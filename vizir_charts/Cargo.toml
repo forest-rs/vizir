@@ -1,0 +1,36 @@
+[package]
+name = "vizir_charts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Vega-ish chart building blocks (scales, axes, legends) that generate vizir_core marks."
+readme = "README.md"
+keywords = ["visualization", "charts"]
+categories = ["graphics", "no-std"]
+
+[dependencies]
+kurbo.workspace = true
+libm = { version = "0.2.15", optional = true }
+peniko.workspace = true
+vizir_core.workspace = true
+vizir_transforms.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["libm"]
+std = ["vizir_core/std", "kurbo/std", "peniko/std", "vizir_transforms/std"]
+libm = [
+  "dep:libm",
+  "vizir_core/libm",
+  "kurbo/libm",
+  "peniko/libm",
+  "vizir_transforms/libm",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+default-target = "x86_64-unknown-linux-gnu"
+targets = []
