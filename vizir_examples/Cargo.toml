@@ -1,0 +1,16 @@
+[package]
+name = "vizir_examples"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Examples and benchmarks for vizir_core (kept out of core crate dev-deps)."
+publish = false
+
+[dependencies]
+kurbo = { workspace = true, features = ["std"] }
+peniko = { workspace = true, features = ["std"] }
+vizir_core = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true

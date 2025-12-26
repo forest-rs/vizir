@@ -1,0 +1,29 @@
+[package]
+name = "vizir_core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Minimal incremental viz runtime core (tables, signals, marks, diffs)."
+readme = "README.md"
+keywords = ["visualization", "reactive", "incremental", "dataflow"]
+categories = ["graphics", "no-std"]
+
+[dependencies]
+hashbrown.workspace = true
+smallvec.workspace = true
+kurbo.workspace = true
+peniko.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["libm"]
+std = ["kurbo/std", "peniko/std"]
+libm = ["kurbo/libm", "peniko/libm"]
+
+[package.metadata.docs.rs]
+all-features = true
+default-target = "x86_64-unknown-linux-gnu"
+targets = []
