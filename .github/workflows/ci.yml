@@ -18,14 +18,20 @@ env:
   RUST_STD_ONLY_PKGS: >-
     --exclude vizir_charts_demo
     --exclude vizir_examples
+    --exclude vizir_vello_demo
   # List of packages that don't support wasip1
+  # - vizir_text_parley is here because it needs work to pass tests due to not having
+  #   font data available.
   RUST_NO_WASIP1_PKGS: >-
     --exclude vizir_charts_demo
     --exclude vizir_examples
+    --exclude vizir_text_parley
+    --exclude vizir_vello_demo
   # List of packages that don't support wasm32
   RUST_NO_WASM_PKGS: >-
     --exclude vizir_charts_demo
     --exclude vizir_examples
+    --exclude vizir_vello_demo
   # List of features that depend on the standard library and will be excluded from no_std checks.
   FEATURES_DEPENDING_ON_STD: "std,default"
 
@@ -126,6 +132,12 @@ jobs:
         os: [windows-latest, macos-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
+
+      - name: install native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt update
+          sudo apt install libfontconfig-dev libfreetype-dev
 
       - name: install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -309,6 +321,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: install native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt update
+          sudo apt install libfontconfig-dev libfreetype-dev
 
       - name: install nightly toolchain
         uses: dtolnay/rust-toolchain@nightly
