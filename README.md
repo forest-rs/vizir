@@ -38,6 +38,9 @@ stability.
     `sector.svg`.
   - This crate can depend on `std` and is where we experiment with renderer adapters.
 
+- `vizir_vello_demo`
+  - A native demo binary that renders `vizir_core` marks via Vello (`winit` + `wgpu`).
+
 - `vizir_examples`
   - Scratch/example binaries (kept separate from core crates).
 

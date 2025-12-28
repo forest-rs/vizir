@@ -9,6 +9,7 @@ members = [
   "vizir_text_parley",
   "vizir_text_web",
   "vizir_transforms",
+  "vizir_vello_demo",
 ]
 
 [workspace.package]

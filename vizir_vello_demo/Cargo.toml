@@ -1,0 +1,27 @@
+[package]
+name = "vizir_vello_demo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Native Vello renderer demo for VizIR (winit + wgpu)."
+readme = "README.md"
+keywords = ["visualization", "charts", "vello"]
+categories = ["graphics"]
+publish = false
+
+[dependencies]
+kurbo = { workspace = true, features = ["std"] }
+peniko = { workspace = true, features = ["std"] }
+vizir_charts = { workspace = true, features = ["std"] }
+vizir_core = { workspace = true, features = ["std"] }
+vizir_text_parley = { workspace = true, features = ["std"] }
+
+parley = { version = "0.7.0", default-features = false, features = ["system"] }
+pollster = "0.4.0"
+vello = "0.6.0"
+wgpu = { version = "26.0.1", default-features = false, features = ["std"] }
+winit = "0.30.12"
+
+[lints]
+workspace = true
