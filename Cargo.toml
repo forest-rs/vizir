@@ -5,6 +5,9 @@ members = [
   "vizir_examples",
   "vizir_charts",
   "vizir_charts_demo",
+  "vizir_text",
+  "vizir_text_parley",
+  "vizir_text_web",
   "vizir_transforms",
 ]
 
@@ -28,6 +31,8 @@ smallvec = { version = "1.13.2", default-features = false }
 
 vizir_charts = { path = "vizir_charts", default-features = false }
 vizir_core = { path = "vizir_core", default-features = false }
+vizir_text = { path = "vizir_text", default-features = false }
+vizir_text_parley = { path = "vizir_text_parley", default-features = false }
 vizir_transforms = { path = "vizir_transforms", default-features = false }
 
 [workspace.lints]

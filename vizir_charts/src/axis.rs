@@ -22,12 +22,12 @@ use peniko::color::palette::css;
 use vizir_core::{Mark, MarkId, TextAnchor, TextBaseline};
 
 use crate::format::format_tick_with_step;
-use crate::measure::TextMeasurer;
 use crate::rule_mark::RuleMarkSpec;
 use crate::scale::{
     ScaleBand, ScaleContinuous, ScaleLinear, ScaleLog, ScalePoint, ScaleSpec, ScaleTime,
 };
 use crate::z_order;
+use crate::{TextMeasurer, TextStyle};
 
 /// A paint + width pair for stroked paths (domain lines, ticks, gridlines).
 #[derive(Clone, Debug, PartialEq)]
@@ -432,7 +432,7 @@ impl AxisSpec {
     /// Measure the thickness this axis needs along its normal direction.
     ///
     /// This is intended for a measure/arrange layout pass.
-    pub fn measure(&self, measurer: &impl TextMeasurer) -> f64 {
+    pub fn measure(&self, measurer: &dyn TextMeasurer) -> f64 {
         let tick_extent = if self.ticks {
             self.tick_size.abs()
         } else {
@@ -450,7 +450,10 @@ impl AxisSpec {
                     let cos = theta.cos().abs();
                     for v in ticks {
                         let label = self.format_tick(v, step);
-                        let (w, h) = measurer.measure(&label, self.style.label_font_size);
+                        let metrics =
+                            measurer.measure(&label, TextStyle::new(self.style.label_font_size));
+                        let w = metrics.advance_width;
+                        let h = metrics.line_height();
                         let rotated_h = sin * w + cos * h;
                         max_label_extent = max_label_extent.max(rotated_h);
                     }
@@ -463,8 +466,9 @@ impl AxisSpec {
                 };
                 let mut out = tick_extent + label_thickness;
                 if let Some(title) = &self.title {
-                    let (_tw, th) = measurer.measure(title, self.style.title_font_size);
-                    out += self.title_offset.max(0.0) + th;
+                    let metrics =
+                        measurer.measure(title, TextStyle::new(self.style.title_font_size));
+                    out += self.title_offset.max(0.0) + metrics.line_height();
                 }
                 out
             }
@@ -478,7 +482,10 @@ impl AxisSpec {
                     let cos = theta.cos().abs();
                     for v in ticks {
                         let label = self.format_tick(v, step);
-                        let (w, h) = measurer.measure(&label, self.style.label_font_size);
+                        let metrics =
+                            measurer.measure(&label, TextStyle::new(self.style.label_font_size));
+                        let w = metrics.advance_width;
+                        let h = metrics.line_height();
                         let rotated_w = cos * w + sin * h;
                         max_label_extent = max_label_extent.max(rotated_w);
                     }
@@ -1253,7 +1260,7 @@ mod tests {
     use vizir_core::{Encoding, MarkEncodings, MarkKind, TextEncodings};
 
     use super::*;
-    use crate::measure::HeuristicTextMeasurer;
+    use crate::HeuristicTextMeasurer;
     use crate::scale::{ScaleLinearSpec, ScaleLogSpec, ScaleTimeSpec};
 
     #[test]

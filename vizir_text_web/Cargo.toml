@@ -1,0 +1,36 @@
+[package]
+name = "vizir_text_web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "WASM text measurement adapter for VizIR (via web-sys canvas measureText)."
+readme = "README.md"
+keywords = ["text", "wasm", "layout"]
+categories = ["graphics"]
+
+[dependencies]
+vizir_text.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2.99"
+web-sys = { version = "0.3.76", features = [
+  "CanvasRenderingContext2d",
+  "Document",
+  "HtmlCanvasElement",
+  "TextMetrics",
+  "Window",
+] }
+
+[lints]
+workspace = true
+
+[features]
+default = []
+std = []
+libm = []
+
+[package.metadata.docs.rs]
+all-features = true
+default-target = "wasm32-unknown-unknown"
+targets = ["wasm32-unknown-unknown"]

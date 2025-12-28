@@ -15,7 +15,12 @@ kurbo = { workspace = true, features = ["std"] }
 peniko = { workspace = true, features = ["std"] }
 vizir_charts = { workspace = true, features = ["std"] }
 vizir_core = { workspace = true, features = ["std"] }
+vizir_text_parley = { workspace = true, optional = true, features = ["std"] }
 vizir_transforms = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true
+
+[features]
+default = []
+parley = ["dep:vizir_text_parley"]
