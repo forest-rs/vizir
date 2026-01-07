@@ -1226,11 +1226,12 @@ impl Scene {
             return Ok(());
         };
 
-        signal.bump();
         let typed = signal
             .as_any_mut()
             .downcast_mut::<Signal<T>>()
             .ok_or(SignalAccessError::TypeMismatch)?;
+
+        typed.bump();
         typed.value = value;
         Ok(())
     }
@@ -1838,5 +1839,27 @@ mod tests {
         };
         assert_eq!(*kind, MarkKind::Path);
         assert!(bounds.is_some());
+    }
+
+    #[test]
+    fn set_signal_type_mismatch_does_not_bump_version() {
+        let mut scene = Scene::new();
+        let id = SignalId(1);
+
+        scene.insert_signal(id, 1.0_f32);
+
+        let before_version = scene.signals.get(&id).unwrap().version();
+
+        // Wrong type: should error and should NOT bump version.
+        let err = scene.set_signal::<u32>(id, 123_u32).unwrap_err();
+        assert_eq!(err, SignalAccessError::TypeMismatch);
+
+        let after_version = scene.signals.get(&id).unwrap().version();
+        assert_eq!(before_version, after_version);
+
+        // Also assert that the original value is unchanged.
+        let sig_any = scene.signals.get(&id).unwrap();
+        let typed = sig_any.as_any().downcast_ref::<Signal<f32>>().unwrap();
+        assert_eq!(typed.value, 1.0_f32);
     }
 }
