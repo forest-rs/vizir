@@ -23,7 +23,7 @@ pub(crate) fn format_tick_with_step(v: f64, step: f64) -> String {
     if decimals == 0 {
         alloc::format!("{v:.0}")
     } else {
-        alloc::format!("{v:.*}", decimals)
+        alloc::format!("{v:.decimals$}")
     }
 }
 
