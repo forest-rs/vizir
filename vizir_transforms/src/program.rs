@@ -173,7 +173,7 @@ impl Program {
                     idx.sort_by(|&a, &b| {
                         let av = by_col[a];
                         let bv = by_col[b];
-                        let ord = av.partial_cmp(&bv).unwrap_or(core::cmp::Ordering::Greater);
+                        let ord = cmp_f64_bits(av.to_bits(), bv.to_bits());
                         let ord = match order {
                             SortOrder::Asc => ord,
                             SortOrder::Desc => ord.reverse(),
@@ -590,8 +590,7 @@ impl Program {
                                 rows.sort_by(|&a, &b| {
                                     let av = col[a];
                                     let bv = col[b];
-                                    let ord =
-                                        av.partial_cmp(&bv).unwrap_or(core::cmp::Ordering::Greater);
+                                    let ord = cmp_f64_bits(av.to_bits(), bv.to_bits());
                                     let ord = match sort_order {
                                         SortOrder::Asc => ord,
                                         SortOrder::Desc => ord.reverse(),
@@ -1296,5 +1295,104 @@ mod tests {
         assert_close(t.data[4][4], 7.0 / 24.0);
         assert_close(t.data[3][5], 7.0 / 24.0);
         assert_close(t.data[4][5], 79.0 / 24.0);
+    }
+
+    #[test]
+    fn sort_places_nans_last_and_is_deterministic() {
+        let mut p = Program::new();
+        p.push(Transform::Sort {
+            input: TableId(1),
+            output: TableId(2),
+            by: ColId(1),
+            order: SortOrder::Asc,
+            columns: vec![ColId(0), ColId(1)],
+        });
+
+        // row_keys: [10,11,12,13]
+        // sort key col1: [NaN, 1.0, NaN, 0.0]
+        let inputs: HashMap<_, _> = [(
+            TableId(1),
+            TableFrame {
+                row_keys: vec![10, 11, 12, 13],
+                columns: vec![ColId(0), ColId(1)],
+                data: vec![
+                    vec![1.0, 2.0, 3.0, 4.0],           // col0 payload
+                    vec![f64::NAN, 1.0, f64::NAN, 0.0], // col1 sort key
+                ],
+            },
+        )]
+        .into_iter()
+        .collect();
+
+        let out = p.execute(&inputs).unwrap();
+        let t = out.tables.get(&TableId(2)).unwrap();
+
+        // Ascending: 0.0, 1.0, NaN, NaN. NaNs last, tie-broken by row_key (10 then 12).
+        assert_eq!(t.row_keys, vec![13, 11, 10, 12]);
+
+        assert_eq!(t.data[1][0], 0.0);
+        assert_eq!(t.data[1][1], 1.0);
+        assert!(t.data[1][2].is_nan());
+        assert!(t.data[1][3].is_nan());
+        assert_eq!(t.data[0], vec![4.0, 2.0, 1.0, 3.0]);
+    }
+
+    #[test]
+    fn stack_sort_by_places_nans_last_deterministically() {
+        let mut p = Program::new();
+        p.push(Transform::Stack {
+            input: TableId(1),
+            output: TableId(2),
+            group_by: vec![ColId(0)], // single group
+            offset: StackOffset::Zero,
+            sort_by: Some(ColId(1)), // sort key (contains NaNs)
+            sort_order: SortOrder::Asc,
+            field: ColId(2), // values to stack
+            output_start: ColId(3),
+            output_end: ColId(4),
+            columns: vec![ColId(0), ColId(1), ColId(2)],
+        });
+
+        // One group (col0 = 0.0 for all rows).
+        // sort_by col1: [NaN, 1.0, NaN, 0.0]
+        // field col2:   [1,   10,  100, 1000]
+        //
+        // Stack order within group (Asc, NaNs last, tie by row_key):
+        // row_key 13 (0.0) -> row_key 11 (1.0) -> row_key 10 (NaN) -> row_key 12 (NaN)
+        // Values:            1000              10                1                100
+        //
+        // Cumulative y0/y1:
+        // rk13: [0,1000]
+        // rk11: [1000,1010]
+        // rk10: [1010,1011]
+        // rk12: [1011,1111]
+        //
+        // Output row order is preserved (10,11,12,13), but y0/y1 stored at those rows.
+        let inputs: HashMap<_, _> = [(
+            TableId(1),
+            TableFrame {
+                row_keys: vec![10, 11, 12, 13],
+                columns: vec![ColId(0), ColId(1), ColId(2)],
+                data: vec![
+                    vec![0.0, 0.0, 0.0, 0.0],           // group key
+                    vec![f64::NAN, 1.0, f64::NAN, 0.0], // sort key
+                    vec![1.0, 10.0, 100.0, 1000.0],     // field
+                ],
+            },
+        )]
+        .into_iter()
+        .collect();
+
+        let out = p.execute(&inputs).unwrap();
+        let t = out.tables.get(&TableId(2)).unwrap();
+
+        // Row order preserved:
+        assert_eq!(t.row_keys, vec![10, 11, 12, 13]);
+
+        // y0 (output_start col3) in original row order:
+        assert_eq!(t.data[3], vec![1010.0, 1000.0, 1011.0, 0.0]);
+
+        // y1 (output_end col4) in original row order:
+        assert_eq!(t.data[4], vec![1011.0, 1010.0, 1111.0, 1000.0]);
     }
 }
