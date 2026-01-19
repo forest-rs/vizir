@@ -22,8 +22,8 @@ hashbrown = { version = "0.16.1", default-features = false, features = [
   "alloc",
   "default-hasher",
 ] }
-kurbo = { version = "0.12.0", default-features = false }
-peniko = { version = "0.5.0", default-features = false }
+kurbo = { version = "0.13.0", default-features = false }
+peniko = { version = "0.6.0", default-features = false }
 smallvec = { version = "1.13.2", default-features = false }
 
 vizir_charts = { path = "vizir_charts", default-features = false }
