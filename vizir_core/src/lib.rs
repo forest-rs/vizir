@@ -1165,7 +1165,9 @@ impl Scene {
 
     /// Queue a mark removal so it yields an `Exit` on the next `update()`.
     pub fn remove_mark(&mut self, id: MarkId) {
-        self.pending_removals.push(id);
+        if self.marks.contains_key(&id) {
+            self.pending_removals.push(id);
+        }
     }
 
     /// Insert or replace a signal with an initial version of `1`.
@@ -1861,5 +1863,25 @@ mod tests {
         let sig_any = scene.signals.get(&id).unwrap();
         let typed = sig_any.as_any().downcast_ref::<Signal<f32>>().unwrap();
         assert_eq!(typed.value, 1.0_f32);
+    }
+
+    #[test]
+    fn remove_mark_is_idempotent() {
+        let mut scene = Scene::new();
+        let id = MarkId(1);
+
+        // Add a mark and evaluate it so it has cache.
+        let _ = scene.tick([Mark::new(id)]);
+
+        scene.remove_mark(id);
+
+        // Removal should trigger an `Exit` diff.
+        let diffs = scene.update();
+        assert!(matches!(&diffs[..], [MarkDiff::Exit { id: got, .. }] if *got == id));
+
+        // Removing again should now be a noop.
+        scene.remove_mark(id);
+        let diffs = scene.update();
+        assert!(diffs.is_empty());
     }
 }
