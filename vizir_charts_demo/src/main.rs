@@ -10,10 +10,10 @@ use peniko::Color;
 use peniko::color::palette::css;
 use vizir_charts::{
     AxisSpec, AxisStyle, BarMarkSpec, ChartLayout, ChartLayoutSpec, ChartSpec, GridStyle,
-    HeuristicTextMeasurer, LegendItem, LegendOrient, LegendPlacement, LegendSwatchesSpec,
-    PLOT_BACKGROUND, RectMarkSpec, RuleMarkSpec, ScaleBand, ScaleLinearSpec, ScaleLogSpec,
-    ScaleTimeSpec, SectorMarkSpec, Size, StackedAreaChartSpec, StackedAreaMarkSpec,
-    StackedBarChartSpec, StrokeStyle, Symbol, TextMarkSpec, TitleSpec,
+    LegendItem, LegendOrient, LegendPlacement, LegendSwatchesSpec, PLOT_BACKGROUND, RectMarkSpec,
+    RuleMarkSpec, ScaleBand, ScaleLinearSpec, ScaleLogSpec, ScaleTimeSpec, SectorMarkSpec, Size,
+    StackedAreaChartSpec, StackedAreaMarkSpec, StackedBarChartSpec, StrokeStyle, Symbol,
+    TextMarkSpec, TitleSpec,
 };
 use vizir_core::{ColId, Mark, Scene, Table, TableData, TableId};
 use vizir_transforms::{
@@ -64,7 +64,7 @@ fn main() {
 
 fn render_chart(
     scene: &mut Scene,
-    measurer: &impl vizir_charts::TextMeasurer,
+    measurer: &dyn vizir_charts::TextMeasurer,
     chart: &ChartSpec,
     build_series: impl FnOnce(&ChartSpec, Rect) -> Vec<Mark>,
 ) -> (ChartLayout, String) {
@@ -74,6 +74,18 @@ fn render_chart(
     svg_scene.set_view_box(layout.view);
     svg_scene.apply_diffs(&diffs);
     (layout, svg_scene.to_svg_string())
+}
+
+fn demo_measurer() -> Box<dyn vizir_charts::TextMeasurer> {
+    #[cfg(feature = "parley")]
+    {
+        Box::new(vizir_text_parley::ParleyTextMeasurer::new())
+    }
+
+    #[cfg(not(feature = "parley"))]
+    {
+        Box::new(vizir_charts::HeuristicTextMeasurer)
+    }
 }
 
 fn log_time_axes_demo() -> html::HtmlSection {
@@ -86,7 +98,7 @@ fn log_time_axes_demo() -> html::HtmlSection {
     let x_col = ColId(0);
     let y_col = ColId(1);
 
-    let measurer = HeuristicTextMeasurer;
+    let measurer = demo_measurer();
     let plot_size = Size {
         width: 260.0,
         height: 140.0,
@@ -140,7 +152,7 @@ fn log_time_axes_demo() -> html::HtmlSection {
 
     let keys = scene.tables[&table_id].row_keys.clone();
 
-    let (_layout, svg) = render_chart(&mut scene, &measurer, &chart, |chart, plot| {
+    let (_layout, svg) = render_chart(&mut scene, &*measurer, &chart, |chart, plot| {
         let x_scale = chart.x_scale_continuous(plot).expect("expected x scale");
         let y_scale = chart.y_scale_continuous(plot).expect("expected y scale");
 
@@ -226,7 +238,7 @@ fn transforms_demo() -> html::HtmlSection {
     let _ = out;
 
     // Render: show original points in gray, transformed points in tomato.
-    let measurer = HeuristicTextMeasurer;
+    let measurer = demo_measurer();
     let plot_size = Size {
         width: 220.0,
         height: 120.0,
@@ -273,7 +285,7 @@ fn transforms_demo() -> html::HtmlSection {
     let keys_src = scene.tables[&source_id].row_keys.clone();
     let keys_sorted = scene.tables[&sorted_id].row_keys.clone();
 
-    let (_layout, svg) = render_chart(&mut scene, &measurer, &chart, |chart, plot| {
+    let (_layout, svg) = render_chart(&mut scene, &*measurer, &chart, |chart, plot| {
         let x_scale = chart.x_scale_continuous(plot).expect("expected x scale");
         let y_scale = chart.y_scale_continuous(plot).expect("expected y scale");
 
@@ -360,7 +372,7 @@ fn aggregate_demo() -> html::HtmlSection {
     });
     program.apply_to_scene(&mut scene).expect("apply_to_scene");
 
-    let measurer = HeuristicTextMeasurer;
+    let measurer = demo_measurer();
     let plot_size = Size {
         width: 220.0,
         height: 120.0,
@@ -434,7 +446,7 @@ fn aggregate_demo() -> html::HtmlSection {
         legend: None,
     };
 
-    let (_layout, svg) = render_chart(&mut scene, &measurer, &chart, move |chart, plot| {
+    let (_layout, svg) = render_chart(&mut scene, &*measurer, &chart, move |chart, plot| {
         let band = ScaleBand::new((plot.x0, plot.x1), n).with_padding(0.2, 0.1);
         let y_scale = chart.y_scale_continuous(plot).expect("expected y scale");
         let bars = BarMarkSpec::new(agg_id, sum_col, band, y_scale).with_fill(css::CORNFLOWER_BLUE);
@@ -525,7 +537,7 @@ fn histogram_demo() -> html::HtmlSection {
     });
     program.apply_to_scene(&mut scene).expect("apply_to_scene");
 
-    let measurer = HeuristicTextMeasurer;
+    let measurer = demo_measurer();
     let plot_size = Size {
         width: 240.0,
         height: 120.0,
@@ -602,7 +614,7 @@ fn histogram_demo() -> html::HtmlSection {
         legend: None,
     };
 
-    let (_layout, svg) = render_chart(&mut scene, &measurer, &chart, move |chart, plot| {
+    let (_layout, svg) = render_chart(&mut scene, &*measurer, &chart, move |chart, plot| {
         let band = ScaleBand::new((plot.x0, plot.x1), n).with_padding(0.2, 0.1);
         let y_scale = chart.y_scale_continuous(plot).expect("expected y scale");
         let bars = BarMarkSpec::new(sorted_id, count_col, band, y_scale).with_fill(css::ORANGE);
@@ -680,7 +692,7 @@ fn stack_demo() -> html::HtmlSection {
         .apply_to_scene(&mut scene)
         .expect("apply_to_scene");
 
-    let measurer = HeuristicTextMeasurer;
+    let measurer = demo_measurer();
     let plot_size = Size {
         width: 260.0,
         height: 120.0,
@@ -775,7 +787,7 @@ fn stack_demo() -> html::HtmlSection {
 
     let (_layout, svg) = render_chart(
         &mut scene,
-        &measurer,
+        &*measurer,
         &chart_spec,
         move |chart_spec, plot| {
             let band = ScaleBand::new((plot.x0, plot.x1), category_count).with_padding(0.2, 0.1);
@@ -893,7 +905,7 @@ fn stacked_area_demo() -> html::HtmlSection {
             .expect("apply_to_scene");
     }
 
-    let measurer = HeuristicTextMeasurer;
+    let measurer = demo_measurer();
     let plot_size = Size {
         width: 260.0,
         height: 120.0,
@@ -961,7 +973,7 @@ fn stacked_area_demo() -> html::HtmlSection {
 
     let (_layout, svg) = render_chart(
         &mut scene,
-        &measurer,
+        &*measurer,
         &chart_spec,
         move |chart_spec, plot| {
             let x_scale = chart_spec
@@ -1075,7 +1087,7 @@ fn percent_stack_demo() -> html::HtmlSection {
         .apply_to_scene(&mut scene)
         .expect("apply_to_scene");
 
-    let measurer = HeuristicTextMeasurer;
+    let measurer = demo_measurer();
     let plot_size = Size {
         width: 260.0,
         height: 120.0,
@@ -1132,7 +1144,7 @@ fn percent_stack_demo() -> html::HtmlSection {
 
     let (_layout, svg) = render_chart(
         &mut scene,
-        &measurer,
+        &*measurer,
         &chart_spec,
         move |chart_spec, plot| {
             let band = ScaleBand::new((plot.x0, plot.x1), 4).with_padding(0.2, 0.1);
@@ -1236,7 +1248,7 @@ fn streamgraph_demo() -> html::HtmlSection {
                 .expect("apply_to_scene");
         }
 
-        let measurer = HeuristicTextMeasurer;
+        let measurer = demo_measurer();
         let plot_size = Size {
             width: 260.0,
             height: 120.0,
@@ -1319,7 +1331,7 @@ fn streamgraph_demo() -> html::HtmlSection {
 
         let (_layout, svg) = render_chart(
             &mut scene,
-            &measurer,
+            &*measurer,
             &chart_spec,
             move |chart_spec, plot| {
                 let x_scale = chart_spec
@@ -1424,7 +1436,7 @@ fn axis_label_angle_demo() -> html::HtmlSection {
     let x_col = ColId(0);
     let y_col = ColId(1);
 
-    let measurer = HeuristicTextMeasurer;
+    let measurer = demo_measurer();
     let plot_size = Size {
         width: 240.0,
         height: 120.0,
@@ -1493,7 +1505,7 @@ fn axis_label_angle_demo() -> html::HtmlSection {
 
     let (_layout, svg) = render_chart(
         &mut scene,
-        &measurer,
+        &*measurer,
         &chart_spec,
         move |chart_spec, plot| {
             let x_scale = chart_spec
@@ -1699,7 +1711,7 @@ fn bar_demo() -> html::HtmlSection {
     let table_id = TableId(1);
     let y_col = ColId(0);
 
-    let measurer = HeuristicTextMeasurer;
+    let measurer = demo_measurer();
     let plot_size = Size {
         width: 180.0,
         height: 100.0,
@@ -1778,7 +1790,7 @@ fn bar_demo() -> html::HtmlSection {
 
     let (_layout, svg) = render_chart(
         &mut scene,
-        &measurer,
+        &*measurer,
         &chart_spec,
         move |chart_spec, plot| {
             let band = ScaleBand::new((plot.x0, plot.x1), n).with_padding(0.2, 0.1);
@@ -1849,7 +1861,7 @@ fn scatter_demo() -> html::HtmlSection {
     let x_col = ColId(0);
     let y_col = ColId(1);
 
-    let measurer = HeuristicTextMeasurer;
+    let measurer = demo_measurer();
     let plot_size = Size {
         width: 180.0,
         height: 100.0,
@@ -1923,7 +1935,7 @@ fn scatter_demo() -> html::HtmlSection {
 
     let (_layout, svg) = render_chart(
         &mut scene,
-        &measurer,
+        &*measurer,
         &chart_spec,
         move |chart_spec, plot| {
             let x_scale = chart_spec
@@ -1962,7 +1974,7 @@ fn line_demo() -> html::HtmlSection {
     let x_col = ColId(0);
     let y_col = ColId(1);
 
-    let measurer = HeuristicTextMeasurer;
+    let measurer = demo_measurer();
     let plot_size = Size {
         width: 180.0,
         height: 100.0,
@@ -2030,7 +2042,7 @@ fn line_demo() -> html::HtmlSection {
 
     let (_layout, svg) = render_chart(
         &mut scene,
-        &measurer,
+        &*measurer,
         &chart_spec,
         move |chart_spec, plot| {
             let x_scale = chart_spec
@@ -2074,7 +2086,7 @@ fn area_demo() -> html::HtmlSection {
     let x_col = ColId(0);
     let y_col = ColId(1);
 
-    let measurer = HeuristicTextMeasurer;
+    let measurer = demo_measurer();
     let plot_size = Size {
         width: 180.0,
         height: 100.0,
@@ -2148,7 +2160,7 @@ fn area_demo() -> html::HtmlSection {
 
     let (_layout, svg) = render_chart(
         &mut scene,
-        &measurer,
+        &*measurer,
         &chart_spec,
         move |chart_spec, plot| {
             let x_scale = chart_spec
@@ -2184,7 +2196,7 @@ fn sector_demo() -> html::HtmlSection {
     // A minimal pie/donut chart demo: a few `SectorMarkSpec`s.
     let mut scene = Scene::new();
 
-    let measurer = HeuristicTextMeasurer;
+    let measurer = demo_measurer();
     let plot_size = Size {
         width: 180.0,
         height: 100.0,
@@ -2232,7 +2244,7 @@ fn sector_demo() -> html::HtmlSection {
         )),
     };
 
-    let (_layout, svg) = render_chart(&mut scene, &measurer, &chart_spec, move |_chart, plot| {
+    let (_layout, svg) = render_chart(&mut scene, &*measurer, &chart_spec, move |_chart, plot| {
         let cx = (plot.x0 + plot.x1) * 0.5;
         let cy = (plot.y0 + plot.y1) * 0.5;
         let r = plot.width().min(plot.height()) * 0.45;

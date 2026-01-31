@@ -17,8 +17,8 @@ use peniko::{Brush, Color};
 use vizir_core::{Mark, MarkId, TextAnchor, TextBaseline};
 
 use crate::layout::Size;
-use crate::measure::TextMeasurer;
 use crate::z_order;
+use crate::{TextMeasurer, TextMetrics, TextStyle};
 
 fn union_rect(a: Rect, b: Rect) -> Rect {
     Rect::new(
@@ -32,11 +32,12 @@ fn union_rect(a: Rect, b: Rect) -> Rect {
 fn text_bounds(
     x: f64,
     y: f64,
-    size: (f64, f64),
+    metrics: TextMetrics,
     anchor: TextAnchor,
     baseline: TextBaseline,
 ) -> Rect {
-    let (w, h) = size;
+    let w = metrics.advance_width;
+    let h = metrics.line_height();
     let (x0, x1) = match anchor {
         TextAnchor::Start => (x, x + w),
         TextAnchor::Middle => (x - w * 0.5, x + w * 0.5),
@@ -44,9 +45,9 @@ fn text_bounds(
     };
     let (y0, y1) = match baseline {
         TextBaseline::Middle => (y - h * 0.5, y + h * 0.5),
-        TextBaseline::Alphabetic => (y - h, y),
+        TextBaseline::Alphabetic => (y - metrics.ascent, y + metrics.descent),
         TextBaseline::Hanging => (y, y + h),
-        TextBaseline::Ideographic => (y - h, y),
+        TextBaseline::Ideographic => (y - metrics.ascent, y + metrics.descent),
     };
     Rect::new(x0, y0, x1, y1)
 }
@@ -153,7 +154,7 @@ impl LegendSwatches {
     /// Estimates legend bounds using the provided text measurer.
     ///
     /// This is intended for simple guide layout (computing margins / view boxes).
-    pub fn bounds(&self, measurer: &impl TextMeasurer) -> Rect {
+    pub fn bounds(&self, measurer: &dyn TextMeasurer) -> Rect {
         let mut bounds: Option<Rect> = None;
 
         for mark in self.marks() {
@@ -192,8 +193,8 @@ impl LegendSwatches {
                     let vizir_core::Encoding::Const(baseline) = enc.baseline else {
                         continue;
                     };
-                    let (w, h) = measurer.measure(text, font_size);
-                    text_bounds(x, y, (w, h), anchor, baseline)
+                    let metrics = measurer.measure(text, TextStyle::new(font_size));
+                    text_bounds(x, y, metrics, anchor, baseline)
                 }
                 vizir_core::MarkEncodings::Path(_enc) => {
                     // This legend doesn't currently emit paths.
@@ -286,7 +287,7 @@ impl LegendSwatchesSpec {
     }
 
     /// Measures the desired legend size (width/height).
-    pub fn measure(&self, measurer: &impl TextMeasurer) -> Size {
+    pub fn measure(&self, measurer: &dyn TextMeasurer) -> Size {
         let legend = self.at(0.0, 0.0);
         let b = legend.bounds(measurer);
         Size {
@@ -325,7 +326,7 @@ mod tests {
     use alloc::vec;
 
     use super::*;
-    use crate::measure::HeuristicTextMeasurer;
+    use crate::HeuristicTextMeasurer;
 
     #[test]
     fn measure_accounts_for_columns() {

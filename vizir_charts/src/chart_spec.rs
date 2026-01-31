@@ -73,7 +73,7 @@ impl ChartSpec {
     }
 
     /// Computes layout for this chart.
-    pub fn layout(&self, measurer: &impl TextMeasurer) -> ChartLayout {
+    pub fn layout(&self, measurer: &dyn TextMeasurer) -> ChartLayout {
         let title_top = self.title.as_ref().map(|t| t.measure(measurer));
 
         let axis_left_w = self.axis_left.as_ref().map(|a| a.measure(measurer));
@@ -99,7 +99,7 @@ impl ChartSpec {
     }
 
     /// Generates marks for titles/axes/legend, given a computed layout.
-    pub fn guide_marks(&self, measurer: &impl TextMeasurer, layout: &ChartLayout) -> Vec<Mark> {
+    pub fn guide_marks(&self, measurer: &dyn TextMeasurer, layout: &ChartLayout) -> Vec<Mark> {
         let mut out = Vec::new();
 
         if let (Some(title), Some(rect)) = (self.title.as_ref(), layout.title_top) {
@@ -132,7 +132,7 @@ impl ChartSpec {
     /// The series builder is invoked with the resolved plot rectangle.
     pub fn marks(
         &self,
-        measurer: &impl TextMeasurer,
+        measurer: &dyn TextMeasurer,
         build_series: impl FnOnce(&Self, Rect) -> Vec<Mark>,
     ) -> (ChartLayout, Vec<Mark>) {
         let layout = self.layout(measurer);

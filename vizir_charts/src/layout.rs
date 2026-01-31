@@ -13,7 +13,7 @@
 
 use kurbo::Rect;
 
-use crate::measure::TextMeasurer;
+use crate::{TextMeasurer, TextStyle};
 
 /// A width/height pair used by chart layout.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -273,7 +273,7 @@ impl ChartLayout {
 
     /// Convenience helper to compute a left-axis thickness using the provided measurer.
     pub fn measure_axis_left(
-        measurer: &impl TextMeasurer,
+        measurer: &dyn TextMeasurer,
         tick_labels: &[&str],
         tick_size: f64,
         tick_padding: f64,
@@ -282,22 +282,22 @@ impl ChartLayout {
     ) -> f64 {
         let mut max_w = 0.0_f64;
         for s in tick_labels {
-            let (w, _h) = measurer.measure(s, font_size);
-            max_w = max_w.max(w);
+            let metrics = measurer.measure(s, TextStyle::new(font_size));
+            max_w = max_w.max(metrics.advance_width);
         }
         tick_size.abs() + tick_padding.max(0.0) + label_padding.max(0.0) + max_w
     }
 
     /// Convenience helper to compute a bottom-axis thickness using the provided measurer.
     pub fn measure_axis_bottom(
-        measurer: &impl TextMeasurer,
+        measurer: &dyn TextMeasurer,
         tick_size: f64,
         tick_padding: f64,
         label_padding: f64,
         font_size: f64,
     ) -> f64 {
-        let (_w, h) = measurer.measure("Mg", font_size);
-        tick_size.abs() + tick_padding.max(0.0) + label_padding.max(0.0) + h
+        let metrics = measurer.measure("Mg", TextStyle::new(font_size));
+        tick_size.abs() + tick_padding.max(0.0) + label_padding.max(0.0) + metrics.line_height()
     }
 }
 
