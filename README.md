@@ -21,6 +21,18 @@ stability.
   - Mark specs (Swift Charts / Vega-inspired): `BarMarkSpec`, `LineMarkSpec`, `PointMarkSpec`,
     `AreaMarkSpec`, `RuleMarkSpec`, `SectorMarkSpec`, plus `RectMarkSpec`/`TextMarkSpec`.
 
+- `vizir_text`
+  - `#![no_std]` + `alloc` text measurement traits used for chart layout.
+  - Shared types: `TextMeasurer`, `TextStyle`, `TextMetrics`.
+  - Includes a small `HeuristicTextMeasurer` for demos/early layout.
+
+- `vizir_text_web`
+  - `wasm32` text measurement adapter using `web-sys` Canvas 2D `measureText` (Vega-style).
+  - Non-`wasm32` builds fall back to heuristic measurement so the crate can still compile in a workspace.
+
+- `vizir_text_parley`
+  - Native text measurement adapter using Parley (shaping-aware metrics).
+
 - `vizir_charts_demo`
   - A tiny demo binary that emits SVG dumps: `bar.svg`, `scatter.svg`, `line.svg`, `area.svg`,
     `sector.svg`.

@@ -28,7 +28,6 @@ mod format;
 mod layout;
 mod legend;
 mod line_mark;
-mod measure;
 mod point_mark;
 mod rect_mark;
 mod rule_mark;
@@ -53,7 +52,6 @@ pub use chart_spec::ChartSpec;
 pub use layout::{ChartLayout, ChartLayoutSpec, LegendOrient, LegendPlacement, Size};
 pub use legend::{LegendItem, LegendSwatches, LegendSwatchesSpec};
 pub use line_mark::LineMarkSpec;
-pub use measure::{HeuristicTextMeasurer, TextMeasurer};
 pub use point_mark::PointMarkSpec;
 pub use rect_mark::RectMarkSpec;
 pub use rule_mark::RuleMarkSpec;
@@ -71,4 +69,7 @@ pub use symbol::Symbol;
 pub use text_mark::TextMarkSpec;
 pub use time::{format_time_seconds, nice_time_ticks_seconds};
 pub use title::TitleSpec;
+pub use vizir_text::{
+    FontFamily, FontStyle, FontWeight, HeuristicTextMeasurer, TextMeasurer, TextMetrics, TextStyle,
+};
 pub use z_order::*;

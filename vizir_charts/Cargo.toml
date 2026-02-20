@@ -14,6 +14,7 @@ kurbo.workspace = true
 libm = { version = "0.2.15", optional = true }
 peniko.workspace = true
 vizir_core.workspace = true
+vizir_text.workspace = true
 vizir_transforms.workspace = true
 
 [lints]
