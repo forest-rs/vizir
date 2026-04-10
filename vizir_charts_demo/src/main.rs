@@ -9,12 +9,12 @@ use kurbo::{Point, Rect};
 use peniko::Color;
 use peniko::color::palette::css;
 use vizir_charts::{
-    AxisSpec, AxisStyle, BarMarkSpec, ChannelDef, ChartLayout, ChartLayoutSpec, ChartSpec, DataRef,
-    GridStyle, HeuristicTextMeasurer, LegendItem, LegendOrient, LegendPlacement,
-    LegendSwatchesSpec, MarkDef, PLOT_BACKGROUND, RectMarkSpec, RuleMarkSpec, ScaleBand,
-    ScaleLinearSpec, ScaleLogSpec, ScaleTimeSpec, SectorMarkSpec, Size, StackedAreaChartSpec,
-    StackedAreaMarkSpec, StackedBarChartSpec, StrokeStyle, Symbol, TextMarkSpec, TitleSpec,
-    UnitSpec,
+    AdaptContext, AxisSpec, AxisStyle, BarMarkSpec, ChannelDef, ChartLayout, ChartLayoutSpec,
+    ChartSpec, DataRef, GridStyle, HeuristicTextMeasurer, LegendItem, LegendOrient,
+    LegendPlacement, LegendSwatchesSpec, MarkDef, PLOT_BACKGROUND, RectMarkSpec, RuleMarkSpec,
+    ScaleBand, ScaleLinearSpec, ScaleLogSpec, ScaleTimeSpec, SchemaField, SectorMarkSpec, Size,
+    SliceFieldResolver, StackedAreaChartSpec, StackedAreaMarkSpec, StackedBarChartSpec,
+    StrokeStyle, Symbol, TextMarkSpec, TitleSpec, UnitSpec, parse_unit_spec_json,
 };
 use vizir_core::{ColumnId, Mark, Scene, Table, TableData, TableId};
 use vizir_transforms::{
@@ -48,6 +48,7 @@ fn main() {
         transforms_demo(),
         aggregate_demo(),
         lowered_spec_demo(),
+        lowered_json_spec_demo(),
         lowered_area_spec_demo(),
         lowered_ranged_area_spec_demo(),
         histogram_demo(),
@@ -508,6 +509,65 @@ fn lowered_spec_demo() -> html::HtmlSection {
     html::HtmlSection {
         title: "Lowered UnitSpec",
         description: "An aggregate bar chart built through `vizir_charts::spec` and lowered into transforms, guides, and series marks.",
+        svg: render_lowered_unit_spec(&mut scene, spec),
+    }
+}
+
+fn lowered_json_spec_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(136);
+
+    let cat = vec![0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 3.0];
+    let v = vec![1.0, 2.0, 3.0, 4.0, 5.0, 2.0, 1.0, 6.0];
+    let mut table = Table::new(source_id);
+    table.row_keys = (0..cat.len() as u64).collect();
+    table.data = Some(Box::new(CategoryValues { cat, v }));
+    scene.insert_table(table);
+
+    let parsed = parse_unit_spec_json(
+        r#"{
+            "mark": "bar",
+            "title": "JSON Lowered UnitSpec",
+            "width": 220.0,
+            "height": 120.0,
+            "transform": [
+                {
+                    "aggregate": [{ "op": "sum", "field": "value", "as": "sum_value" }],
+                    "groupby": ["category"]
+                }
+            ],
+            "encoding": {
+                "x": { "field": "category", "type": "ordinal", "title": "category" },
+                "y": { "field": "sum_value", "type": "quantitative", "title": "sum(value)" }
+            }
+        }"#,
+    )
+    .expect("parse json unit spec");
+
+    let resolver = SliceFieldResolver::new(&[
+        SchemaField {
+            name: "category",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "value",
+            column: ColumnId(1),
+        },
+    ]);
+    let spec = parsed
+        .adapt(
+            &resolver,
+            AdaptContext {
+                id_base: 0xD0_800,
+                derived_table_base: TableId(137),
+                data: DataRef::Table(source_id),
+            },
+        )
+        .expect("adapt json parsed spec");
+
+    html::HtmlSection {
+        title: "Lowered JSON UnitSpec",
+        description: "An aggregate bar chart built from actual JSON text, parsed into `ParsedUnitSpec`, adapted by field names, and lowered through the authored seam.",
         svg: render_lowered_unit_spec(&mut scene, spec),
     }
 }
