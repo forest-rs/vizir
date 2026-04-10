@@ -13,8 +13,10 @@ This slice is intentionally small:
 - `x`, `x2`, `y`, `y2`, `color`, `text`
 - generated `ChartSpec` + series mark specs + optional transform program
 
-The goal is not JSON parsing yet. The goal is to prove that a canonical Vega-Lite-like chart can
+The goal is not full JSON parsing yet. The goal is to prove that a canonical Vega-Lite-like chart can
 be expressed in one authored IR and lowered without bespoke demo glue.
+
+For the current supported slice and fences, see `plans/support-matrix.md`.
 
 ## Fence
 
@@ -142,13 +144,17 @@ Support:
 
 Support only:
 - `x`
+- `x2`
 - `y`
+- `y2`
 - `color`
 - `text`
 
 And only the most useful authored meanings:
 - `x`: position or grouped category
+- `x2`: secondary position for ranged areas
 - `y`: position or aggregate value
+- `y2`: secondary position for ranged areas
 - `color`: categorical series split for legend/fill
 - `text`: direct label channel for simple annotations later
 
@@ -171,6 +177,7 @@ pub enum MarkDef {
     Bar,
     Line,
     Point,
+    Area,
 }
 
 pub struct EncodingSet {

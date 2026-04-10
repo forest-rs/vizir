@@ -16,6 +16,7 @@ Optional `json` feature:
 
 Living roadmap/design notes are in `plans/` at the workspace root:
 - `plans/README.md`
+- `plans/support-matrix.md`
 - `plans/mark-specs.md`
 - `plans/transforms.md`
 - `plans/scales.md`
