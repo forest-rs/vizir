@@ -30,6 +30,7 @@ mod legend;
 mod line_mark;
 mod measure;
 mod point_mark;
+mod range_area_mark;
 mod rect_mark;
 mod rule_mark;
 mod scale;
@@ -56,6 +57,7 @@ pub use legend::{LegendItem, LegendSwatches, LegendSwatchesSpec};
 pub use line_mark::LineMarkSpec;
 pub use measure::{HeuristicTextMeasurer, TextMeasurer};
 pub use point_mark::PointMarkSpec;
+pub use range_area_mark::RangeAreaMarkSpec;
 pub use rect_mark::RectMarkSpec;
 pub use rule_mark::RuleMarkSpec;
 pub use scale::{

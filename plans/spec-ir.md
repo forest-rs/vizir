@@ -10,7 +10,7 @@ This slice is intentionally small:
 - one dataset already present in a `vizir_core::Scene`
 - a small transform subset
 - `bar` / `line` / `point` / `area`
-- `x`, `y`, `color`, `text`
+- `x`, `x2`, `y`, `y2`, `color`, `text`
 - generated `ChartSpec` + series mark specs + optional transform program
 
 The goal is not JSON parsing yet. The goal is to prove that a canonical Vega-Lite-like chart can
@@ -175,7 +175,9 @@ pub enum MarkDef {
 
 pub struct EncodingSet {
     pub x: Option<ChannelDef>,
+    pub x2: Option<ChannelDef>,
     pub y: Option<ChannelDef>,
+    pub y2: Option<ChannelDef>,
     pub color: Option<ChannelDef>,
     pub text: Option<ChannelDef>,
 }

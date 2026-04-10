@@ -11,7 +11,7 @@
 //! - one input table already present in a [`vizir_core::Scene`],
 //! - a small transform subset,
 //! - `bar`, `line`, `point`, and `area` marks,
-//! - `x`, `y`, and categorical `color` channels,
+//! - `x`, `x2`, `y`, `y2`, and categorical `color` channels,
 //! - optional chart titles.
 //!
 //! It is not a JSON parser and not a full Vega/Vega-Lite implementation.
@@ -159,7 +159,9 @@ impl ChannelDef {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EncodingSet {
     x: Option<ChannelDef>,
+    x2: Option<ChannelDef>,
     y: Option<ChannelDef>,
+    y2: Option<ChannelDef>,
     color: Option<ChannelDef>,
     text: Option<ChannelDef>,
 }
@@ -176,9 +178,21 @@ impl EncodingSet {
         self
     }
 
+    /// Sets the x2 channel.
+    pub fn with_x2(mut self, x2: ChannelDef) -> Self {
+        self.x2 = Some(x2);
+        self
+    }
+
     /// Sets the y channel.
     pub fn with_y(mut self, y: ChannelDef) -> Self {
         self.y = Some(y);
+        self
+    }
+
+    /// Sets the y2 channel.
+    pub fn with_y2(mut self, y2: ChannelDef) -> Self {
+        self.y2 = Some(y2);
         self
     }
 
@@ -198,8 +212,16 @@ impl EncodingSet {
         self.x.as_ref()
     }
 
+    fn x2(&self) -> Option<&ChannelDef> {
+        self.x2.as_ref()
+    }
+
     fn y(&self) -> Option<&ChannelDef> {
         self.y.as_ref()
+    }
+
+    fn y2(&self) -> Option<&ChannelDef> {
+        self.y2.as_ref()
     }
 
     fn color(&self) -> Option<&ChannelDef> {
@@ -374,9 +396,21 @@ impl UnitSpec {
         self
     }
 
+    /// Sets the x2 channel.
+    pub fn with_x2(mut self, x2: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_x2(x2);
+        self
+    }
+
     /// Sets the y channel.
     pub fn with_y(mut self, y: ChannelDef) -> Self {
         self.encoding = self.encoding.with_y(y);
+        self
+    }
+
+    /// Sets the y2 channel.
+    pub fn with_y2(mut self, y2: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_y2(y2);
         self
     }
 
@@ -407,10 +441,12 @@ impl UnitSpec {
             .encoding
             .x()
             .ok_or(LoweringError::MissingChannel("x"))?;
+        let x2 = self.encoding.x2();
         let y = self
             .encoding
             .y()
             .ok_or(LoweringError::MissingChannel("y"))?;
+        let y2 = self.encoding.y2();
         let color = self.encoding.color();
         if self.encoding.text().is_some() {
             return Err(LoweringError::Unsupported(
@@ -420,6 +456,13 @@ impl UnitSpec {
         if x.aggregate().is_some() {
             return Err(LoweringError::Unsupported(
                 "aggregate on the x channel is not supported in the experimental lowering slice",
+            ));
+        }
+        if let Some(x2) = x2
+            && x2.aggregate().is_some()
+        {
+            return Err(LoweringError::Unsupported(
+                "aggregate on the x2 channel is not supported in the experimental lowering slice",
             ));
         }
         if let Some(color) = color
@@ -434,9 +477,33 @@ impl UnitSpec {
                 "the experimental lowering slice requires a quantitative y channel",
             ));
         }
+        if let Some(y2) = y2
+            && y2.aggregate().is_some()
+        {
+            return Err(LoweringError::Unsupported(
+                "aggregate on the y2 channel is not supported in the experimental lowering slice",
+            ));
+        }
+        if let Some(y2) = y2
+            && y2.kind() != FieldKind::Quantitative
+        {
+            return Err(LoweringError::Unsupported(
+                "the experimental lowering slice requires a quantitative y2 channel",
+            ));
+        }
         if color.is_some() && self.mark == MarkDef::Bar {
             return Err(LoweringError::Unsupported(
                 "categorical color splitting is not supported for bar marks yet",
+            ));
+        }
+        if (x2.is_some() || y2.is_some()) && self.mark != MarkDef::Area {
+            return Err(LoweringError::Unsupported(
+                "secondary position channels are currently only supported for area marks",
+            ));
+        }
+        if x2.is_some() && y2.is_none() {
+            return Err(LoweringError::Unsupported(
+                "x2 currently requires y2 so the area can form an explicit lower edge",
             ));
         }
 
@@ -454,6 +521,18 @@ impl UnitSpec {
                         "line/point/area lowering currently requires a quantitative or temporal x channel",
                     ));
                 }
+            }
+        }
+        if let Some(x2) = x2 {
+            if x2.kind() != x.kind() {
+                return Err(LoweringError::Unsupported(
+                    "x2 must use the same field kind as x in the experimental lowering slice",
+                ));
+            }
+            if !matches!(x2.kind(), FieldKind::Quantitative | FieldKind::Temporal) {
+                return Err(LoweringError::Unsupported(
+                    "x2 currently requires a quantitative or temporal channel kind",
+                ));
             }
         }
 
@@ -497,7 +576,7 @@ impl UnitSpec {
             &base_program,
             input_table,
             current_table,
-            required_columns(x, lowered_y_field, color),
+            required_columns(x, x2, lowered_y_field, y2, color),
         )?;
 
         let mut program = if base_program.transforms().is_empty() {
@@ -532,7 +611,7 @@ impl UnitSpec {
                         op: vizir_transforms::CompareOp::Eq,
                         value,
                     },
-                    columns: vec![x.field(), lowered_y_field],
+                    columns: series_columns(x, x2, lowered_y_field, y2, Some(color)),
                 });
                 if matches!(self.mark, MarkDef::Line | MarkDef::Area) {
                     p.push(Transform::Sort {
@@ -540,7 +619,7 @@ impl UnitSpec {
                         output,
                         by: x.field(),
                         order: SortOrder::Asc,
-                        columns: vec![x.field(), lowered_y_field],
+                        columns: series_columns(x, x2, lowered_y_field, y2, None),
                     });
                 }
                 derived_tables.push(output);
@@ -570,7 +649,9 @@ impl UnitSpec {
                         id: MarkId::from_raw(self.id_base.wrapping_add(0x1_000 + index as u64)),
                         table: output,
                         x: x.field(),
+                        x2: x2.map(ChannelDef::field),
                         y: lowered_y_field,
+                        y2: y2.map(ChannelDef::field),
                         baseline: 0.0,
                         fill,
                     }),
@@ -603,7 +684,9 @@ impl UnitSpec {
                     id: MarkId::from_raw(self.id_base.wrapping_add(0x1_000)),
                     table: current_table,
                     x: x.field(),
+                    x2: x2.map(ChannelDef::field),
                     y: lowered_y_field,
+                    y2: y2.map(ChannelDef::field),
                     baseline: 0.0,
                     fill: Brush::Solid(css::CORNFLOWER_BLUE),
                 }),
@@ -614,7 +697,9 @@ impl UnitSpec {
             self,
             &preview_frame,
             x,
+            x2,
             lowered_y_field,
+            y2.map(ChannelDef::field),
             y.title(),
             legend_items,
         )?;
@@ -880,7 +965,9 @@ struct AreaLayer {
     id: MarkId,
     table: TableId,
     x: ColumnId,
+    x2: Option<ColumnId>,
     y: ColumnId,
+    y2: Option<ColumnId>,
     baseline: f64,
     fill: Brush,
 }
@@ -898,12 +985,29 @@ impl AreaLayer {
         let y_scale = chart
             .y_scale_continuous(plot)
             .ok_or(LoweringError::MissingChannel("y"))?;
-        Ok(
-            crate::AreaMarkSpec::new(self.id.0, self.table, self.x, self.y, x_scale, y_scale)
-                .with_baseline(self.baseline)
-                .with_fill(self.fill.clone())
-                .marks(),
-        )
+        Ok(match (self.x2, self.y2) {
+            (Some(x2), Some(y2)) => crate::RangeAreaMarkSpec::new(
+                self.id.0, self.table, self.x, self.y, x2, y2, x_scale, y_scale,
+            )
+            .with_fill(self.fill.clone())
+            .marks(),
+            (None, Some(y2)) => crate::StackedAreaMarkSpec::new(
+                self.id.0, self.table, self.x, y2, self.y, x_scale, y_scale,
+            )
+            .with_fill(self.fill.clone())
+            .marks(),
+            (None, None) => {
+                crate::AreaMarkSpec::new(self.id.0, self.table, self.x, self.y, x_scale, y_scale)
+                    .with_baseline(self.baseline)
+                    .with_fill(self.fill.clone())
+                    .marks()
+            }
+            (Some(_), None) => {
+                return Err(LoweringError::Unsupported(
+                    "x2 requires y2 before area marks can be rendered",
+                ));
+            }
+        })
     }
 }
 
@@ -911,7 +1015,9 @@ fn build_chart_spec(
     spec: &UnitSpec,
     frame: &TableFrame,
     x: &ChannelDef,
+    x2: Option<&ChannelDef>,
     y_field: ColumnId,
+    y2_field: Option<ColumnId>,
     y_title: Option<&str>,
     legend_items: Vec<LegendItem>,
 ) -> Result<ChartSpec, LoweringError> {
@@ -924,8 +1030,8 @@ fn build_chart_spec(
         .with_fill(css::BLACK)
     });
 
-    let axis_bottom = build_x_axis(spec, frame, x)?;
-    let axis_left = build_y_axis(spec, frame, y_field, y_title, spec.mark)?;
+    let axis_bottom = build_x_axis(spec, frame, x, x2)?;
+    let axis_left = build_y_axis(spec, frame, y_field, y2_field, y_title, spec.mark)?;
     let legend = if legend_items.is_empty() {
         None
     } else {
@@ -963,6 +1069,7 @@ fn build_x_axis(
     spec: &UnitSpec,
     frame: &TableFrame,
     x: &ChannelDef,
+    x2: Option<&ChannelDef>,
 ) -> Result<AxisSpec, LoweringError> {
     let mut axis = match x.kind() {
         FieldKind::Ordinal | FieldKind::Nominal => {
@@ -992,7 +1099,7 @@ fn build_x_axis(
             })
         }
         FieldKind::Quantitative => {
-            let domain = infer_frame_domain(frame, x.field(), "x")?;
+            let domain = infer_frame_domain_pair(frame, x.field(), x2.map(ChannelDef::field), "x")?;
             AxisSpec::bottom(
                 spec.id_base.wrapping_add(0x10_000),
                 ScaleLinearSpec::new(expand_domain(domain)).with_nice(true),
@@ -1000,7 +1107,7 @@ fn build_x_axis(
             .with_tick_count(6)
         }
         FieldKind::Temporal => {
-            let domain = infer_frame_domain(frame, x.field(), "x")?;
+            let domain = infer_frame_domain_pair(frame, x.field(), x2.map(ChannelDef::field), "x")?;
             AxisSpec::bottom(
                 spec.id_base.wrapping_add(0x10_000),
                 ScaleTimeSpec::new(expand_domain(domain)),
@@ -1018,13 +1125,15 @@ fn build_y_axis(
     spec: &UnitSpec,
     frame: &TableFrame,
     y_field: ColumnId,
+    y2_field: Option<ColumnId>,
     y_title: Option<&str>,
     mark: MarkDef,
 ) -> Result<AxisSpec, LoweringError> {
-    let domain = infer_frame_domain(frame, y_field, "y")?;
+    let domain = infer_frame_domain_pair(frame, y_field, y2_field, "y")?;
     let domain = match mark {
-        MarkDef::Bar | MarkDef::Area => include_zero(expand_domain(domain)),
-        MarkDef::Line | MarkDef::Point => expand_domain(domain),
+        MarkDef::Bar => include_zero(expand_domain(domain)),
+        MarkDef::Area if y2_field.is_none() => include_zero(expand_domain(domain)),
+        MarkDef::Area | MarkDef::Line | MarkDef::Point => expand_domain(domain),
     };
     let mut axis = AxisSpec::left(
         spec.id_base.wrapping_add(0x11_000),
@@ -1142,38 +1251,62 @@ fn preview_output_frame(
 
 fn required_columns(
     x: &ChannelDef,
+    x2: Option<&ChannelDef>,
     y_field: ColumnId,
+    y2: Option<&ChannelDef>,
     color: Option<&ChannelDef>,
 ) -> Vec<ColumnId> {
     let mut out = vec![x.field(), y_field];
+    if let Some(x2) = x2 {
+        push_unique_col(&mut out, x2.field());
+    }
+    if let Some(y2) = y2 {
+        push_unique_col(&mut out, y2.field());
+    }
     if let Some(color) = color {
         push_unique_col(&mut out, color.field());
     }
     out
 }
 
-fn infer_frame_domain(
+fn infer_frame_domain_pair(
     frame: &TableFrame,
-    col: ColumnId,
+    primary: ColumnId,
+    secondary: Option<ColumnId>,
     role: &'static str,
 ) -> Result<(f64, f64), LoweringError> {
     let mut min = f64::INFINITY;
     let mut max = f64::NEG_INFINITY;
-    for row in 0..frame.row_count() {
-        let Some(v) = frame.f64(row, col) else {
-            continue;
-        };
-        if !v.is_finite() {
-            continue;
+    for col in [Some(primary), secondary].into_iter().flatten() {
+        for row in 0..frame.row_count() {
+            let Some(v) = frame.f64(row, col) else {
+                continue;
+            };
+            if !v.is_finite() {
+                continue;
+            }
+            min = min.min(v);
+            max = max.max(v);
         }
-        min = min.min(v);
-        max = max.max(v);
     }
     if min.is_finite() && max.is_finite() {
         Ok((min, max))
     } else {
-        Err(LoweringError::MissingDomain { field: col, role })
+        Err(LoweringError::MissingDomain {
+            field: primary,
+            role,
+        })
     }
+}
+
+fn series_columns(
+    x: &ChannelDef,
+    x2: Option<&ChannelDef>,
+    y_field: ColumnId,
+    y2: Option<&ChannelDef>,
+    color: Option<&ChannelDef>,
+) -> Vec<ColumnId> {
+    required_columns(x, x2, y_field, y2, color)
 }
 
 fn expand_domain((min, max): (f64, f64)) -> (f64, f64) {
@@ -1277,8 +1410,14 @@ fn next_derived_col(spec: &UnitSpec) -> u32 {
     if let Some(x) = spec.encoding.x() {
         max_col = max_col.max(x.field().0);
     }
+    if let Some(x2) = spec.encoding.x2() {
+        max_col = max_col.max(x2.field().0);
+    }
     if let Some(y) = spec.encoding.y() {
         max_col = max_col.max(y.field().0);
+    }
+    if let Some(y2) = spec.encoding.y2() {
+        max_col = max_col.max(y2.field().0);
     }
     if let Some(color) = spec.encoding.color() {
         max_col = max_col.max(color.field().0);
@@ -1398,6 +1537,34 @@ mod tests {
                 ColumnId(0) => self.a.get(row).copied(),
                 ColumnId(1) => self.b.get(row).copied(),
                 ColumnId(2) => self.c.get(row).copied(),
+                _ => None,
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct FourCols {
+        a: Vec<f64>,
+        b: Vec<f64>,
+        c: Vec<f64>,
+        d: Vec<f64>,
+    }
+
+    impl TableData for FourCols {
+        fn row_count(&self) -> usize {
+            self.a
+                .len()
+                .min(self.b.len())
+                .min(self.c.len())
+                .min(self.d.len())
+        }
+
+        fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+            match col {
+                ColumnId(0) => self.a.get(row).copied(),
+                ColumnId(1) => self.b.get(row).copied(),
+                ColumnId(2) => self.c.get(row).copied(),
+                ColumnId(3) => self.d.get(row).copied(),
                 _ => None,
             }
         }
@@ -1604,5 +1771,96 @@ mod tests {
                 .iter()
                 .all(|mark| matches!(mark.encodings, vizir_core::MarkEncodings::Path(_)))
         );
+    }
+
+    #[test]
+    fn ranged_area_lowering_uses_y2_without_forcing_zero() {
+        let mut scene = Scene::new();
+        let table_id = TableId(60);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![200, 201, 202];
+        table.data = Some(Box::new(ThreeCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![5.0, 6.0, 7.0],
+            c: vec![2.0, 3.0, 4.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xEF00,
+            TableId(600),
+            DataRef::Table(table_id),
+            MarkDef::Area,
+        )
+        .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+        .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("hi"))
+        .with_y2(ChannelDef::quantitative(ColumnId(2)).with_title("lo"));
+
+        let lowered = spec.lower(&scene).expect("lower ranged area chart");
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let y_scale = lowered
+            .chart()
+            .y_scale_continuous(layout.data)
+            .expect("y scale");
+        assert!(y_scale.domain_min() > 0.0);
+
+        let marks = lowered
+            .series_marks(&scene, layout.data)
+            .expect("ranged area series marks");
+        assert_eq!(marks.len(), 1);
+        assert!(matches!(
+            marks[0].encodings,
+            vizir_core::MarkEncodings::Path(_)
+        ));
+    }
+
+    #[test]
+    fn ranged_area_lowering_uses_x2_and_y2_in_domains() {
+        let mut scene = Scene::new();
+        let table_id = TableId(70);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![300, 301, 302];
+        table.data = Some(Box::new(FourCols {
+            a: vec![1.0, 2.0, 3.0],
+            b: vec![5.0, 6.0, 7.0],
+            c: vec![0.0, 1.0, 2.0],
+            d: vec![2.0, 3.0, 4.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xF000,
+            TableId(700),
+            DataRef::Table(table_id),
+            MarkDef::Area,
+        )
+        .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+        .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("top"))
+        .with_x2(ChannelDef::quantitative(ColumnId(2)).with_title("x2"))
+        .with_y2(ChannelDef::quantitative(ColumnId(3)).with_title("bottom"));
+
+        let lowered = spec.lower(&scene).expect("lower paired ranged area chart");
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let x_scale = lowered
+            .chart()
+            .x_scale_continuous(layout.data)
+            .expect("x scale");
+        let y_scale = lowered
+            .chart()
+            .y_scale_continuous(layout.data)
+            .expect("y scale");
+        assert_eq!(x_scale.domain_min(), 0.0);
+        assert_eq!(x_scale.domain_max(), 3.0);
+        assert_eq!(y_scale.domain_min(), 2.0);
+        assert_eq!(y_scale.domain_max(), 7.0);
+
+        let marks = lowered
+            .series_marks(&scene, layout.data)
+            .expect("paired ranged area series marks");
+        assert_eq!(marks.len(), 1);
+        assert!(matches!(
+            marks[0].encodings,
+            vizir_core::MarkEncodings::Path(_)
+        ));
     }
 }
