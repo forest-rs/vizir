@@ -1,0 +1,13 @@
+{
+  "title": "Faceted Bars",
+  "facet": { "field": "series", "type": "nominal", "title": "series" },
+  "columns": 2,
+  "spacing": 24.0,
+  "spec": {
+    "mark": "bar",
+    "encoding": {
+      "x": { "field": "category", "type": "ordinal", "title": "category" },
+      "y": { "field": "value", "type": "quantitative", "title": "value" }
+    }
+  }
+}

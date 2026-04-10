@@ -23,7 +23,8 @@ Status meanings:
 | Shared-plot `layer` spec | partial | Shared data with child-local transforms, unit-shaped child entries, and literal child styles; later children can inherit base-child defaults, but they may not fork the shared x/domain or color/legend shell |
 | Existing input table via `DataRef::Table` | supported | No URL/data loading in authored spec path |
 | Deterministic lowering to `Program + ChartSpec + series plan` | supported | Same seam used by demos/tests |
-| Multi-view composition beyond shared-plot `layer` (`facet`, `repeat`, `concat`) | missing | Not modeled yet |
+| One-field `facet` over a unit child | partial | Categorical facet partitioning with a fixed grid; each cell lowers the same unit spec, titles each cell from the facet value, and currently suppresses per-cell legends |
+| Multi-view composition beyond shared-plot `layer` and narrow `facet` (`repeat`, `concat`, nested facet`) | missing | Not modeled yet |
 | Params / selections / event streams | missing | No interaction model yet |
 
 ### Marks
@@ -74,9 +75,11 @@ Status meanings:
 |---|---|---|
 | Rust-authored `UnitSpec` | supported | Primary lowering target |
 | Rust-authored `LayerSpec` | partial | Narrow shared-plot layering with child-local transforms, unit-shaped child entries, and literal child fill/stroke/opacity styles; explicit rejection for conflicting child x/color shells |
+| Rust-authored `FacetSpec` | partial | One categorical facet field over a unit-shaped child chart; fixed grid only, with no scale-resolution policy beyond per-cell lowering |
 | Name-based `ParsedUnitSpec` adapter | supported | Resolves field names and derived aliases into `ColumnId`s |
 | Name-based `ParsedLayerSpec` adapter | partial | Shared data plus child-local transforms, unit-shaped child entries, and literal child styles; the shared shell is still validated during lowering |
-| Narrow JSON parser behind `json` feature | partial | Supports the current unit slice plus shared-plot `layer` with unit-shaped child entries, child-local transforms, literal child styles, and structural `order`/`detail` channels |
+| Name-based `ParsedFacetSpec` adapter | partial | Resolves one categorical facet field plus a unit-shaped child chart into the authored facet seam |
+| Narrow JSON parser behind `json` feature | partial | Supports the current unit slice, shared-plot `layer`, and one-field `facet` with a nested unit child |
 | Full Vega-Lite JSON coverage | missing | Current JSON parser is intentionally narrow |
 
 ## Important fences
@@ -88,6 +91,9 @@ Status meanings:
   their own mark, transforms, and encoding block, and later children can inherit
   positional/grouping defaults from the base child, but the base child still owns the shared x/y
   domains and color/legend shell. Independent per-child domain resolution is not modeled yet.
+- `facet` currently means one ordinal/nominal partition field over a unit-shaped child chart. It
+  uses a fixed grid with per-cell inferred domains and no shared legend resolution; child legends
+  are suppressed in the current slice.
 - `rule` currently means a full-span threshold mark, not an arbitrary segment. It requires exactly
   one authored `x` or `y` channel, and layered rules do not inherit positional channels from the
   shared shell.

@@ -17,8 +17,8 @@ use vizir_core::{ColumnId, TableId};
 use vizir_transforms::{AggregateField, AggregateOp, CompareOp, Predicate, SortOrder, StackOffset};
 
 use crate::{
-    ChannelDef, DataRef, FieldKind, LayerChildSpec, LayerSpec, MarkDef, StrokeStyle, TransformSpec,
-    UnitSpec,
+    ChannelDef, DataRef, FacetSpec, FieldKind, LayerChildSpec, LayerSpec, MarkDef, StrokeStyle,
+    TransformSpec, UnitSpec,
 };
 
 /// Context needed to adapt a parsed unit spec into a concrete [`UnitSpec`].
@@ -796,6 +796,209 @@ impl ParsedLayerChildSpec {
     pub fn with_opacity_value(mut self, opacity: f64) -> Self {
         self.style.opacity = Some(opacity);
         self
+    }
+}
+
+/// A parsed one-field facet spec that still refers to fields by name.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParsedFacetSpec {
+    facet: ParsedChannelDef,
+    unit: ParsedUnitSpec,
+    title: Option<String>,
+    columns: usize,
+    spacing: f64,
+}
+
+impl ParsedFacetSpec {
+    /// Creates a new parsed facet spec over a unit-shaped child mark.
+    pub fn new(facet: ParsedChannelDef, mark: ParsedMarkDef) -> Self {
+        Self {
+            facet,
+            unit: ParsedUnitSpec::new(mark),
+            title: None,
+            columns: 2,
+            spacing: 24.0,
+        }
+    }
+
+    /// Sets the outer facet title.
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// Sets the cell plot size.
+    pub fn with_size(mut self, width: f64, height: f64) -> Self {
+        self.unit = self.unit.with_size(width, height);
+        self
+    }
+
+    /// Sets the number of facet columns.
+    pub fn with_columns(mut self, columns: usize) -> Self {
+        self.columns = columns.max(1);
+        self
+    }
+
+    /// Sets the spacing between facet cells.
+    pub fn with_spacing(mut self, spacing: f64) -> Self {
+        self.spacing = spacing;
+        self
+    }
+
+    /// Replaces the child encoding set.
+    pub fn with_encoding(mut self, encoding: ParsedEncodingSet) -> Self {
+        self.unit = self.unit.with_encoding(encoding);
+        self
+    }
+
+    /// Sets the child x channel.
+    pub fn with_x(mut self, x: ParsedChannelDef) -> Self {
+        self.unit = self.unit.with_x(x);
+        self
+    }
+
+    /// Sets the child x2 channel.
+    pub fn with_x2(mut self, x2: ParsedChannelDef) -> Self {
+        self.unit = self.unit.with_x2(x2);
+        self
+    }
+
+    /// Sets the child y channel.
+    pub fn with_y(mut self, y: ParsedChannelDef) -> Self {
+        self.unit = self.unit.with_y(y);
+        self
+    }
+
+    /// Sets the child y2 channel.
+    pub fn with_y2(mut self, y2: ParsedChannelDef) -> Self {
+        self.unit = self.unit.with_y2(y2);
+        self
+    }
+
+    /// Sets the child color channel.
+    pub fn with_color(mut self, color: ParsedChannelDef) -> Self {
+        self.unit = self.unit.with_color(color);
+        self
+    }
+
+    /// Sets the child size channel.
+    pub fn with_size_channel(mut self, size: ParsedChannelDef) -> Self {
+        self.unit = self.unit.with_size_channel(size);
+        self
+    }
+
+    /// Sets the child shape channel.
+    pub fn with_shape(mut self, shape: ParsedChannelDef) -> Self {
+        self.unit = self.unit.with_shape(shape);
+        self
+    }
+
+    /// Sets the child opacity channel.
+    pub fn with_opacity(mut self, opacity: ParsedChannelDef) -> Self {
+        self.unit = self.unit.with_opacity(opacity);
+        self
+    }
+
+    /// Sets the child stroke channel.
+    pub fn with_stroke(mut self, stroke: ParsedChannelDef) -> Self {
+        self.unit = self.unit.with_stroke(stroke);
+        self
+    }
+
+    /// Sets the child stroke-width channel.
+    pub fn with_stroke_width(mut self, stroke_width: ParsedChannelDef) -> Self {
+        self.unit = self.unit.with_stroke_width(stroke_width);
+        self
+    }
+
+    /// Sets the child order channel.
+    pub fn with_order(mut self, order: ParsedChannelDef) -> Self {
+        self.unit = self.unit.with_order(order);
+        self
+    }
+
+    /// Sets the child detail channel.
+    pub fn with_detail(mut self, detail: ParsedChannelDef) -> Self {
+        self.unit = self.unit.with_detail(detail);
+        self
+    }
+
+    /// Sets the child text channel.
+    pub fn with_text(mut self, text: ParsedChannelDef) -> Self {
+        self.unit = self.unit.with_text(text);
+        self
+    }
+
+    /// Appends a parsed transform to the child unit.
+    pub fn with_transform(mut self, transform: ParsedTransformSpec) -> Self {
+        self.unit = self.unit.with_transform(transform);
+        self
+    }
+
+    /// Adapts this parsed facet spec into a concrete [`FacetSpec`].
+    pub fn adapt(
+        &self,
+        resolver: &impl FieldResolver,
+        context: AdaptContext,
+    ) -> Result<FacetSpec, AdaptError> {
+        let mut fields = FieldBindings::new(resolver);
+        let facet = adapt_channel(&self.facet, "facet", &mut fields)?;
+        let mut out = FacetSpec::new(
+            context.id_base,
+            context.derived_table_base,
+            context.data,
+            facet,
+            adapt_mark(self.unit.mark),
+        )
+        .with_size(self.unit.width, self.unit.height)
+        .with_columns(self.columns)
+        .with_spacing(self.spacing);
+        if let Some(title) = &self.title {
+            out = out.with_title(title.clone());
+        }
+        for transform in &self.unit.transforms {
+            out = out.with_transform(adapt_transform(transform, &mut fields)?);
+        }
+        if let Some(x) = &self.unit.encoding.x {
+            out = out.with_x(adapt_channel(x, "x", &mut fields)?);
+        }
+        if let Some(x2) = &self.unit.encoding.x2 {
+            out = out.with_x2(adapt_channel(x2, "x2", &mut fields)?);
+        }
+        if let Some(y) = &self.unit.encoding.y {
+            out = out.with_y(adapt_channel(y, "y", &mut fields)?);
+        }
+        if let Some(y2) = &self.unit.encoding.y2 {
+            out = out.with_y2(adapt_channel(y2, "y2", &mut fields)?);
+        }
+        if let Some(color) = &self.unit.encoding.color {
+            out = out.with_color(adapt_channel(color, "color", &mut fields)?);
+        }
+        if let Some(size) = &self.unit.encoding.size {
+            out = out.with_size_channel(adapt_channel(size, "size", &mut fields)?);
+        }
+        if let Some(shape) = &self.unit.encoding.shape {
+            out = out.with_shape(adapt_channel(shape, "shape", &mut fields)?);
+        }
+        if let Some(opacity) = &self.unit.encoding.opacity {
+            out = out.with_opacity(adapt_channel(opacity, "opacity", &mut fields)?);
+        }
+        if let Some(stroke) = &self.unit.encoding.stroke {
+            out = out.with_stroke(adapt_channel(stroke, "stroke", &mut fields)?);
+        }
+        if let Some(stroke_width) = &self.unit.encoding.stroke_width {
+            out = out.with_stroke_width(adapt_channel(stroke_width, "strokeWidth", &mut fields)?);
+        }
+        if let Some(order) = &self.unit.encoding.order {
+            out = out.with_order(adapt_channel(order, "order", &mut fields)?);
+        }
+        if let Some(detail) = &self.unit.encoding.detail {
+            out = out.with_detail(adapt_channel(detail, "detail", &mut fields)?);
+        }
+        if let Some(text) = &self.unit.encoding.text {
+            out = out.with_text(adapt_channel(text, "text", &mut fields)?);
+        }
+        Ok(out)
     }
 }
 
@@ -1819,6 +2022,40 @@ mod tests {
                 .any(|mark| mark.kind == vizir_core::MarkKind::Rect)
         );
         assert!(lowered.chart().legend.is_some());
+    }
+
+    #[test]
+    fn parsed_facet_adapts_and_lowers() {
+        let parsed = ParsedFacetSpec::new(ParsedChannelDef::nominal("series"), ParsedMarkDef::Bar)
+            .with_title("Faceted Bars")
+            .with_x(ParsedChannelDef::ordinal("category"))
+            .with_y(ParsedChannelDef::quantitative("value"));
+
+        let mut scene = Scene::new();
+        let table_id = TableId(323);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![140, 141, 142, 143, 144, 145];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0, 2.0, 0.0, 1.0, 2.0],
+            b: vec![2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+            c: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            d: vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        }));
+        scene.insert_table(table);
+
+        let facet = parsed
+            .adapt(&resolver(), context(table_id))
+            .expect("adapt facet");
+        let lowered = facet.lower_into_scene(&mut scene).expect("lower facet");
+        let (layout, marks) = lowered
+            .marks(&scene, &HeuristicTextMeasurer)
+            .expect("facet marks");
+        assert_eq!(layout.cells.len(), 2);
+        assert!(
+            marks
+                .iter()
+                .any(|mark| mark.kind == vizir_core::MarkKind::Rect)
+        );
     }
 
     #[test]

@@ -13,30 +13,31 @@ Current state:
   aggregate transforms.
 - Unit specs now support grouped categorical color bars, plus explicit stacked bars through
   stack-derived `y`/`y2` spans, in the same lowering path.
+- One-field categorical `facet` now lowers a unit-shaped child chart into a fixed grid.
 - Structural `order` and `detail` channels lower for line/area marks.
 - Styling channels now include point-local `opacity`, `stroke`, and `strokeWidth`.
 - The parser-facing adapter and feature-gated JSON path target the same seam through checked-in
   fixtures.
 
 Goals:
-- Keep tightening layered diagnostics now that unit-shaped child entries are real.
-- Decide the next useful structural channel or composition slice without widening domain semantics.
+- Tighten the facet and layer fences now that both composition seams are real.
+- Decide the next useful transform or styling slice without widening domain semantics accidentally.
 - Keep fixture-driven JSON coverage aligned with the support matrix.
 
 Non-goals:
 - Full nested unit specs inside `layer`.
-- Full scale/domain conflict resolution across unrelated child specs.
+- Full scale/domain conflict resolution across unrelated child specs or facet cells.
 - Generic string-valued table columns in `vizir_core`.
 
 Planned slices:
-1. Next structural channel/composition decision
-   - Decide whether the next gain is richer styling or broader transform support.
-   - Do not blur the current shared-domain fence accidentally.
-2. Layered diagnostics + conflict tests
-   - Keep shared data and shared plot guides.
-   - Make fences like `color + detail`, aggregated `order`, and base-child domain ownership
-     explicit in tests and docs.
+1. Facet + layer diagnostics
+   - Make facet domain/legend fences and layer shared-shell fences explicit in tests and docs.
+   - Do not let narrow composition slices read as full Vega-Lite resolve semantics.
+2. Broader transform support
+   - Start with the most useful derived-field/dataflow slices after composition: `calculate`,
+     `joinaggregate`, then a narrow `window`.
 3. Fixture-driven expansion
+   - Keep shared data and shared plot guides.
    - Add new checked-in JSON fixtures only for slices that are fully tested and documented.
    - Reuse fixtures from tests and the demo where practical.
 

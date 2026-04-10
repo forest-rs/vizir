@@ -10,12 +10,12 @@ use peniko::Color;
 use peniko::color::palette::css;
 use vizir_charts::{
     AdaptContext, AxisSpec, AxisStyle, BarMarkSpec, ChannelDef, ChartLayout, ChartLayoutSpec,
-    ChartSpec, DataRef, GridStyle, HeuristicTextMeasurer, LegendItem, LegendOrient,
+    ChartSpec, DataRef, FacetSpec, GridStyle, HeuristicTextMeasurer, LegendItem, LegendOrient,
     LegendPlacement, LegendSwatchesSpec, MarkDef, PLOT_BACKGROUND, RectMarkSpec, RuleMarkSpec,
     ScaleBand, ScaleLinearSpec, ScaleLogSpec, ScaleTimeSpec, SchemaField, SectorMarkSpec, Size,
     SliceFieldResolver, StackedAreaChartSpec, StackedAreaMarkSpec, StackedBarChartSpec,
-    StrokeStyle, Symbol, TextMarkSpec, TitleSpec, UnitSpec, parse_layer_spec_json,
-    parse_unit_spec_json,
+    StrokeStyle, Symbol, TextMarkSpec, TitleSpec, UnitSpec, parse_facet_spec_json,
+    parse_layer_spec_json, parse_unit_spec_json,
 };
 use vizir_core::{ColumnId, Mark, Scene, Table, TableData, TableId};
 use vizir_transforms::{
@@ -52,6 +52,7 @@ fn main() {
         lowered_json_spec_demo(),
         lowered_json_grouped_bar_demo(),
         lowered_json_stacked_bar_demo(),
+        lowered_json_facet_demo(),
         lowered_json_bar_text_demo(),
         lowered_json_point_shape_size_demo(),
         lowered_json_point_opacity_demo(),
@@ -115,6 +116,22 @@ fn render_lowered_layer_spec(scene: &mut Scene, spec: vizir_charts::LayerSpec) -
     let (layout, marks) = lowered
         .marks(scene, &measurer)
         .expect("build lowered authored layer marks");
+    let diffs = scene.tick(marks);
+
+    let mut svg_scene = svg::SvgScene::default();
+    svg_scene.set_view_box(layout.view);
+    svg_scene.apply_diffs(&diffs);
+    svg_scene.to_svg_string()
+}
+
+fn render_lowered_facet_spec(scene: &mut Scene, spec: FacetSpec) -> String {
+    let measurer = HeuristicTextMeasurer;
+    let lowered = spec
+        .lower_into_scene(scene)
+        .expect("lower and apply authored facet spec");
+    let (layout, marks) = lowered
+        .marks(scene, &measurer)
+        .expect("build lowered authored facet marks");
     let diffs = scene.tick(marks);
 
     let mut svg_scene = svg::SvgScene::default();
@@ -672,6 +689,52 @@ fn lowered_json_stacked_bar_demo() -> html::HtmlSection {
         title: "Lowered JSON Stacked Bars",
         description: "A stacked bar chart built from JSON text, proving explicit stack-transform lowering into bar `y`/`y2` spans through the authored seam.",
         svg: render_lowered_unit_spec(&mut scene, spec),
+    }
+}
+
+fn lowered_json_facet_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(1373);
+    let mut table = Table::new(source_id);
+    table.row_keys = (0..6_u64).collect();
+    table.data = Some(Box::new(GroupedBarValues {
+        category: vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0],
+        value: vec![2.0, 4.0, 3.0, 5.0, 4.0, 6.0],
+        series: vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+    }));
+    scene.insert_table(table);
+
+    let parsed = parse_facet_spec_json(include_str!("../../fixtures/specs/facet_unit_bar.json"))
+        .expect("parse facet spec");
+    let resolver = SliceFieldResolver::new(&[
+        SchemaField {
+            name: "category",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "value",
+            column: ColumnId(1),
+        },
+        SchemaField {
+            name: "series",
+            column: ColumnId(2),
+        },
+    ]);
+    let spec = parsed
+        .adapt(
+            &resolver,
+            AdaptContext {
+                id_base: 0xD0_900,
+                derived_table_base: TableId(140),
+                data: DataRef::Table(source_id),
+            },
+        )
+        .expect("adapt facet spec");
+
+    html::HtmlSection {
+        title: "Lowered JSON Facet",
+        description: "A one-field faceted bar chart built from JSON text, proving narrow facet partitioning over the authored unit seam.",
+        svg: render_lowered_facet_spec(&mut scene, spec),
     }
 }
 

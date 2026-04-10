@@ -70,16 +70,19 @@ pub use scale::{
 };
 pub use sector_mark::SectorMarkSpec;
 pub use spec::{
-    ChannelDef, DataRef, EncodingSet, FieldKind, LayerChildSpec, LayerSpec, LoweredLayer,
-    LoweredUnit, LoweringError, MarkDef, TransformSpec, UnitSpec,
+    ChannelDef, DataRef, EncodingSet, FacetLayout, FacetSpec, FieldKind, LayerChildSpec, LayerSpec,
+    LoweredFacet, LoweredLayer, LoweredUnit, LoweringError, MarkDef, TransformSpec, UnitSpec,
 };
 pub use spec_adapter::{
     AdaptContext, AdaptError, FieldResolver, ParsedAggregateField, ParsedChannelDef,
-    ParsedEncodingSet, ParsedFieldKind, ParsedLayerChildSpec, ParsedLayerSpec, ParsedMarkDef,
-    ParsedPredicate, ParsedTransformSpec, ParsedUnitSpec, SchemaField, SliceFieldResolver,
+    ParsedEncodingSet, ParsedFacetSpec, ParsedFieldKind, ParsedLayerChildSpec, ParsedLayerSpec,
+    ParsedMarkDef, ParsedPredicate, ParsedTransformSpec, ParsedUnitSpec, SchemaField,
+    SliceFieldResolver,
 };
 #[cfg(feature = "json")]
-pub use spec_json::{JsonSpecError, parse_layer_spec_json, parse_unit_spec_json};
+pub use spec_json::{
+    JsonSpecError, parse_facet_spec_json, parse_layer_spec_json, parse_unit_spec_json,
+};
 pub use stacked_area_chart::StackedAreaChartSpec;
 pub use stacked_area_mark::StackedAreaMarkSpec;
 pub use stacked_bar_chart::StackedBarChartSpec;

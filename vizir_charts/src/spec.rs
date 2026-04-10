@@ -18,16 +18,18 @@
 
 extern crate alloc;
 
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use kurbo::Rect;
+use kurbo::{Affine, BezPath, Rect};
 use peniko::Brush;
 use peniko::color::palette::css;
 use vizir_core::{
-    ColumnId, InputRef, Mark, MarkDiff, MarkId, Scene, TableId, TextAnchor, TextBaseline,
+    ColumnId, Encoding, InputRef, Mark, MarkDiff, MarkEncodings, MarkId, PathEncodings,
+    RectEncodings, Scene, TableId, TextAnchor, TextBaseline, TextEncodings,
 };
 use vizir_transforms::{
     AggregateField, AggregateOp, Predicate, Program, SceneExecutionError, SortOrder, StackOffset,
@@ -1383,6 +1385,277 @@ impl UnitSpec {
     }
 }
 
+/// A narrow one-field faceted chart.
+///
+/// This reuses the authored unit-chart seam and partitions one input table by a categorical
+/// `facet` channel. Each facet cell lowers the same unit chart against its filtered table.
+#[derive(Clone, Debug)]
+pub struct FacetSpec {
+    id_base: u64,
+    derived_table_base: TableId,
+    data: DataRef,
+    facet: ChannelDef,
+    transforms: Vec<TransformSpec>,
+    mark: MarkDef,
+    encoding: EncodingSet,
+    width: f64,
+    height: f64,
+    title: Option<String>,
+    columns: usize,
+    spacing: f64,
+}
+
+impl FacetSpec {
+    /// Creates a new one-field facet spec.
+    pub fn new(
+        id_base: u64,
+        derived_table_base: TableId,
+        data: DataRef,
+        facet: ChannelDef,
+        mark: MarkDef,
+    ) -> Self {
+        Self {
+            id_base,
+            derived_table_base,
+            data,
+            facet,
+            transforms: Vec::new(),
+            mark,
+            encoding: EncodingSet::new(),
+            width: 220.0,
+            height: 120.0,
+            title: None,
+            columns: 2,
+            spacing: 24.0,
+        }
+    }
+
+    /// Sets the plot size used by each facet cell.
+    pub fn with_size(mut self, width: f64, height: f64) -> Self {
+        self.width = width;
+        self.height = height;
+        self
+    }
+
+    /// Sets the authored facet title.
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// Sets the number of facet columns in the rendered grid.
+    pub fn with_columns(mut self, columns: usize) -> Self {
+        self.columns = columns.max(1);
+        self
+    }
+
+    /// Sets the spacing between facet cells.
+    pub fn with_spacing(mut self, spacing: f64) -> Self {
+        self.spacing = spacing;
+        self
+    }
+
+    /// Replaces the facet cell encoding set.
+    pub fn with_encoding(mut self, encoding: EncodingSet) -> Self {
+        self.encoding = encoding;
+        self
+    }
+
+    /// Sets the x channel for each facet cell.
+    pub fn with_x(mut self, x: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_x(x);
+        self
+    }
+
+    /// Sets the x2 channel for each facet cell.
+    pub fn with_x2(mut self, x2: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_x2(x2);
+        self
+    }
+
+    /// Sets the y channel for each facet cell.
+    pub fn with_y(mut self, y: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_y(y);
+        self
+    }
+
+    /// Sets the y2 channel for each facet cell.
+    pub fn with_y2(mut self, y2: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_y2(y2);
+        self
+    }
+
+    /// Sets the color channel for each facet cell.
+    pub fn with_color(mut self, color: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_color(color);
+        self
+    }
+
+    /// Sets the size channel for each facet cell.
+    pub fn with_size_channel(mut self, size: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_size(size);
+        self
+    }
+
+    /// Sets the shape channel for each facet cell.
+    pub fn with_shape(mut self, shape: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_shape(shape);
+        self
+    }
+
+    /// Sets the opacity channel for each facet cell.
+    pub fn with_opacity(mut self, opacity: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_opacity(opacity);
+        self
+    }
+
+    /// Sets the stroke channel for each facet cell.
+    pub fn with_stroke(mut self, stroke: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_stroke(stroke);
+        self
+    }
+
+    /// Sets the stroke-width channel for each facet cell.
+    pub fn with_stroke_width(mut self, stroke_width: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_stroke_width(stroke_width);
+        self
+    }
+
+    /// Sets the order channel for each facet cell.
+    pub fn with_order(mut self, order: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_order(order);
+        self
+    }
+
+    /// Sets the detail channel for each facet cell.
+    pub fn with_detail(mut self, detail: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_detail(detail);
+        self
+    }
+
+    /// Sets the text channel for each facet cell.
+    pub fn with_text(mut self, text: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_text(text);
+        self
+    }
+
+    /// Appends an authored transform for each facet cell.
+    pub fn with_transform(mut self, transform: TransformSpec) -> Self {
+        self.transforms.push(transform);
+        self
+    }
+
+    /// Lowers the authored facet spec into a faceted chart/transform plan.
+    pub fn lower(&self, scene: &Scene) -> Result<LoweredFacet, LoweringError> {
+        let DataRef::Table(input_table) = self.data;
+        ensure_table_exists(scene, input_table)?;
+
+        if self.facet.aggregate().is_some() {
+            return Err(LoweringError::Unsupported(
+                "facet channels do not support aggregate in the experimental lowering slice",
+            ));
+        }
+        if !matches!(self.facet.kind(), FieldKind::Ordinal | FieldKind::Nominal) {
+            return Err(LoweringError::Unsupported(
+                "facet lowering currently requires an ordinal or nominal channel",
+            ));
+        }
+
+        let input = scene
+            .tables
+            .get(&input_table)
+            .ok_or(LoweringError::MissingTable(input_table))?;
+        let frame =
+            TableFrame::from_table(input, facet_preview_columns(self)).map_err(
+                |err| match err {
+                    TableFrameError::MissingData => LoweringError::MissingTableData(input_table),
+                    _ => LoweringError::FrameError {
+                        table: input_table,
+                        err,
+                    },
+                },
+            )?;
+        let facet_values = distinct_values(&frame, self.facet.field());
+        if facet_values.is_empty() {
+            return Err(LoweringError::Unsupported(
+                "facet lowering requires at least one finite facet value",
+            ));
+        }
+
+        let mut cells = Vec::new();
+        let mut derived_tables = Vec::new();
+        let mut program = None;
+        let filter_columns = facet_filter_columns(self);
+        for (index, value) in facet_values.iter().copied().enumerate() {
+            let filtered_table = facet_cell_input_table(self.derived_table_base, index);
+            let mut filter_program = Program::new();
+            filter_program.push(Transform::Filter {
+                input: input_table,
+                output: filtered_table,
+                predicate: Predicate {
+                    col: self.facet.field(),
+                    op: vizir_transforms::CompareOp::Eq,
+                    value,
+                },
+                columns: filter_columns.clone(),
+            });
+
+            let output = filter_program.execute_on_scene(scene)?;
+            let filtered = output
+                .tables
+                .get(&filtered_table)
+                .cloned()
+                .ok_or(LoweringError::MissingTable(filtered_table))?;
+            let mut filtered_scene = Scene::new();
+            filtered_scene.insert_table(filtered.into_table(filtered_table));
+
+            let label = facet_cell_label(self.facet.clone(), value);
+            let mut lowered = self
+                .facet_cell_unit(filtered_table, index, &label)
+                .lower(&filtered_scene)?;
+            lowered.chart.legend = None;
+
+            derived_tables.push(filtered_table);
+            extend_unique_tables(&mut derived_tables, &lowered.derived_tables);
+            merge_programs(&mut program, Some(filter_program));
+            merge_programs(&mut program, lowered.program.clone());
+            cells.push(LoweredFacetCell { label, lowered });
+        }
+
+        Ok(LoweredFacet {
+            id_base: self.id_base,
+            input_table,
+            derived_tables,
+            program,
+            cells,
+            title: self.title.clone(),
+            columns: self.columns.max(1),
+            spacing: self.spacing.max(0.0),
+        })
+    }
+
+    /// Lowers the authored facet spec and applies the derived tables to the scene.
+    pub fn lower_into_scene(&self, scene: &mut Scene) -> Result<LoweredFacet, LoweringError> {
+        let lowered = self.lower(scene)?;
+        lowered.apply_to_scene(scene)?;
+        Ok(lowered)
+    }
+
+    fn facet_cell_unit(&self, input_table: TableId, index: usize, title: &str) -> UnitSpec {
+        UnitSpec {
+            id_base: facet_cell_id_base(self.id_base, index),
+            derived_table_base: facet_cell_derived_table_base(self.derived_table_base, index),
+            data: DataRef::Table(input_table),
+            transforms: self.transforms.clone(),
+            mark: self.mark,
+            encoding: self.encoding.clone(),
+            width: self.width,
+            height: self.height,
+            title: Some(String::from(title)),
+        }
+    }
+}
+
 /// One unit-shaped child entry in a narrow shared-plot layer spec.
 ///
 /// A child always contributes exactly one mark kind plus its own transform and encoding block.
@@ -1973,6 +2246,151 @@ impl LoweredLayer {
             out.extend(layer.marks(scene, &self.chart, plot)?);
         }
         Ok(out)
+    }
+}
+
+#[derive(Clone, Debug)]
+struct LoweredFacetCell {
+    label: String,
+    lowered: LoweredUnit,
+}
+
+/// Layout output for a faceted chart grid.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FacetLayout {
+    /// Outer faceted view bounds.
+    pub view: Rect,
+    /// Reserved rectangle for the facet title, when present.
+    pub title_top: Option<Rect>,
+    /// Slot rectangle for each facet cell in row-major order.
+    pub cells: Vec<Rect>,
+}
+
+/// A lowered faceted chart plan.
+#[derive(Clone, Debug)]
+pub struct LoweredFacet {
+    id_base: u64,
+    input_table: TableId,
+    derived_tables: Vec<TableId>,
+    program: Option<Program>,
+    cells: Vec<LoweredFacetCell>,
+    title: Option<String>,
+    columns: usize,
+    spacing: f64,
+}
+
+impl LoweredFacet {
+    /// Returns the original input table referenced by the authored facet spec.
+    pub fn input_table(&self) -> TableId {
+        self.input_table
+    }
+
+    /// Returns every derived table id the lowered plan may write into the scene.
+    pub fn derived_tables(&self) -> &[TableId] {
+        &self.derived_tables
+    }
+
+    /// Returns the lowered transform program, if the facet spec needs derived tables.
+    pub fn program(&self) -> Option<&Program> {
+        self.program.as_ref()
+    }
+
+    /// Applies the lowered transform program to the scene.
+    pub fn apply_to_scene(&self, scene: &mut Scene) -> Result<(), LoweringError> {
+        if let Some(program) = &self.program {
+            program.apply_to_scene(scene)?;
+        }
+        Ok(())
+    }
+
+    /// Produces the full translated mark list for the faceted chart.
+    pub fn marks(
+        &self,
+        scene: &Scene,
+        measurer: &impl TextMeasurer,
+    ) -> Result<(FacetLayout, Vec<Mark>), LoweringError> {
+        let mut slot_width: f64 = 0.0;
+        let mut slot_height: f64 = 0.0;
+        let mut cell_payloads = Vec::with_capacity(self.cells.len());
+        for cell in &self.cells {
+            let (layout, marks) = cell.lowered.marks(scene, measurer)?;
+            slot_width = slot_width.max(layout.view.width());
+            slot_height = slot_height.max(layout.view.height());
+            cell_payloads.push((layout, marks));
+        }
+
+        let title_spec = self
+            .title
+            .as_ref()
+            .map(|title| TitleSpec::new(MarkId::from_raw(self.id_base), title.clone()));
+        let title_height = title_spec
+            .as_ref()
+            .map_or(0.0, |title| title.measure(measurer));
+        let title_gap = if title_spec.is_some() {
+            self.spacing
+        } else {
+            0.0
+        };
+        let columns = self.columns.max(1);
+        let rows = cell_payloads.len().div_ceil(columns);
+        let view_width = if cell_payloads.is_empty() {
+            0.0
+        } else {
+            columns as f64 * slot_width + (columns.saturating_sub(1)) as f64 * self.spacing
+        };
+        let grid_height = if cell_payloads.is_empty() {
+            0.0
+        } else {
+            rows as f64 * slot_height + (rows.saturating_sub(1)) as f64 * self.spacing
+        };
+        let view_height = title_height + title_gap + grid_height;
+        let view = Rect::new(0.0, 0.0, view_width, view_height);
+        let title_top = title_spec
+            .as_ref()
+            .map(|_| Rect::new(0.0, 0.0, view_width, title_height));
+
+        let mut out = Vec::new();
+        if let (Some(title), Some(title_rect)) = (title_spec.as_ref(), title_top) {
+            out.extend(title.marks(measurer, title_rect));
+        }
+
+        let mut cells = Vec::with_capacity(cell_payloads.len());
+        for (index, (layout, marks)) in cell_payloads.into_iter().enumerate() {
+            let col = index % columns;
+            let row = index / columns;
+            let x = col as f64 * (slot_width + self.spacing);
+            let y = title_height + title_gap + row as f64 * (slot_height + self.spacing);
+            let cell_rect = Rect::new(x, y, x + layout.view.width(), y + layout.view.height());
+            let dx = x - layout.view.x0;
+            let dy = y - layout.view.y0;
+            out.extend(marks.into_iter().map(|mark| translate_mark(mark, dx, dy)));
+            cells.push(cell_rect);
+        }
+
+        Ok((
+            FacetLayout {
+                view,
+                title_top,
+                cells,
+            },
+            out,
+        ))
+    }
+
+    /// Builds translated marks and runs a full scene tick.
+    pub fn tick(
+        &self,
+        scene: &mut Scene,
+        measurer: &impl TextMeasurer,
+    ) -> Result<(FacetLayout, Vec<MarkDiff>), LoweringError> {
+        let (layout, marks) = self.marks(scene, measurer)?;
+        let diffs = scene.tick(marks);
+        Ok((layout, diffs))
+    }
+
+    /// Returns the facet cell labels in row-major order.
+    pub fn cell_labels(&self) -> Vec<&str> {
+        self.cells.iter().map(|cell| cell.label.as_str()).collect()
     }
 }
 
@@ -3386,6 +3804,187 @@ fn push_unique_col(cols: &mut Vec<ColumnId>, col: ColumnId) {
     }
 }
 
+fn facet_preview_columns(spec: &FacetSpec) -> Vec<ColumnId> {
+    dedup_cols(vec![spec.facet.field()])
+}
+
+fn facet_filter_columns(spec: &FacetSpec) -> Vec<ColumnId> {
+    let mut out = vec![spec.facet.field()];
+    if let Some(x) = spec.encoding.x() {
+        push_unique_col(&mut out, x.field());
+    }
+    if let Some(x2) = spec.encoding.x2() {
+        push_unique_col(&mut out, x2.field());
+    }
+    if let Some(y) = spec.encoding.y() {
+        push_unique_col(&mut out, y.field());
+    }
+    if let Some(y2) = spec.encoding.y2() {
+        push_unique_col(&mut out, y2.field());
+    }
+    if let Some(color) = spec.encoding.color() {
+        push_unique_col(&mut out, color.field());
+    }
+    if let Some(size) = spec.encoding.size() {
+        push_unique_col(&mut out, size.field());
+    }
+    if let Some(shape) = spec.encoding.shape() {
+        push_unique_col(&mut out, shape.field());
+    }
+    if let Some(opacity) = spec.encoding.opacity() {
+        push_unique_col(&mut out, opacity.field());
+    }
+    if let Some(stroke) = spec.encoding.stroke() {
+        push_unique_col(&mut out, stroke.field());
+    }
+    if let Some(stroke_width) = spec.encoding.stroke_width() {
+        push_unique_col(&mut out, stroke_width.field());
+    }
+    if let Some(order) = spec.encoding.order() {
+        push_unique_col(&mut out, order.field());
+    }
+    if let Some(detail) = spec.encoding.detail() {
+        push_unique_col(&mut out, detail.field());
+    }
+    if let Some(text) = spec.encoding.text() {
+        push_unique_col(&mut out, text.field());
+    }
+    for transform in &spec.transforms {
+        extend_transform_input_columns(&mut out, transform);
+    }
+    dedup_cols(out)
+}
+
+fn extend_transform_input_columns(out: &mut Vec<ColumnId>, transform: &TransformSpec) {
+    match &transform.kind {
+        TransformSpecKind::Filter { predicate, columns } => {
+            push_unique_col(out, predicate.col);
+            for &col in columns {
+                push_unique_col(out, col);
+            }
+        }
+        TransformSpecKind::Sort { by, columns, .. } => {
+            push_unique_col(out, *by);
+            for &col in columns {
+                push_unique_col(out, col);
+            }
+        }
+        TransformSpecKind::Aggregate { group_by, fields } => {
+            for &col in group_by {
+                push_unique_col(out, col);
+            }
+            for field in fields {
+                push_unique_col(out, field.input);
+            }
+        }
+        TransformSpecKind::Bin {
+            input_col, columns, ..
+        } => {
+            push_unique_col(out, *input_col);
+            for &col in columns {
+                push_unique_col(out, col);
+            }
+        }
+        TransformSpecKind::Stack {
+            group_by,
+            sort_by,
+            field,
+            columns,
+            ..
+        } => {
+            for &col in group_by {
+                push_unique_col(out, col);
+            }
+            if let Some(sort_by) = sort_by {
+                push_unique_col(out, *sort_by);
+            }
+            push_unique_col(out, *field);
+            for &col in columns {
+                push_unique_col(out, col);
+            }
+        }
+    }
+}
+
+fn facet_cell_label(facet: ChannelDef, value: f64) -> String {
+    let value = format_channel_value(value, facet.kind());
+    if let Some(title) = facet.title() {
+        format!("{title}: {value}")
+    } else {
+        value
+    }
+}
+
+fn facet_cell_id_base(id_base: u64, index: usize) -> u64 {
+    id_base.wrapping_add((index as u64).wrapping_mul(0x10_0000))
+}
+
+fn facet_cell_input_table(base: TableId, index: usize) -> TableId {
+    let index = u32::try_from(index).unwrap_or(u32::MAX);
+    TableId(base.0.wrapping_add(index.wrapping_mul(0x100)))
+}
+
+fn facet_cell_derived_table_base(base: TableId, index: usize) -> TableId {
+    let input = facet_cell_input_table(base, index);
+    TableId(input.0.wrapping_add(1))
+}
+
+fn translate_mark(mut mark: Mark, dx: f64, dy: f64) -> Mark {
+    mark.encodings = match mark.encodings {
+        MarkEncodings::Rect(enc) => MarkEncodings::Rect(Box::new(RectEncodings {
+            x: translate_scalar_encoding(enc.x, dx),
+            y: translate_scalar_encoding(enc.y, dy),
+            w: enc.w,
+            h: enc.h,
+            fill: enc.fill,
+        })),
+        MarkEncodings::Text(enc) => MarkEncodings::Text(Box::new(TextEncodings {
+            x: translate_scalar_encoding(enc.x, dx),
+            y: translate_scalar_encoding(enc.y, dy),
+            text: enc.text,
+            font_size: enc.font_size,
+            angle: enc.angle,
+            anchor: enc.anchor,
+            baseline: enc.baseline,
+            fill: enc.fill,
+        })),
+        MarkEncodings::Path(enc) => MarkEncodings::Path(Box::new(PathEncodings {
+            path: translate_path_encoding(enc.path, dx, dy),
+            fill: enc.fill,
+            stroke: enc.stroke,
+            stroke_width: enc.stroke_width,
+        })),
+    };
+    mark.cache = None;
+    mark.rebuild_deps();
+    mark
+}
+
+fn translate_scalar_encoding(encoding: Encoding<f64>, delta: f64) -> Encoding<f64> {
+    match encoding {
+        Encoding::Const(v) => Encoding::Const(v + delta),
+        Encoding::Compute { deps, f } => Encoding::Compute {
+            deps,
+            f: Box::new(move |ctx, id| f(ctx, id) + delta),
+        },
+    }
+}
+
+fn translate_path_encoding(encoding: Encoding<BezPath>, dx: f64, dy: f64) -> Encoding<BezPath> {
+    match encoding {
+        Encoding::Const(path) => Encoding::Const(translate_path(path, dx, dy)),
+        Encoding::Compute { deps, f } => Encoding::Compute {
+            deps,
+            f: Box::new(move |ctx, id| translate_path(f(ctx, id), dx, dy)),
+        },
+    }
+}
+
+fn translate_path(mut path: BezPath, dx: f64, dy: f64) -> BezPath {
+    path.apply_affine(Affine::translate((dx, dy)));
+    path
+}
+
 fn merge_layer_encoding(
     shared: &EncodingSet,
     overrides: &EncodingSet,
@@ -3920,7 +4519,7 @@ mod tests {
             .expect("marks");
         let rect_count = marks
             .iter()
-            .filter(|mark| matches!(mark.encodings, vizir_core::MarkEncodings::Rect(_)))
+            .filter(|mark| matches!(mark.encodings, MarkEncodings::Rect(_)))
             .count();
         assert_eq!(rect_count, 3);
     }
@@ -4026,6 +4625,75 @@ mod tests {
         unique.sort_by(f64::total_cmp);
         unique.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
         assert_eq!(unique.len(), 3);
+    }
+
+    #[test]
+    fn facet_lowering_partitions_rows_into_multiple_cells() {
+        let mut scene = Scene::new();
+        let table_id = TableId(13);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![30, 31, 32, 33, 34, 35];
+        table.data = Some(Box::new(ThreeCols {
+            a: vec![0.0, 1.0, 2.0, 0.0, 1.0, 2.0],
+            b: vec![2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+            c: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = FacetSpec::new(
+            0xAD00,
+            TableId(130),
+            DataRef::Table(table_id),
+            ChannelDef::nominal(ColumnId(2)).with_title("series"),
+            MarkDef::Bar,
+        )
+        .with_title("Facet Demo")
+        .with_x(ChannelDef::ordinal(ColumnId(0)).with_title("category"))
+        .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("value"));
+
+        let lowered = spec.lower_into_scene(&mut scene).expect("lower facet spec");
+        assert_eq!(lowered.cell_labels(), vec!["series: 0", "series: 1"]);
+
+        let (layout, marks) = lowered
+            .marks(&scene, &HeuristicTextMeasurer)
+            .expect("facet marks");
+        assert_eq!(layout.cells.len(), 2);
+        assert!(layout.title_top.is_some());
+        assert!(
+            marks
+                .iter()
+                .any(|mark| matches!(mark.encodings, MarkEncodings::Text(_)))
+        );
+    }
+
+    #[test]
+    fn facet_lowering_rejects_quantitative_facet_channels() {
+        let mut scene = Scene::new();
+        let table_id = TableId(14);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![40, 41];
+        table.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 1.0],
+            b: vec![2.0, 4.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = FacetSpec::new(
+            0xAE00,
+            TableId(140),
+            DataRef::Table(table_id),
+            ChannelDef::quantitative(ColumnId(0)),
+            MarkDef::Line,
+        )
+        .with_x(ChannelDef::quantitative(ColumnId(0)))
+        .with_y(ChannelDef::quantitative(ColumnId(1)));
+
+        let err = spec
+            .lower(&scene)
+            .expect_err("quantitative facet should fail");
+        assert!(
+            matches!(err, LoweringError::Unsupported(message) if message.contains("ordinal or nominal"))
+        );
     }
 
     #[test]
@@ -4252,7 +4920,7 @@ mod tests {
         assert!(
             marks
                 .iter()
-                .any(|mark| matches!(mark.encodings, vizir_core::MarkEncodings::Path(_)))
+                .any(|mark| matches!(mark.encodings, MarkEncodings::Path(_)))
         );
     }
 
@@ -4314,10 +4982,7 @@ mod tests {
             .series_marks(&scene, layout.data)
             .expect("area series marks");
         assert_eq!(marks.len(), 1);
-        assert!(matches!(
-            marks[0].encodings,
-            vizir_core::MarkEncodings::Path(_)
-        ));
+        assert!(matches!(marks[0].encodings, MarkEncodings::Path(_)));
     }
 
     #[test]
@@ -4419,7 +5084,7 @@ mod tests {
         assert!(
             marks
                 .iter()
-                .all(|mark| matches!(mark.encodings, vizir_core::MarkEncodings::Path(_)))
+                .all(|mark| matches!(mark.encodings, MarkEncodings::Path(_)))
         );
     }
 
@@ -4458,10 +5123,7 @@ mod tests {
             .series_marks(&scene, layout.data)
             .expect("ranged area series marks");
         assert_eq!(marks.len(), 1);
-        assert!(matches!(
-            marks[0].encodings,
-            vizir_core::MarkEncodings::Path(_)
-        ));
+        assert!(matches!(marks[0].encodings, MarkEncodings::Path(_)));
     }
 
     #[test]
@@ -4508,10 +5170,7 @@ mod tests {
             .series_marks(&scene, layout.data)
             .expect("paired ranged area series marks");
         assert_eq!(marks.len(), 1);
-        assert!(matches!(
-            marks[0].encodings,
-            vizir_core::MarkEncodings::Path(_)
-        ));
+        assert!(matches!(marks[0].encodings, MarkEncodings::Path(_)));
     }
 
     #[test]
@@ -4625,7 +5284,7 @@ mod tests {
         assert!(
             marks
                 .iter()
-                .all(|mark| matches!(mark.encodings, vizir_core::MarkEncodings::Path(_)))
+                .all(|mark| matches!(mark.encodings, MarkEncodings::Path(_)))
         );
     }
 

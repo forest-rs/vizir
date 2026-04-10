@@ -18,7 +18,7 @@ use serde_json::Value;
 use vizir_transforms::{AggregateOp, CompareOp, SortOrder, StackOffset};
 
 use crate::{
-    ParsedAggregateField, ParsedChannelDef, ParsedEncodingSet, ParsedFieldKind,
+    ParsedAggregateField, ParsedChannelDef, ParsedEncodingSet, ParsedFacetSpec, ParsedFieldKind,
     ParsedLayerChildSpec, ParsedLayerSpec, ParsedMarkDef, ParsedPredicate, ParsedTransformSpec,
     ParsedUnitSpec, StrokeStyle,
 };
@@ -60,6 +60,13 @@ impl ParsedLayerSpec {
     /// Parses a narrow JSON layer spec into a [`ParsedLayerSpec`].
     pub fn from_json_str(input: &str) -> Result<Self, JsonSpecError> {
         parse_layer_spec_json(input)
+    }
+}
+
+impl ParsedFacetSpec {
+    /// Parses a narrow JSON facet spec into a [`ParsedFacetSpec`].
+    pub fn from_json_str(input: &str) -> Result<Self, JsonSpecError> {
+        parse_facet_spec_json(input)
     }
 }
 
@@ -123,6 +130,32 @@ pub fn parse_layer_spec_json(input: &str) -> Result<ParsedLayerSpec, JsonSpecErr
     Ok(spec)
 }
 
+/// Parses a narrow JSON facet spec into a [`ParsedFacetSpec`].
+pub fn parse_facet_spec_json(input: &str) -> Result<ParsedFacetSpec, JsonSpecError> {
+    let raw: JsonFacetSpec = serde_json::from_str(input)?;
+    if raw.spec.title.is_some() {
+        return Err(JsonSpecError::Invalid(String::from(
+            "facet child specs do not support nested titles in the current parser slice",
+        )));
+    }
+
+    let mut spec = ParsedFacetSpec::new(parse_channel(raw.facet)?, parse_mark(raw.spec.mark)?)
+        .with_size(
+            raw.spec.width.unwrap_or(220.0),
+            raw.spec.height.unwrap_or(120.0),
+        )
+        .with_columns(raw.columns.unwrap_or(2))
+        .with_spacing(raw.spacing.unwrap_or(24.0))
+        .with_encoding(parse_encoding_set(raw.spec.encoding)?);
+    if let Some(title) = raw.title {
+        spec = spec.with_title(title);
+    }
+    for transform in raw.spec.transform {
+        spec = spec.with_transform(parse_transform(transform)?);
+    }
+    Ok(spec)
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct JsonUnitSpec {
@@ -146,6 +179,16 @@ struct JsonLayerSpec {
     transform: Vec<Value>,
     width: Option<f64>,
     height: Option<f64>,
+    title: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JsonFacetSpec {
+    facet: JsonChannel,
+    spec: JsonUnitSpec,
+    columns: Option<usize>,
+    spacing: Option<f64>,
     title: Option<String>,
 }
 
@@ -672,6 +715,37 @@ mod tests {
                 },
             )
             .expect("adapt parsed stacked bar");
+    }
+
+    #[test]
+    fn parses_facet_fixture() {
+        let spec = parse_facet_spec_json(include_str!("../../fixtures/specs/facet_unit_bar.json"))
+            .expect("parse facet spec");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "category",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "value",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "series",
+                column: ColumnId(2),
+            },
+        ]);
+        let _facet = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xA0_300,
+                    derived_table_base: TableId(103),
+                    data: DataRef::Table(TableId(4)),
+                },
+            )
+            .expect("adapt parsed facet");
     }
 
     #[test]
