@@ -153,6 +153,8 @@ struct JsonEncoding {
     color: Option<JsonChannel>,
     size: Option<JsonChannel>,
     shape: Option<JsonChannel>,
+    order: Option<JsonChannel>,
+    detail: Option<JsonChannel>,
     text: Option<JsonChannel>,
 }
 
@@ -310,6 +312,12 @@ fn parse_encoding_set(encoding: JsonEncoding) -> Result<ParsedEncodingSet, JsonS
     }
     if let Some(shape) = encoding.shape {
         out = out.with_shape(parse_channel(shape)?);
+    }
+    if let Some(order) = encoding.order {
+        out = out.with_order(parse_channel(order)?);
+    }
+    if let Some(detail) = encoding.detail {
+        out = out.with_detail(parse_channel(detail)?);
     }
     if let Some(text) = encoding.text {
         out = out.with_text(parse_channel(text)?);
@@ -698,6 +706,43 @@ mod tests {
     }
 
     #[test]
+    fn parses_line_order_detail_fixture() {
+        let spec = parse_unit_spec_json(include_str!(
+            "../../fixtures/specs/unit_line_order_detail.json"
+        ))
+        .expect("parse line order/detail spec");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "y",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "step",
+                column: ColumnId(2),
+            },
+            SchemaField {
+                name: "series",
+                column: ColumnId(3),
+            },
+        ]);
+        let _unit = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xC1_180,
+                    derived_table_base: TableId(305),
+                    data: DataRef::Table(TableId(7)),
+                },
+            )
+            .expect("adapt parsed order/detail spec");
+    }
+
+    #[test]
     fn parses_shared_plot_layer_spec() {
         let spec = parse_layer_spec_json(include_str!("../../fixtures/specs/layer_area_line.json"))
             .expect("parse layer spec");
@@ -753,5 +798,42 @@ mod tests {
                 },
             )
             .expect("adapt parsed bar + text layer");
+    }
+
+    #[test]
+    fn parses_layer_base_child_defaults_fixture() {
+        let spec = parse_layer_spec_json(include_str!(
+            "../../fixtures/specs/layer_base_child_defaults.json"
+        ))
+        .expect("parse base-child defaults layer");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "high",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "low",
+                column: ColumnId(2),
+            },
+            SchemaField {
+                name: "line",
+                column: ColumnId(3),
+            },
+        ]);
+        let _layer = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xC2_100,
+                    derived_table_base: TableId(306),
+                    data: DataRef::Table(TableId(8)),
+                },
+            )
+            .expect("adapt parsed base-child defaults layer");
     }
 }

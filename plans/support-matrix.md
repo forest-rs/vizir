@@ -20,7 +20,7 @@ Status meanings:
 | Area | Status | Notes |
 |---|---|---|
 | Single unit chart | supported | One plot, optional title, x/y axes, optional legend |
-| Shared-plot `layer` spec | partial | Shared data with child-local transforms and encoding overrides; proven for overlays like line + point, area + line, and bar + text |
+| Shared-plot `layer` spec | partial | Shared data with child-local transforms, base-child positional/grouping defaults, and child encoding overrides; proven for overlays like line + point, area + line, and bar + text |
 | Existing input table via `DataRef::Table` | supported | No URL/data loading in authored spec path |
 | Deterministic lowering to `Program + ChartSpec + series plan` | supported | Same seam used by demos/tests |
 | Multi-view composition beyond shared-plot `layer` (`facet`, `repeat`, `concat`) | missing | Not modeled yet |
@@ -49,7 +49,9 @@ Status meanings:
 | `size` | partial | Point-only; quantitative values map into a fixed visual size range |
 | `shape` | partial | Point-only; distinct values map into a fixed symbol palette |
 | `text` | partial | Supported for `text` marks; text-as-annotation on other marks is not lowered yet |
-| `order`, `detail`, `tooltip`, `opacity`, `row`, `column`, etc. | missing | Not modeled in authored seam |
+| `order` | partial | Line/area only; sorts within each rendered series; not yet supported with aggregated `y` |
+| `detail` | partial | Line/area only; categorical split without legend or color encoding |
+| `tooltip`, `opacity`, `row`, `column`, etc. | missing | Not modeled in authored seam |
 
 ### Transforms
 
@@ -67,20 +69,23 @@ Status meanings:
 | Layer | Status | Notes |
 |---|---|---|
 | Rust-authored `UnitSpec` | supported | Primary lowering target |
-| Rust-authored `LayerSpec` | partial | Narrow shared-plot layering with child-local transforms and encoding overrides |
+| Rust-authored `LayerSpec` | partial | Narrow shared-plot layering with child-local transforms, base-child positional/grouping defaults, and child encoding overrides |
 | Name-based `ParsedUnitSpec` adapter | supported | Resolves field names and derived aliases into `ColumnId`s |
-| Name-based `ParsedLayerSpec` adapter | partial | Shared data plus child-local transforms and encoding overrides |
-| Narrow JSON parser behind `json` feature | partial | Supports the current unit slice plus shared-plot `layer` with child-local transforms and encoding overrides |
+| Name-based `ParsedLayerSpec` adapter | partial | Shared data plus child-local transforms, base-child defaults, and child encoding overrides |
+| Narrow JSON parser behind `json` feature | partial | Supports the current unit slice plus shared-plot `layer` with child-local transforms, base-child defaults, and structural `order`/`detail` channels |
 | Full Vega-Lite JSON coverage | missing | Current JSON parser is intentionally narrow |
 
 ## Important fences
 
 - `color` splitting is currently rejected for `bar` and `text`.
 - Shared `layer` currently keeps one shared plot shell. Child-specific transforms and encoding
-  overrides are supported, but the base child still owns the shared x/y domains. Per-child nested
-  unit specs and independent domain resolution are not modeled yet.
-- `aggregate` on `x`, `x2`, `color`, `y2`, and `text` is rejected.
+  overrides are supported, and later children can inherit positional/grouping defaults from the
+  base child, but the base child still owns the shared x/y domains. Per-child nested unit specs
+  and independent domain resolution are not modeled yet.
+- `aggregate` on `x`, `x2`, `color`, `y2`, `order`, `detail`, and `text` is rejected.
 - `x2`/`y2` are currently only supported on `area`.
+- `order` and `detail` are currently line/area-only, `detail` must be categorical, and
+  `color + detail` is rejected.
 - `text` currently formats numeric columns only; string-backed table data is not in the runtime yet.
 - The JSON/parser path is feature-gated and should stay narrower than the runtime until support is
   proven.

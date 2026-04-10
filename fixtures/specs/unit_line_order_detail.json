@@ -1,0 +1,10 @@
+{
+  "title": "Ordered Detailed Line",
+  "mark": "line",
+  "encoding": {
+    "x": { "field": "x", "type": "quantitative" },
+    "y": { "field": "y", "type": "quantitative" },
+    "order": { "field": "step", "type": "quantitative" },
+    "detail": { "field": "series", "type": "nominal" }
+  }
+}

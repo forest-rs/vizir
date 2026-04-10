@@ -195,6 +195,8 @@ pub struct ParsedEncodingSet {
     color: Option<ParsedChannelDef>,
     size: Option<ParsedChannelDef>,
     shape: Option<ParsedChannelDef>,
+    order: Option<ParsedChannelDef>,
+    detail: Option<ParsedChannelDef>,
     text: Option<ParsedChannelDef>,
 }
 
@@ -243,6 +245,18 @@ impl ParsedEncodingSet {
     /// Sets the shape channel.
     pub fn with_shape(mut self, shape: ParsedChannelDef) -> Self {
         self.shape = Some(shape);
+        self
+    }
+
+    /// Sets the order channel.
+    pub fn with_order(mut self, order: ParsedChannelDef) -> Self {
+        self.order = Some(order);
+        self
+    }
+
+    /// Sets the detail channel.
+    pub fn with_detail(mut self, detail: ParsedChannelDef) -> Self {
+        self.detail = Some(detail);
         self
     }
 
@@ -510,6 +524,18 @@ impl ParsedUnitSpec {
         self
     }
 
+    /// Sets the order channel.
+    pub fn with_order(mut self, order: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_order(order);
+        self
+    }
+
+    /// Sets the detail channel.
+    pub fn with_detail(mut self, detail: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_detail(detail);
+        self
+    }
+
     /// Sets the text channel.
     pub fn with_text(mut self, text: ParsedChannelDef) -> Self {
         self.encoding = self.encoding.with_text(text);
@@ -565,6 +591,12 @@ impl ParsedUnitSpec {
         }
         if let Some(shape) = &self.encoding.shape {
             unit = unit.with_shape(adapt_channel(shape, "shape", &mut fields)?);
+        }
+        if let Some(order) = &self.encoding.order {
+            unit = unit.with_order(adapt_channel(order, "order", &mut fields)?);
+        }
+        if let Some(detail) = &self.encoding.detail {
+            unit = unit.with_detail(adapt_channel(detail, "detail", &mut fields)?);
         }
         if let Some(text) = &self.encoding.text {
             unit = unit.with_text(adapt_channel(text, "text", &mut fields)?);
@@ -643,6 +675,18 @@ impl ParsedLayerChildSpec {
     /// Sets the child shape override.
     pub fn with_shape(mut self, shape: ParsedChannelDef) -> Self {
         self.encoding = self.encoding.with_shape(shape);
+        self
+    }
+
+    /// Sets the child order override.
+    pub fn with_order(mut self, order: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_order(order);
+        self
+    }
+
+    /// Sets the child detail override.
+    pub fn with_detail(mut self, detail: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_detail(detail);
         self
     }
 
@@ -732,6 +776,18 @@ impl ParsedLayerSpec {
         self
     }
 
+    /// Sets the order channel.
+    pub fn with_order(mut self, order: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_order(order);
+        self
+    }
+
+    /// Sets the detail channel.
+    pub fn with_detail(mut self, detail: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_detail(detail);
+        self
+    }
+
     /// Sets the text channel.
     pub fn with_text(mut self, text: ParsedChannelDef) -> Self {
         self.encoding = self.encoding.with_text(text);
@@ -793,6 +849,12 @@ impl ParsedLayerSpec {
         }
         if let Some(shape) = &self.encoding.shape {
             layer = layer.with_shape(adapt_channel(shape, "shape", &mut fields)?);
+        }
+        if let Some(order) = &self.encoding.order {
+            layer = layer.with_order(adapt_channel(order, "order", &mut fields)?);
+        }
+        if let Some(detail) = &self.encoding.detail {
+            layer = layer.with_detail(adapt_channel(detail, "detail", &mut fields)?);
         }
         if let Some(text) = &self.encoding.text {
             layer = layer.with_text(adapt_channel(text, "text", &mut fields)?);
@@ -878,6 +940,12 @@ fn adapt_layer_child(
     }
     if let Some(shape) = &child.encoding.shape {
         out = out.with_shape(adapt_channel(shape, "layer child shape", &mut fields)?);
+    }
+    if let Some(order) = &child.encoding.order {
+        out = out.with_order(adapt_channel(order, "layer child order", &mut fields)?);
+    }
+    if let Some(detail) = &child.encoding.detail {
+        out = out.with_detail(adapt_channel(detail, "layer child detail", &mut fields)?);
     }
     if let Some(text) = &child.encoding.text {
         out = out.with_text(adapt_channel(text, "layer child text", &mut fields)?);
@@ -1482,5 +1550,109 @@ mod tests {
             .get(&lowered.derived_tables()[0])
             .expect("filtered child table");
         assert_eq!(filtered.row_keys, vec![31, 32]);
+    }
+
+    #[test]
+    fn parsed_line_order_detail_adapts_and_lowers() {
+        let parsed = ParsedUnitSpec::new(ParsedMarkDef::Line)
+            .with_x(ParsedChannelDef::quantitative("x"))
+            .with_y(ParsedChannelDef::quantitative("y"))
+            .with_order(ParsedChannelDef::quantitative("step"))
+            .with_detail(ParsedChannelDef::nominal("series"));
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "y",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "step",
+                column: ColumnId(2),
+            },
+            SchemaField {
+                name: "series",
+                column: ColumnId(3),
+            },
+        ]);
+
+        let mut scene = Scene::new();
+        let table_id = TableId(73);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![40, 41, 42, 43];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0, 0.0, 1.0],
+            b: vec![10.0, 20.0, 30.0, 40.0],
+            c: vec![2.0, 1.0, 2.0, 1.0],
+            d: vec![0.0, 0.0, 1.0, 1.0],
+        }));
+        scene.insert_table(table);
+
+        let unit = parsed
+            .adapt(&resolver, context(table_id))
+            .expect("adapt ordered detailed line");
+        let lowered = unit.lower(&scene).expect("lower ordered detailed line");
+        assert_eq!(lowered.derived_tables().len(), 2);
+    }
+
+    #[test]
+    fn parsed_layer_children_inherit_base_child_defaults() {
+        let parsed = ParsedLayerSpec::new()
+            .with_child(
+                ParsedLayerChildSpec::new(ParsedMarkDef::Area)
+                    .with_x(ParsedChannelDef::quantitative("x"))
+                    .with_y(ParsedChannelDef::quantitative("high"))
+                    .with_y2(ParsedChannelDef::quantitative("low")),
+            )
+            .with_child(
+                ParsedLayerChildSpec::new(ParsedMarkDef::Line)
+                    .with_y(ParsedChannelDef::quantitative("line")),
+            );
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "high",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "low",
+                column: ColumnId(2),
+            },
+            SchemaField {
+                name: "line",
+                column: ColumnId(3),
+            },
+        ]);
+
+        let mut scene = Scene::new();
+        let table_id = TableId(74);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![50, 51, 52];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![4.0, 5.0, 6.0],
+            c: vec![1.0, 2.0, 3.0],
+            d: vec![2.0, 3.0, 4.0],
+        }));
+        scene.insert_table(table);
+
+        let layer = parsed
+            .adapt(&resolver, context(table_id))
+            .expect("adapt base-child defaults");
+        let lowered = layer.lower(&scene).expect("lower base-child defaults");
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let y_scale = lowered
+            .chart()
+            .y_scale_continuous(layout.data)
+            .expect("y scale");
+        assert_eq!(y_scale.domain_min(), 1.0);
+        assert_eq!(y_scale.domain_max(), 6.0);
     }
 }

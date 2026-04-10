@@ -1,0 +1,19 @@
+{
+  "title": "Base Child Defaults",
+  "layer": [
+    {
+      "mark": "area",
+      "encoding": {
+        "x": { "field": "x", "type": "quantitative" },
+        "y": { "field": "high", "type": "quantitative" },
+        "y2": { "field": "low", "type": "quantitative" }
+      }
+    },
+    {
+      "mark": "line",
+      "encoding": {
+        "y": { "field": "line", "type": "quantitative" }
+      }
+    }
+  ]
+}

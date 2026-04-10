@@ -6,13 +6,16 @@ Fence:
 
 Current state:
 - Unit specs lower through a real authored seam.
-- Shared-plot layering exists with child encoding overrides.
-- The parser-facing adapter and feature-gated JSON path target the same seam.
+- Shared-plot layering exists with child-local transforms, base-child positional/grouping defaults,
+  and child encoding overrides.
+- Structural `order` and `detail` channels lower for line/area marks.
+- The parser-facing adapter and feature-gated JSON path target the same seam through checked-in
+  fixtures.
 
 Goals:
-- Add child-local transforms for narrow shared-plot layering.
-- Add one more useful authored mark slice without forcing new runtime storage semantics.
-- Move JSON coverage from inline examples toward checked-in fixtures.
+- Add calmer diagnostics and conflict coverage for layered specs.
+- Decide the next useful structural channel or composition slice without widening domain semantics.
+- Keep fixture-driven JSON coverage aligned with the support matrix.
 
 Non-goals:
 - Full nested unit specs inside `layer`.
@@ -20,23 +23,21 @@ Non-goals:
 - Generic string-valued table columns in `vizir_core`.
 
 Planned slices:
-1. Child-local layer transforms
+1. Layered diagnostics + conflict tests
    - Keep shared data and shared plot guides.
-   - Let each child append its own transform chain after shared transforms.
-   - Keep the base child responsible for the chart shell and current domain policy.
-2. Authored point richness + text mark slice
-   - Add point-local `size` and `shape` channels through the same seam.
-   - Keep `shape` as a small fixed symbol palette rather than an open-ended marker language.
-   - Add `text` as an authored mark kind.
-   - Lower numeric text fields via formatting from existing numeric table access.
-   - Keep string-backed text out of scope until runtime storage grows.
-3. Fixture-driven JSON coverage
-   - Add small checked-in JSON fixtures for supported unit/layer shapes.
+   - Make fences like `color + detail`, aggregated `order`, and base-child domain ownership
+     explicit in tests and docs.
+2. Next structural channel/composition decision
+   - Either broaden structural channels (`opacity`, `detail`-adjacent grouping rules) or take the
+     next composition step toward nested child units.
+   - Do not blur the current shared-domain fence accidentally.
+3. Fixture-driven expansion
+   - Add new checked-in JSON fixtures only for slices that are fully tested and documented.
    - Reuse fixtures from tests and the demo where practical.
 
 Main risks:
-- Child-local transforms can make layering look more general than the domain policy really is.
-- Text marks can imply broader string support than the runtime currently provides.
+- Base-child inheritance can make layering look more general than the domain policy really is.
+- Structural channels can imply broader Vega-Lite parity than the current seam actually supports.
 - JSON fixtures can drift unless the support matrix stays current.
 
 Acceptance bar:

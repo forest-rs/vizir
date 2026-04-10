@@ -98,7 +98,7 @@ This keeps the public API calm while still forcing the architectural seam to exi
 
 Current supported view shapes:
 - one unit chart
-- one narrow shared-plot layer with shared data, child-local transforms, and child encoding overrides
+- one narrow shared-plot layer with shared data, child-local transforms, base-child positional/grouping defaults, and child encoding overrides
 - optional title
 - optional x/y axes
 - optional color legend

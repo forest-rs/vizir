@@ -11,7 +11,7 @@
 //! - one input table already present in a [`vizir_core::Scene`],
 //! - a small transform subset,
 //! - `bar`, `line`, `point`, `area`, and `text` marks,
-//! - `x`, `x2`, `y`, `y2`, `color`, `size`, `shape`, and `text` channels,
+//! - `x`, `x2`, `y`, `y2`, `color`, `size`, `shape`, `order`, `detail`, and `text` channels,
 //! - optional chart titles.
 //!
 //! It is not a JSON parser and not a full Vega/Vega-Lite implementation.
@@ -169,6 +169,8 @@ pub struct EncodingSet {
     color: Option<ChannelDef>,
     size: Option<ChannelDef>,
     shape: Option<ChannelDef>,
+    order: Option<ChannelDef>,
+    detail: Option<ChannelDef>,
     text: Option<ChannelDef>,
 }
 
@@ -220,6 +222,18 @@ impl EncodingSet {
         self
     }
 
+    /// Sets the order channel.
+    pub fn with_order(mut self, order: ChannelDef) -> Self {
+        self.order = Some(order);
+        self
+    }
+
+    /// Sets the detail channel.
+    pub fn with_detail(mut self, detail: ChannelDef) -> Self {
+        self.detail = Some(detail);
+        self
+    }
+
     /// Sets the text channel.
     pub fn with_text(mut self, text: ChannelDef) -> Self {
         self.text = Some(text);
@@ -252,6 +266,14 @@ impl EncodingSet {
 
     fn shape(&self) -> Option<&ChannelDef> {
         self.shape.as_ref()
+    }
+
+    fn order(&self) -> Option<&ChannelDef> {
+        self.order.as_ref()
+    }
+
+    fn detail(&self) -> Option<&ChannelDef> {
+        self.detail.as_ref()
     }
 
     fn text(&self) -> Option<&ChannelDef> {
@@ -458,6 +480,18 @@ impl UnitSpec {
         self
     }
 
+    /// Sets the order channel.
+    pub fn with_order(mut self, order: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_order(order);
+        self
+    }
+
+    /// Sets the detail channel.
+    pub fn with_detail(mut self, detail: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_detail(detail);
+        self
+    }
+
     /// Sets the text channel.
     pub fn with_text(mut self, text: ChannelDef) -> Self {
         self.encoding = self.encoding.with_text(text);
@@ -488,6 +522,8 @@ impl UnitSpec {
         let color = self.encoding.color();
         let size = self.encoding.size();
         let shape = self.encoding.shape();
+        let order = self.encoding.order();
+        let detail = self.encoding.detail();
         let text = self.encoding.text();
         if self.mark != MarkDef::Text && text.is_some() {
             return Err(LoweringError::Unsupported(
@@ -553,6 +589,20 @@ impl UnitSpec {
                 "aggregate on the shape channel is not supported in the experimental lowering slice",
             ));
         }
+        if let Some(order) = order
+            && order.aggregate().is_some()
+        {
+            return Err(LoweringError::Unsupported(
+                "aggregate on the order channel is not supported in the experimental lowering slice",
+            ));
+        }
+        if let Some(detail) = detail
+            && detail.aggregate().is_some()
+        {
+            return Err(LoweringError::Unsupported(
+                "aggregate on the detail channel is not supported in the experimental lowering slice",
+            ));
+        }
         if color.is_some() && self.mark == MarkDef::Bar {
             return Err(LoweringError::Unsupported(
                 "categorical color splitting is not supported for bar marks yet",
@@ -590,6 +640,33 @@ impl UnitSpec {
         {
             return Err(LoweringError::Unsupported(
                 "point shape does not support temporal channels in the experimental lowering slice",
+            ));
+        }
+        if let Some(detail) = detail
+            && !matches!(detail.kind(), FieldKind::Ordinal | FieldKind::Nominal)
+        {
+            return Err(LoweringError::Unsupported(
+                "detail currently requires an ordinal or nominal channel",
+            ));
+        }
+        if color.is_some() && detail.is_some() {
+            return Err(LoweringError::Unsupported(
+                "color and detail cannot be combined in the current lowering slice",
+            ));
+        }
+        if order.is_some() && !matches!(self.mark, MarkDef::Line | MarkDef::Area) {
+            return Err(LoweringError::Unsupported(
+                "order is currently only supported for line and area marks",
+            ));
+        }
+        if detail.is_some() && !matches!(self.mark, MarkDef::Line | MarkDef::Area) {
+            return Err(LoweringError::Unsupported(
+                "detail is currently only supported for line and area marks",
+            ));
+        }
+        if y.aggregate().is_some() && order.is_some() {
+            return Err(LoweringError::Unsupported(
+                "order is not yet supported with aggregated y channels",
             ));
         }
 
@@ -647,6 +724,9 @@ impl UnitSpec {
             if let Some(color) = color {
                 push_unique_col(&mut group_by, color.field());
             }
+            if let Some(detail) = detail {
+                push_unique_col(&mut group_by, detail.field());
+            }
             base_program.push(Transform::Aggregate {
                 input: current_table,
                 output,
@@ -667,7 +747,18 @@ impl UnitSpec {
             &base_program,
             input_table,
             current_table,
-            required_columns(x, x2, lowered_y_field, y2, color, size, shape, text),
+            required_columns(
+                x,
+                x2,
+                lowered_y_field,
+                y2,
+                color,
+                size,
+                shape,
+                order,
+                detail,
+                text,
+            ),
         )?;
 
         let point_size_domain = size
@@ -683,6 +774,7 @@ impl UnitSpec {
             Some(base_program)
         };
 
+        let sort_col = order.map_or_else(|| x.field(), ChannelDef::field);
         let mut series_layers = Vec::new();
         let mut legend_items = Vec::new();
         if let Some(color) = color {
@@ -717,6 +809,8 @@ impl UnitSpec {
                         Some(color),
                         size,
                         shape,
+                        order,
+                        None,
                         text,
                     ),
                 });
@@ -724,7 +818,7 @@ impl UnitSpec {
                     p.push(Transform::Sort {
                         input: output,
                         output,
-                        by: x.field(),
+                        by: sort_col,
                         order: SortOrder::Asc,
                         columns: series_columns(
                             x,
@@ -734,6 +828,8 @@ impl UnitSpec {
                             None,
                             size,
                             shape,
+                            order,
+                            None,
                             text,
                         ),
                     });
@@ -792,7 +888,104 @@ impl UnitSpec {
                     }),
                 });
             }
+        } else if let Some(detail) = detail {
+            let series_values = distinct_values(&preview_frame, detail.field());
+            if series_values.is_empty() {
+                return Err(LoweringError::Unsupported(
+                    "detail lowering requires at least one finite series value",
+                ));
+            }
+            let p = program.get_or_insert_with(Program::new);
+            for (index, value) in series_values.iter().copied().enumerate() {
+                let output = alloc_table(&mut next_table);
+                p.push(Transform::Filter {
+                    input: current_table,
+                    output,
+                    predicate: Predicate {
+                        col: detail.field(),
+                        op: vizir_transforms::CompareOp::Eq,
+                        value,
+                    },
+                    columns: series_columns(
+                        x,
+                        x2,
+                        lowered_y_field,
+                        y2,
+                        None,
+                        size,
+                        shape,
+                        order,
+                        Some(detail),
+                        text,
+                    ),
+                });
+                p.push(Transform::Sort {
+                    input: output,
+                    output,
+                    by: sort_col,
+                    order: SortOrder::Asc,
+                    columns: series_columns(
+                        x,
+                        x2,
+                        lowered_y_field,
+                        y2,
+                        None,
+                        size,
+                        shape,
+                        order,
+                        None,
+                        text,
+                    ),
+                });
+                derived_tables.push(output);
+                series_layers.push(match self.mark {
+                    MarkDef::Line => SeriesLayer::Line(LineLayer {
+                        id: MarkId::from_raw(self.id_base.wrapping_add(0x1_000 + index as u64)),
+                        table: output,
+                        x: x.field(),
+                        y: lowered_y_field,
+                        stroke: StrokeStyle::solid(css::BLACK, 2.0),
+                    }),
+                    MarkDef::Area => SeriesLayer::Area(AreaLayer {
+                        id: MarkId::from_raw(self.id_base.wrapping_add(0x1_000 + index as u64)),
+                        table: output,
+                        x: x.field(),
+                        x2: x2.map(ChannelDef::field),
+                        y: lowered_y_field,
+                        y2: y2.map(ChannelDef::field),
+                        baseline: 0.0,
+                        fill: Brush::Solid(css::CORNFLOWER_BLUE),
+                    }),
+                    MarkDef::Bar | MarkDef::Point | MarkDef::Text => {
+                        unreachable!("detail is validated for line/area marks only")
+                    }
+                });
+            }
         } else {
+            if matches!(self.mark, MarkDef::Line | MarkDef::Area) && order.is_some() {
+                let output = alloc_table(&mut next_table);
+                let p = program.get_or_insert_with(Program::new);
+                p.push(Transform::Sort {
+                    input: current_table,
+                    output,
+                    by: sort_col,
+                    order: SortOrder::Asc,
+                    columns: series_columns(
+                        x,
+                        x2,
+                        lowered_y_field,
+                        y2,
+                        None,
+                        size,
+                        shape,
+                        order,
+                        None,
+                        text,
+                    ),
+                });
+                derived_tables.push(output);
+                current_table = output;
+            }
             series_layers.push(match self.mark {
                 MarkDef::Bar => SeriesLayer::Bar(BarLayer {
                     id_base: self.id_base.wrapping_add(0x1_000),
@@ -952,6 +1145,18 @@ impl LayerChildSpec {
         self
     }
 
+    /// Sets the child order override.
+    pub fn with_order(mut self, order: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_order(order);
+        self
+    }
+
+    /// Sets the child detail override.
+    pub fn with_detail(mut self, detail: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_detail(detail);
+        self
+    }
+
     /// Sets the child text override.
     pub fn with_text(mut self, text: ChannelDef) -> Self {
         self.encoding = self.encoding.with_text(text);
@@ -1058,6 +1263,18 @@ impl LayerSpec {
         self
     }
 
+    /// Sets the order channel.
+    pub fn with_order(mut self, order: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_order(order);
+        self
+    }
+
+    /// Sets the detail channel.
+    pub fn with_detail(mut self, detail: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_detail(detail);
+        self
+    }
+
     /// Sets the text channel.
     pub fn with_text(mut self, text: ChannelDef) -> Self {
         self.encoding = self.encoding.with_text(text);
@@ -1104,8 +1321,16 @@ impl LayerSpec {
         }
 
         let base_index = base_layer_mark_index(&self.children);
-        let base_unit = self.layer_child_unit(base_index);
+        let base_unit = self.layer_child_unit(base_index, None);
         let base_lowered = base_unit.lower(scene)?;
+        let base_defaults = inherited_layer_encoding_defaults(
+            &self.encoding,
+            &merge_layer_encoding(
+                &self.encoding,
+                &self.children[base_index].encoding,
+                self.children[base_index].mark(),
+            ),
+        );
 
         let mut series_layers = base_lowered.series_layers.clone();
         let mut derived_tables = base_lowered.derived_tables.clone();
@@ -1114,7 +1339,7 @@ impl LayerSpec {
             if index == base_index {
                 continue;
             }
-            let child = self.layer_child_unit(index);
+            let child = self.layer_child_unit(index, Some(&base_defaults));
             let lowered = child.lower(scene)?;
             series_layers.extend(lowered.series_layers);
             extend_unique_tables(&mut derived_tables, &lowered.derived_tables);
@@ -1138,7 +1363,7 @@ impl LayerSpec {
         Ok(lowered)
     }
 
-    fn layer_child_unit(&self, index: usize) -> UnitSpec {
+    fn layer_child_unit(&self, index: usize, inherited_defaults: Option<&EncodingSet>) -> UnitSpec {
         let child = &self.children[index];
         UnitSpec {
             id_base: child_layer_id_base(self.id_base, index),
@@ -1146,7 +1371,11 @@ impl LayerSpec {
             data: self.data,
             transforms: layer_child_transforms(&self.transforms, &child.transforms),
             mark: child.mark(),
-            encoding: merge_layer_encoding(&self.encoding, &child.encoding, child.mark()),
+            encoding: merge_layer_encoding(
+                inherited_defaults.unwrap_or(&self.encoding),
+                &child.encoding,
+                child.mark(),
+            ),
             width: self.width,
             height: self.height,
             title: self.title.clone(),
@@ -2021,6 +2250,8 @@ fn required_columns(
     color: Option<&ChannelDef>,
     size: Option<&ChannelDef>,
     shape: Option<&ChannelDef>,
+    order: Option<&ChannelDef>,
+    detail: Option<&ChannelDef>,
     text: Option<&ChannelDef>,
 ) -> Vec<ColumnId> {
     let mut out = vec![x.field(), y_field];
@@ -2038,6 +2269,12 @@ fn required_columns(
     }
     if let Some(shape) = shape {
         push_unique_col(&mut out, shape.field());
+    }
+    if let Some(order) = order {
+        push_unique_col(&mut out, order.field());
+    }
+    if let Some(detail) = detail {
+        push_unique_col(&mut out, detail.field());
     }
     if let Some(text) = text {
         push_unique_col(&mut out, text.field());
@@ -2083,9 +2320,11 @@ fn series_columns(
     color: Option<&ChannelDef>,
     size: Option<&ChannelDef>,
     shape: Option<&ChannelDef>,
+    order: Option<&ChannelDef>,
+    detail: Option<&ChannelDef>,
     text: Option<&ChannelDef>,
 ) -> Vec<ColumnId> {
-    required_columns(x, x2, y_field, y2, color, size, shape, text)
+    required_columns(x, x2, y_field, y2, color, size, shape, order, detail, text)
 }
 
 fn expand_domain((min, max): (f64, f64)) -> (f64, f64) {
@@ -2236,11 +2475,42 @@ fn merge_layer_encoding(
         color: overrides.color.clone().or_else(|| shared.color.clone()),
         size: overrides.size.clone().or_else(|| shared.size.clone()),
         shape: overrides.shape.clone().or_else(|| shared.shape.clone()),
+        order: overrides.order.clone().or_else(|| shared.order.clone()),
+        detail: overrides.detail.clone().or_else(|| shared.detail.clone()),
         text: overrides.text.clone().or_else(|| shared.text.clone()),
     };
     if mark != MarkDef::Area {
         out.x2 = None;
         out.y2 = None;
+    }
+    out
+}
+
+fn inherited_layer_encoding_defaults(
+    shared: &EncodingSet,
+    base_child: &EncodingSet,
+) -> EncodingSet {
+    let mut out = shared.clone();
+    if out.x.is_none() {
+        out.x = base_child.x.clone();
+    }
+    if out.x2.is_none() {
+        out.x2 = base_child.x2.clone();
+    }
+    if out.y.is_none() {
+        out.y = base_child.y.clone();
+    }
+    if out.y2.is_none() {
+        out.y2 = base_child.y2.clone();
+    }
+    if out.color.is_none() {
+        out.color = base_child.color.clone();
+    }
+    if out.order.is_none() {
+        out.order = base_child.order.clone();
+    }
+    if out.detail.is_none() {
+        out.detail = base_child.detail.clone();
     }
     out
 }
@@ -2317,6 +2587,18 @@ fn next_derived_col(spec: &UnitSpec) -> u32 {
     }
     if let Some(color) = spec.encoding.color() {
         max_col = max_col.max(color.field().0);
+    }
+    if let Some(size) = spec.encoding.size() {
+        max_col = max_col.max(size.field().0);
+    }
+    if let Some(shape) = spec.encoding.shape() {
+        max_col = max_col.max(shape.field().0);
+    }
+    if let Some(order) = spec.encoding.order() {
+        max_col = max_col.max(order.field().0);
+    }
+    if let Some(detail) = spec.encoding.detail() {
+        max_col = max_col.max(detail.field().0);
     }
     if let Some(text) = spec.encoding.text() {
         max_col = max_col.max(text.field().0);
@@ -2834,6 +3116,55 @@ mod tests {
     }
 
     #[test]
+    fn line_detail_lowering_splits_series_and_sorts_by_order() {
+        let mut scene = Scene::new();
+        let table_id = TableId(75);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![900, 901, 902, 903];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0, 0.0, 1.0],
+            b: vec![10.0, 20.0, 30.0, 40.0],
+            c: vec![2.0, 1.0, 2.0, 1.0],
+            d: vec![0.0, 0.0, 1.0, 1.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xF080,
+            TableId(750),
+            DataRef::Table(table_id),
+            MarkDef::Line,
+        )
+        .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+        .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("y"))
+        .with_order(ChannelDef::quantitative(ColumnId(2)).with_title("step"))
+        .with_detail(ChannelDef::nominal(ColumnId(3)).with_title("series"));
+
+        let lowered = spec.lower(&scene).expect("lower ordered detailed line");
+        assert_eq!(lowered.derived_tables().len(), 2);
+
+        lowered
+            .apply_to_scene(&mut scene)
+            .expect("apply ordered detailed line");
+        let first = scene
+            .tables
+            .get(&lowered.derived_tables()[0])
+            .expect("first detailed series");
+        let second = scene
+            .tables
+            .get(&lowered.derived_tables()[1])
+            .expect("second detailed series");
+        assert_eq!(first.row_keys, vec![901, 900]);
+        assert_eq!(second.row_keys, vec![903, 902]);
+
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let marks = lowered
+            .series_marks(&scene, layout.data)
+            .expect("ordered detailed marks");
+        assert_eq!(marks.len(), 2);
+    }
+
+    #[test]
     fn layer_lowering_combines_line_and_point_marks() {
         let mut scene = Scene::new();
         let table_id = TableId(80);
@@ -3009,6 +3340,75 @@ mod tests {
             .expect("y scale");
         assert_eq!(y_scale.domain_min(), 1.0);
         assert_eq!(y_scale.domain_max(), 5.0);
+    }
+
+    #[test]
+    fn layer_children_inherit_base_child_positional_defaults() {
+        let mut scene = Scene::new();
+        let table_id = TableId(85);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![850, 851, 852];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![4.0, 5.0, 6.0],
+            c: vec![1.0, 2.0, 3.0],
+            d: vec![2.0, 3.0, 4.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = LayerSpec::new(0xF1D0, TableId(850), DataRef::Table(table_id))
+            .with_child(
+                LayerChildSpec::new(MarkDef::Area)
+                    .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+                    .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("high"))
+                    .with_y2(ChannelDef::quantitative(ColumnId(2)).with_title("low")),
+            )
+            .with_child(
+                LayerChildSpec::new(MarkDef::Line)
+                    .with_y(ChannelDef::quantitative(ColumnId(3)).with_title("line")),
+            );
+
+        let lowered = spec
+            .lower(&scene)
+            .expect("lower layer with base-child defaults");
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let marks = lowered
+            .series_marks(&scene, layout.data)
+            .expect("layer marks");
+        assert_eq!(marks.len(), 2);
+    }
+
+    #[test]
+    fn unit_lowering_rejects_color_and_detail_together() {
+        let mut scene = Scene::new();
+        let table_id = TableId(86);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![860, 861];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0],
+            b: vec![3.0, 4.0],
+            c: vec![0.0, 1.0],
+            d: vec![0.0, 1.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xF1E0,
+            TableId(860),
+            DataRef::Table(table_id),
+            MarkDef::Line,
+        )
+        .with_x(ChannelDef::quantitative(ColumnId(0)))
+        .with_y(ChannelDef::quantitative(ColumnId(1)))
+        .with_color(ChannelDef::nominal(ColumnId(2)))
+        .with_detail(ChannelDef::nominal(ColumnId(3)));
+
+        let err = spec.lower(&scene).expect_err("color + detail should fail");
+        assert!(matches!(
+            err,
+            LoweringError::Unsupported(message)
+                if message.contains("color and detail")
+        ));
     }
 
     #[test]
