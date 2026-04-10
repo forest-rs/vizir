@@ -12,6 +12,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use peniko::{Brush, Color};
 use serde::Deserialize;
 use serde_json::Value;
 use vizir_transforms::{AggregateOp, CompareOp, SortOrder, StackOffset};
@@ -19,7 +20,7 @@ use vizir_transforms::{AggregateOp, CompareOp, SortOrder, StackOffset};
 use crate::{
     ParsedAggregateField, ParsedChannelDef, ParsedEncodingSet, ParsedFieldKind,
     ParsedLayerChildSpec, ParsedLayerSpec, ParsedMarkDef, ParsedPredicate, ParsedTransformSpec,
-    ParsedUnitSpec,
+    ParsedUnitSpec, StrokeStyle,
 };
 
 /// Errors returned while parsing a narrow JSON unit spec.
@@ -102,6 +103,20 @@ pub fn parse_layer_spec_json(input: &str) -> Result<ParsedLayerSpec, JsonSpecErr
         for transform in layer.transform {
             child = child.with_transform(parse_transform(transform)?);
         }
+        if let Some(style) = layer.style {
+            if let Some(fill) = style.fill {
+                child = child.with_fill_style(parse_brush(&fill)?);
+            }
+            if let Some(stroke) = style.stroke {
+                child = child.with_stroke_style(StrokeStyle::solid(
+                    parse_color(&stroke)?,
+                    style.stroke_width.unwrap_or(1.0),
+                ));
+            }
+            if let Some(opacity) = style.opacity {
+                child = child.with_opacity_value(opacity);
+            }
+        }
         spec = spec.with_child(child);
     }
 
@@ -141,6 +156,17 @@ struct JsonLayerEntry {
     #[serde(default)]
     transform: Vec<Value>,
     encoding: Option<JsonEncoding>,
+    style: Option<JsonLayerStyle>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JsonLayerStyle {
+    fill: Option<String>,
+    stroke: Option<String>,
+    #[serde(rename = "strokeWidth")]
+    stroke_width: Option<f64>,
+    opacity: Option<f64>,
 }
 
 #[derive(Default, Deserialize)]
@@ -434,6 +460,46 @@ fn parse_transform(value: Value) -> Result<ParsedTransformSpec, JsonSpecError> {
     Err(JsonSpecError::Invalid(String::from(
         "unsupported transform object",
     )))
+}
+
+fn parse_brush(raw: &str) -> Result<Brush, JsonSpecError> {
+    Ok(Brush::Solid(parse_color(raw)?))
+}
+
+fn parse_color(raw: &str) -> Result<Color, JsonSpecError> {
+    let raw = raw.strip_prefix('#').ok_or_else(|| {
+        JsonSpecError::Invalid(format!(
+            "literal style colors currently require #RRGGBB or #RRGGBBAA hex strings, got {raw}"
+        ))
+    })?;
+    let bytes = match raw.len() {
+        6 => {
+            let r = u8::from_str_radix(&raw[0..2], 16)
+                .map_err(|_| JsonSpecError::Invalid(format!("invalid hex color #{raw}")))?;
+            let g = u8::from_str_radix(&raw[2..4], 16)
+                .map_err(|_| JsonSpecError::Invalid(format!("invalid hex color #{raw}")))?;
+            let b = u8::from_str_radix(&raw[4..6], 16)
+                .map_err(|_| JsonSpecError::Invalid(format!("invalid hex color #{raw}")))?;
+            [r, g, b, 255]
+        }
+        8 => {
+            let r = u8::from_str_radix(&raw[0..2], 16)
+                .map_err(|_| JsonSpecError::Invalid(format!("invalid hex color #{raw}")))?;
+            let g = u8::from_str_radix(&raw[2..4], 16)
+                .map_err(|_| JsonSpecError::Invalid(format!("invalid hex color #{raw}")))?;
+            let b = u8::from_str_radix(&raw[4..6], 16)
+                .map_err(|_| JsonSpecError::Invalid(format!("invalid hex color #{raw}")))?;
+            let a = u8::from_str_radix(&raw[6..8], 16)
+                .map_err(|_| JsonSpecError::Invalid(format!("invalid hex color #{raw}")))?;
+            [r, g, b, a]
+        }
+        _ => {
+            return Err(JsonSpecError::Invalid(format!(
+                "literal style colors currently require #RRGGBB or #RRGGBBAA hex strings, got #{raw}"
+            )));
+        }
+    };
+    Ok(Color::from_rgba8(bytes[0], bytes[1], bytes[2], bytes[3]))
 }
 
 fn parse_field_kind(kind: &str) -> Result<ParsedFieldKind, JsonSpecError> {
@@ -917,5 +983,41 @@ mod tests {
                 },
             )
             .expect("adapt parsed base-child defaults layer");
+    }
+
+    #[test]
+    fn parses_nested_child_units_fixture() {
+        let spec =
+            parse_layer_spec_json(include_str!("../../fixtures/specs/layer_nested_units.json"))
+                .expect("parse nested child units layer");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "high",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "low",
+                column: ColumnId(2),
+            },
+            SchemaField {
+                name: "line",
+                column: ColumnId(3),
+            },
+        ]);
+        let _layer = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xC2_200,
+                    derived_table_base: TableId(307),
+                    data: DataRef::Table(TableId(9)),
+                },
+            )
+            .expect("adapt parsed nested child units layer");
     }
 }

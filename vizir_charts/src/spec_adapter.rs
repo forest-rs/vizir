@@ -12,11 +12,13 @@ extern crate alloc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use peniko::Brush;
 use vizir_core::{ColumnId, TableId};
 use vizir_transforms::{AggregateField, AggregateOp, CompareOp, Predicate, SortOrder, StackOffset};
 
 use crate::{
-    ChannelDef, DataRef, FieldKind, LayerChildSpec, LayerSpec, MarkDef, TransformSpec, UnitSpec,
+    ChannelDef, DataRef, FieldKind, LayerChildSpec, LayerSpec, MarkDef, StrokeStyle, TransformSpec,
+    UnitSpec,
 };
 
 /// Context needed to adapt a parsed unit spec into a concrete [`UnitSpec`].
@@ -656,10 +658,19 @@ impl ParsedUnitSpec {
 
 /// A parsed shared-plot layer spec that still refers to fields by name.
 #[derive(Clone, Debug, PartialEq)]
+struct ParsedLayerChildStyle {
+    fill: Option<Brush>,
+    stroke: Option<StrokeStyle>,
+    opacity: Option<f64>,
+}
+
+/// A parsed shared-plot layer spec that still refers to fields by name.
+#[derive(Clone, Debug, PartialEq)]
 pub struct ParsedLayerChildSpec {
     mark: ParsedMarkDef,
     transforms: Vec<ParsedTransformSpec>,
     encoding: ParsedEncodingSet,
+    style: ParsedLayerChildStyle,
 }
 
 impl ParsedLayerChildSpec {
@@ -669,6 +680,11 @@ impl ParsedLayerChildSpec {
             mark,
             transforms: Vec::new(),
             encoding: ParsedEncodingSet::new(),
+            style: ParsedLayerChildStyle {
+                fill: None,
+                stroke: None,
+                opacity: None,
+            },
         }
     }
 
@@ -759,6 +775,24 @@ impl ParsedLayerChildSpec {
     /// Sets the child text override.
     pub fn with_text(mut self, text: ParsedChannelDef) -> Self {
         self.encoding = self.encoding.with_text(text);
+        self
+    }
+
+    /// Sets a constant child fill style.
+    pub fn with_fill_style(mut self, fill: impl Into<Brush>) -> Self {
+        self.style.fill = Some(fill.into());
+        self
+    }
+
+    /// Sets a constant child stroke style.
+    pub fn with_stroke_style(mut self, stroke: StrokeStyle) -> Self {
+        self.style.stroke = Some(stroke);
+        self
+    }
+
+    /// Sets a constant child opacity multiplier.
+    pub fn with_opacity_value(mut self, opacity: f64) -> Self {
+        self.style.opacity = Some(opacity);
         self
     }
 }
@@ -1056,6 +1090,15 @@ fn adapt_layer_child(
     }
     if let Some(text) = &child.encoding.text {
         out = out.with_text(adapt_channel(text, "layer child text", &mut fields)?);
+    }
+    if let Some(fill) = &child.style.fill {
+        out = out.with_fill_style(fill.clone());
+    }
+    if let Some(stroke) = &child.style.stroke {
+        out = out.with_stroke_style(stroke.clone());
+    }
+    if let Some(opacity) = child.style.opacity {
+        out = out.with_opacity_value(opacity);
     }
     Ok(out)
 }
@@ -1848,5 +1891,158 @@ mod tests {
             .expect("y scale");
         assert_eq!(y_scale.domain_min(), 1.0);
         assert_eq!(y_scale.domain_max(), 6.0);
+    }
+
+    #[test]
+    fn parsed_layer_children_can_be_fully_specified_units() {
+        let parsed = ParsedLayerSpec::new()
+            .with_child(
+                ParsedLayerChildSpec::new(ParsedMarkDef::Line)
+                    .with_x(ParsedChannelDef::quantitative("x"))
+                    .with_y(ParsedChannelDef::quantitative("y")),
+            )
+            .with_child(
+                ParsedLayerChildSpec::new(ParsedMarkDef::Point)
+                    .with_x(ParsedChannelDef::quantitative("x"))
+                    .with_y(ParsedChannelDef::quantitative("y")),
+            );
+
+        let mut scene = Scene::new();
+        let table_id = TableId(75);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![60, 61, 62];
+        table.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![3.0, 4.0, 5.0],
+        }));
+        scene.insert_table(table);
+
+        let layer = parsed
+            .adapt(&resolver(), context(table_id))
+            .expect("adapt fully specified child units");
+        let lowered = layer
+            .lower(&scene)
+            .expect("lower fully specified child units");
+        let (_layout, marks) = lowered
+            .marks(&scene, &HeuristicTextMeasurer)
+            .expect("layer marks");
+        assert!(marks.len() >= 4);
+    }
+
+    #[test]
+    fn parsed_layer_child_literal_styles_adapt_and_lower() {
+        let parsed = ParsedLayerSpec::new()
+            .with_child(
+                ParsedLayerChildSpec::new(ParsedMarkDef::Area)
+                    .with_x(ParsedChannelDef::quantitative("x"))
+                    .with_y(ParsedChannelDef::quantitative("high"))
+                    .with_y2(ParsedChannelDef::quantitative("low"))
+                    .with_fill_style(Brush::Solid(peniko::color::palette::css::CORNFLOWER_BLUE))
+                    .with_stroke_style(StrokeStyle::solid(
+                        peniko::color::palette::css::CORNFLOWER_BLUE,
+                        1.0,
+                    ))
+                    .with_opacity_value(0.25),
+            )
+            .with_child(
+                ParsedLayerChildSpec::new(ParsedMarkDef::Line)
+                    .with_x(ParsedChannelDef::quantitative("x"))
+                    .with_y(ParsedChannelDef::quantitative("line"))
+                    .with_stroke_style(StrokeStyle::solid(peniko::color::palette::css::BLACK, 2.5)),
+            );
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "high",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "low",
+                column: ColumnId(2),
+            },
+            SchemaField {
+                name: "line",
+                column: ColumnId(3),
+            },
+        ]);
+
+        let mut scene = Scene::new();
+        let table_id = TableId(751);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![80, 81, 82];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![4.0, 5.0, 6.0],
+            c: vec![1.0, 2.0, 3.0],
+            d: vec![2.0, 3.0, 4.0],
+        }));
+        scene.insert_table(table);
+
+        let layer = parsed
+            .adapt(&resolver, context(table_id))
+            .expect("adapt styled child units");
+        let lowered = layer.lower(&scene).expect("lower styled child units");
+        let (_layout, marks) = lowered
+            .marks(&scene, &HeuristicTextMeasurer)
+            .expect("layer marks");
+        assert!(marks.len() >= 2);
+    }
+
+    #[test]
+    fn parsed_layer_child_conflicting_x_is_rejected_during_lowering() {
+        let parsed = ParsedLayerSpec::new()
+            .with_child(
+                ParsedLayerChildSpec::new(ParsedMarkDef::Line)
+                    .with_x(ParsedChannelDef::quantitative("x"))
+                    .with_y(ParsedChannelDef::quantitative("y")),
+            )
+            .with_child(
+                ParsedLayerChildSpec::new(ParsedMarkDef::Point)
+                    .with_x(ParsedChannelDef::quantitative("step"))
+                    .with_y(ParsedChannelDef::quantitative("y")),
+            );
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "y",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "step",
+                column: ColumnId(2),
+            },
+        ]);
+
+        let mut scene = Scene::new();
+        let table_id = TableId(76);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![70, 71, 72];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![3.0, 4.0, 5.0],
+            c: vec![10.0, 11.0, 12.0],
+            d: vec![0.0, 0.0, 0.0],
+        }));
+        scene.insert_table(table);
+
+        let layer = parsed
+            .adapt(&resolver, context(table_id))
+            .expect("adapt conflicting child layer");
+        let err = layer
+            .lower(&scene)
+            .expect_err("conflicting child x should fail");
+        assert!(matches!(
+            err,
+            LoweringError::Unsupported(message)
+                if message.contains("same x channel")
+        ));
     }
 }

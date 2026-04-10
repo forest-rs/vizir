@@ -990,6 +990,8 @@ impl UnitSpec {
                         size_domain: point_size_domain,
                         opacity: opacity.map(ChannelDef::field),
                         opacity_domain,
+                        constant_stroke: Brush::Solid(css::BLACK),
+                        has_constant_stroke_style: false,
                         stroke: stroke.map(ChannelDef::field),
                         stroke_map: point_stroke_map.clone(),
                         default_stroke_width: 1.5,
@@ -1006,6 +1008,7 @@ impl UnitSpec {
                         y2: y2.map(ChannelDef::field),
                         baseline: 0.0,
                         fill,
+                        stroke: None,
                     }),
                     MarkDef::Text => SeriesLayer::Text(TextLayer {
                         id_base: self.id_base.wrapping_add(0x2_000 + index as u64),
@@ -1098,6 +1101,7 @@ impl UnitSpec {
                         y2: y2.map(ChannelDef::field),
                         baseline: 0.0,
                         fill: Brush::Solid(css::CORNFLOWER_BLUE),
+                        stroke: None,
                     }),
                     MarkDef::Bar | MarkDef::Point | MarkDef::Text => {
                         unreachable!("detail is validated for line/area marks only")
@@ -1162,6 +1166,8 @@ impl UnitSpec {
                     size_domain: point_size_domain,
                     opacity: opacity.map(ChannelDef::field),
                     opacity_domain,
+                    constant_stroke: Brush::Solid(css::BLACK),
+                    has_constant_stroke_style: false,
                     stroke: stroke.map(ChannelDef::field),
                     stroke_map: point_stroke_map,
                     default_stroke_width: 1.5,
@@ -1178,6 +1184,7 @@ impl UnitSpec {
                     y2: y2.map(ChannelDef::field),
                     baseline: 0.0,
                     fill: Brush::Solid(css::CORNFLOWER_BLUE),
+                    stroke: None,
                 }),
                 MarkDef::Text => SeriesLayer::Text(TextLayer {
                     id_base: self.id_base.wrapping_add(0x1_200),
@@ -1227,15 +1234,29 @@ impl UnitSpec {
     }
 }
 
-/// One child entry in a narrow shared-plot layer spec.
+/// One unit-shaped child entry in a narrow shared-plot layer spec.
 ///
-/// A child always contributes exactly one mark kind and may override selected channels from the
-/// parent [`LayerSpec`].
+/// A child always contributes exactly one mark kind plus its own transform and encoding block.
+/// Shared layer lowering still keeps one plot shell, so children may not redefine shared-domain
+/// channels incompatibly with the base child.
+#[derive(Clone, Debug, PartialEq)]
+struct LayerChildStyle {
+    fill: Option<Brush>,
+    stroke: Option<StrokeStyle>,
+    opacity: Option<f64>,
+}
+
+/// One unit-shaped child entry in a narrow shared-plot layer spec.
+///
+/// A child always contributes exactly one mark kind plus its own transform and encoding block.
+/// Shared layer lowering still keeps one plot shell, so children may not redefine shared-domain
+/// channels incompatibly with the base child.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LayerChildSpec {
     mark: MarkDef,
     transforms: Vec<TransformSpec>,
     encoding: EncodingSet,
+    style: LayerChildStyle,
 }
 
 impl LayerChildSpec {
@@ -1245,6 +1266,11 @@ impl LayerChildSpec {
             mark,
             transforms: Vec::new(),
             encoding: EncodingSet::new(),
+            style: LayerChildStyle {
+                fill: None,
+                stroke: None,
+                opacity: None,
+            },
         }
     }
 
@@ -1254,7 +1280,7 @@ impl LayerChildSpec {
         self
     }
 
-    /// Replaces the child override encoding set.
+    /// Replaces the child unit encoding set.
     pub fn with_encoding(mut self, encoding: EncodingSet) -> Self {
         self.encoding = encoding;
         self
@@ -1338,6 +1364,24 @@ impl LayerChildSpec {
         self
     }
 
+    /// Sets a constant child fill style.
+    pub fn with_fill_style(mut self, fill: impl Into<Brush>) -> Self {
+        self.style.fill = Some(fill.into());
+        self
+    }
+
+    /// Sets a constant child stroke style.
+    pub fn with_stroke_style(mut self, stroke: StrokeStyle) -> Self {
+        self.style.stroke = Some(stroke);
+        self
+    }
+
+    /// Sets a constant child opacity multiplier.
+    pub fn with_opacity_value(mut self, opacity: f64) -> Self {
+        self.style.opacity = Some(opacity);
+        self
+    }
+
     fn mark(&self) -> MarkDef {
         self.mark
     }
@@ -1346,8 +1390,10 @@ impl LayerChildSpec {
 /// A narrow shared-plot layered chart.
 ///
 /// Every child mark shares the same data source and chart shell. Shared transforms run for every
-/// child, and each child may append its own transform chain and selected channel overrides. This
-/// is an intentionally small composition slice for common overlays such as line + point.
+/// child, and each child may contribute unit-shaped mark, transform, and encoding content. The
+/// base child still owns the shared x/y shell, so later children may not fork the shared x or
+/// legend/color story. This is an intentionally small composition slice for common overlays such
+/// as line + point.
 #[derive(Clone, Debug)]
 pub struct LayerSpec {
     id_base: u64,
@@ -1486,7 +1532,7 @@ impl LayerSpec {
         self
     }
 
-    /// Appends a shared-plot child with mark-specific encoding overrides.
+    /// Appends a shared-plot child with unit-shaped mark/transform/encoding content.
     pub fn with_child(mut self, child: LayerChildSpec) -> Self {
         self.children.push(child);
         self
@@ -1515,7 +1561,16 @@ impl LayerSpec {
 
         let base_index = base_layer_mark_index(&self.children);
         let base_unit = self.layer_child_unit(base_index, None);
-        let base_lowered = base_unit.lower(scene)?;
+        validate_layer_child_literal_style(
+            base_unit.mark,
+            &base_unit.encoding,
+            &self.children[base_index].style,
+        )?;
+        let mut base_lowered = base_unit.lower(scene)?;
+        apply_layer_child_style(
+            &mut base_lowered.series_layers,
+            &self.children[base_index].style,
+        )?;
         let base_defaults = inherited_layer_encoding_defaults(
             &self.encoding,
             &merge_layer_encoding(
@@ -1532,8 +1587,15 @@ impl LayerSpec {
             if index == base_index {
                 continue;
             }
+            validate_layer_child_shared_channels(&base_defaults, &self.children[index].encoding)?;
             let child = self.layer_child_unit(index, Some(&base_defaults));
-            let lowered = child.lower(scene)?;
+            validate_layer_child_literal_style(
+                child.mark,
+                &child.encoding,
+                &self.children[index].style,
+            )?;
+            let mut lowered = child.lower(scene)?;
+            apply_layer_child_style(&mut lowered.series_layers, &self.children[index].style)?;
             series_layers.extend(lowered.series_layers);
             extend_unique_tables(&mut derived_tables, &lowered.derived_tables);
             merge_programs(&mut combined_program, lowered.program);
@@ -1930,6 +1992,8 @@ struct PointLayer {
     size_domain: Option<(f64, f64)>,
     opacity: Option<ColumnId>,
     opacity_domain: Option<(f64, f64)>,
+    constant_stroke: Brush,
+    has_constant_stroke_style: bool,
     stroke: Option<ColumnId>,
     stroke_map: Vec<(u64, Brush)>,
     default_stroke_width: f64,
@@ -1959,6 +2023,8 @@ impl PointLayer {
         let size_domain = self.size_domain;
         let opacity_col = self.opacity;
         let opacity_domain = self.opacity_domain;
+        let constant_stroke = self.constant_stroke.clone();
+        let has_constant_stroke_style = self.has_constant_stroke_style;
         let stroke_col = self.stroke;
         let stroke_map = self.stroke_map.clone();
         let default_stroke_width = self.default_stroke_width;
@@ -1990,16 +2056,17 @@ impl PointLayer {
                 let stroke = stroke_col
                     .and_then(|col| table.data.as_deref().and_then(|data| data.f64(row, col)))
                     .map(|value| {
-                        brush_for_series_value(value, &stroke_map, Brush::Solid(css::BLACK))
+                        brush_for_series_value(value, &stroke_map, constant_stroke.clone())
                     })
-                    .unwrap_or_else(|| Brush::Solid(css::BLACK));
+                    .unwrap_or_else(|| constant_stroke.clone());
                 let stroke_width = stroke_width_col
                     .and_then(|col| table.data.as_deref().and_then(|data| data.f64(row, col)))
                     .map(|value| {
                         stroke_width_for_value(value, stroke_width_domain, default_stroke_width)
                     })
                     .unwrap_or(default_stroke_width);
-                let has_stroke_style = stroke_col.is_some() || stroke_width_col.is_some();
+                let has_stroke_style =
+                    has_constant_stroke_style || stroke_col.is_some() || stroke_width_col.is_some();
 
                 if symbol == Symbol::Square && !has_stroke_style {
                     let mut mark = Mark::builder(layer_row_mark_id(id_base, row_key))
@@ -2095,6 +2162,7 @@ impl PointLayer {
                     };
                     mark = if let Some(stroke_col) = stroke_col {
                         let stroke_map = stroke_map.clone();
+                        let default_stroke = constant_stroke.clone();
                         mark.stroke_compute(
                             [InputRef::TableCol {
                                 table: table_id,
@@ -2103,7 +2171,7 @@ impl PointLayer {
                             move |ctx, _| {
                                 let value =
                                     ctx.table_f64(table_id, row, stroke_col).unwrap_or(f64::NAN);
-                                brush_for_series_value(value, &stroke_map, Brush::Solid(css::BLACK))
+                                brush_for_series_value(value, &stroke_map, default_stroke.clone())
                             },
                         )
                     } else {
@@ -2148,6 +2216,7 @@ struct AreaLayer {
     y2: Option<ColumnId>,
     baseline: f64,
     fill: Brush,
+    stroke: Option<StrokeStyle>,
 }
 
 impl AreaLayer {
@@ -2164,21 +2233,36 @@ impl AreaLayer {
             .y_scale_continuous(plot)
             .ok_or(LoweringError::MissingChannel("y"))?;
         Ok(match (self.x2, self.y2) {
-            (Some(x2), Some(y2)) => crate::RangeAreaMarkSpec::new(
-                self.id.0, self.table, self.x, self.y, x2, y2, x_scale, y_scale,
-            )
-            .with_fill(self.fill.clone())
-            .marks(),
-            (None, Some(y2)) => crate::StackedAreaMarkSpec::new(
-                self.id.0, self.table, self.x, y2, self.y, x_scale, y_scale,
-            )
-            .with_fill(self.fill.clone())
-            .marks(),
+            (Some(x2), Some(y2)) => {
+                let mut spec = crate::RangeAreaMarkSpec::new(
+                    self.id.0, self.table, self.x, self.y, x2, y2, x_scale, y_scale,
+                )
+                .with_fill(self.fill.clone());
+                if let Some(stroke) = self.stroke.clone() {
+                    spec = spec.with_stroke(stroke);
+                }
+                spec.marks()
+            }
+            (None, Some(y2)) => {
+                let mut spec = crate::StackedAreaMarkSpec::new(
+                    self.id.0, self.table, self.x, y2, self.y, x_scale, y_scale,
+                )
+                .with_fill(self.fill.clone());
+                if let Some(stroke) = self.stroke.clone() {
+                    spec = spec.with_stroke(stroke);
+                }
+                spec.marks()
+            }
             (None, None) => {
-                crate::AreaMarkSpec::new(self.id.0, self.table, self.x, self.y, x_scale, y_scale)
-                    .with_baseline(self.baseline)
-                    .with_fill(self.fill.clone())
-                    .marks()
+                let mut spec = crate::AreaMarkSpec::new(
+                    self.id.0, self.table, self.x, self.y, x_scale, y_scale,
+                )
+                .with_baseline(self.baseline)
+                .with_fill(self.fill.clone());
+                if let Some(stroke) = self.stroke.clone() {
+                    spec = spec.with_stroke(stroke);
+                }
+                spec.marks()
             }
             (Some(_), None) => {
                 return Err(LoweringError::Unsupported(
@@ -2946,6 +3030,155 @@ fn merge_layer_encoding(
         out.y2 = None;
     }
     out
+}
+
+fn validate_layer_child_shared_channels(
+    base: &EncodingSet,
+    child: &EncodingSet,
+) -> Result<(), LoweringError> {
+    if let Some(x) = child.x()
+        && base
+            .x()
+            .is_none_or(|base_x| !equivalent_shared_channel(base_x, x))
+    {
+        return Err(LoweringError::Unsupported(
+            "layer children must share the same x channel as the base child",
+        ));
+    }
+    if let Some(x2) = child.x2() {
+        let Some(base_x2) = base.x2() else {
+            return Err(LoweringError::Unsupported(
+                "layer children cannot introduce x2 when the base child has no shared x2 channel",
+            ));
+        };
+        if !equivalent_shared_channel(base_x2, x2) {
+            return Err(LoweringError::Unsupported(
+                "layer children must share the same x2 channel as the base child",
+            ));
+        }
+    }
+    if let Some(color) = child.color() {
+        let Some(base_color) = base.color() else {
+            return Err(LoweringError::Unsupported(
+                "layer children cannot introduce a child-local color channel in the shared-legend slice",
+            ));
+        };
+        if !equivalent_shared_channel(base_color, color) {
+            return Err(LoweringError::Unsupported(
+                "layer children must share the same color channel as the base child",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_layer_child_literal_style(
+    mark: MarkDef,
+    encoding: &EncodingSet,
+    style: &LayerChildStyle,
+) -> Result<(), LoweringError> {
+    if style.fill.is_some() && encoding.color().is_some() {
+        return Err(LoweringError::Unsupported(
+            "layer children cannot combine literal fill style with a color channel",
+        ));
+    }
+    if style.opacity.is_some() && encoding.opacity().is_some() {
+        return Err(LoweringError::Unsupported(
+            "layer children cannot combine literal opacity with an opacity channel",
+        ));
+    }
+    if style.stroke.is_some() && encoding.stroke().is_some() {
+        return Err(LoweringError::Unsupported(
+            "layer children cannot combine literal stroke style with a stroke channel",
+        ));
+    }
+    if style.stroke.is_some() && matches!(mark, MarkDef::Bar | MarkDef::Text) {
+        return Err(LoweringError::Unsupported(
+            "literal stroke style is only supported on line, point, and area layer children",
+        ));
+    }
+    Ok(())
+}
+
+fn apply_layer_child_style(
+    layers: &mut [SeriesLayer],
+    style: &LayerChildStyle,
+) -> Result<(), LoweringError> {
+    for layer in layers {
+        match layer {
+            SeriesLayer::Bar(bar) => {
+                if let Some(fill) = &style.fill {
+                    bar.fill = fill.clone();
+                }
+                if let Some(opacity) = style.opacity {
+                    bar.fill = brush_with_opacity(&bar.fill, opacity);
+                }
+                if style.stroke.is_some() {
+                    return Err(LoweringError::Unsupported(
+                        "literal stroke style is not supported on bar layer children",
+                    ));
+                }
+            }
+            SeriesLayer::Line(line) => {
+                if style.fill.is_some() {
+                    return Err(LoweringError::Unsupported(
+                        "literal fill style is not supported on line layer children",
+                    ));
+                }
+                if let Some(stroke) = &style.stroke {
+                    line.stroke = stroke.clone();
+                }
+                if let Some(opacity) = style.opacity {
+                    line.stroke.brush = brush_with_opacity(&line.stroke.brush, opacity);
+                }
+            }
+            SeriesLayer::Point(point) => {
+                if let Some(fill) = &style.fill {
+                    point.fill = fill.clone();
+                }
+                if let Some(stroke) = &style.stroke {
+                    point.constant_stroke = stroke.brush.clone();
+                    point.default_stroke_width = stroke.stroke_width;
+                    point.has_constant_stroke_style = true;
+                }
+                if let Some(opacity) = style.opacity {
+                    point.fill = brush_with_opacity(&point.fill, opacity);
+                }
+            }
+            SeriesLayer::Area(area) => {
+                if let Some(fill) = &style.fill {
+                    area.fill = fill.clone();
+                }
+                if let Some(stroke) = &style.stroke {
+                    area.stroke = Some(stroke.clone());
+                }
+                if let Some(opacity) = style.opacity {
+                    area.fill = brush_with_opacity(&area.fill, opacity);
+                    if let Some(stroke) = &mut area.stroke {
+                        stroke.brush = brush_with_opacity(&stroke.brush, opacity);
+                    }
+                }
+            }
+            SeriesLayer::Text(text) => {
+                if let Some(fill) = &style.fill {
+                    text.fill = fill.clone();
+                }
+                if let Some(opacity) = style.opacity {
+                    text.fill = brush_with_opacity(&text.fill, opacity);
+                }
+                if style.stroke.is_some() {
+                    return Err(LoweringError::Unsupported(
+                        "literal stroke style is not supported on text layer children",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn equivalent_shared_channel(a: &ChannelDef, b: &ChannelDef) -> bool {
+    a.field == b.field && a.kind == b.kind && a.aggregate == b.aggregate
 }
 
 fn inherited_layer_encoding_defaults(
@@ -3976,11 +4209,172 @@ mod tests {
     }
 
     #[test]
-    fn unit_lowering_rejects_color_and_detail_together() {
+    fn layer_children_can_be_fully_specified_unit_entries() {
         let mut scene = Scene::new();
         let table_id = TableId(86);
         let mut table = Table::new(table_id);
-        table.row_keys = vec![860, 861];
+        table.row_keys = vec![860, 861, 862];
+        table.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![3.0, 4.0, 5.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = LayerSpec::new(0xF1E0, TableId(860), DataRef::Table(table_id))
+            .with_child(
+                LayerChildSpec::new(MarkDef::Line)
+                    .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+                    .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("value")),
+            )
+            .with_child(
+                LayerChildSpec::new(MarkDef::Point)
+                    .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+                    .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("value")),
+            );
+
+        let lowered = spec
+            .lower(&scene)
+            .expect("lower layer with fully specified child units");
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let marks = lowered
+            .series_marks(&scene, layout.data)
+            .expect("layer marks");
+        assert_eq!(marks.len(), 4);
+    }
+
+    #[test]
+    fn layer_child_literal_styles_apply_to_rendered_marks() {
+        let mut scene = Scene::new();
+        let table_id = TableId(861);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![8600, 8601, 8602];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![4.0, 5.0, 6.0],
+            c: vec![1.0, 2.0, 3.0],
+            d: vec![2.0, 3.0, 4.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = LayerSpec::new(0xF1E8, TableId(861), DataRef::Table(table_id))
+            .with_child(
+                LayerChildSpec::new(MarkDef::Area)
+                    .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+                    .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("high"))
+                    .with_y2(ChannelDef::quantitative(ColumnId(2)).with_title("low"))
+                    .with_fill_style(css::CORNFLOWER_BLUE)
+                    .with_stroke_style(StrokeStyle::solid(css::CORNFLOWER_BLUE, 1.0))
+                    .with_opacity_value(0.25),
+            )
+            .with_child(
+                LayerChildSpec::new(MarkDef::Line)
+                    .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+                    .with_y(ChannelDef::quantitative(ColumnId(3)).with_title("line"))
+                    .with_stroke_style(StrokeStyle::solid(css::BLACK, 2.5)),
+            );
+
+        let (_layout, diffs) = spec
+            .lower_into_scene(&mut scene)
+            .expect("lower styled layer")
+            .tick(&mut scene, &HeuristicTextMeasurer)
+            .expect("tick styled layer");
+
+        let mut fills = Vec::new();
+        let mut strokes = Vec::new();
+        let mut widths = Vec::new();
+        for diff in diffs {
+            let MarkDiff::Enter { new, .. } = diff else {
+                continue;
+            };
+            let vizir_core::MarkPayload::Path(channels) = *new else {
+                continue;
+            };
+            fills.push(channels.fill);
+            strokes.push(channels.stroke);
+            widths.push(channels.stroke_width);
+        }
+        assert!(fills.contains(&Brush::Solid(css::CORNFLOWER_BLUE.with_alpha(0.25))));
+        assert!(strokes.contains(&Brush::Solid(css::BLACK)));
+        assert!(widths.iter().any(|width| (*width - 2.5).abs() < 1e-9));
+    }
+
+    #[test]
+    fn layer_lowering_rejects_conflicting_child_x_channel() {
+        let mut scene = Scene::new();
+        let table_id = TableId(87);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![870, 871, 872];
+        table.data = Some(Box::new(ThreeCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![3.0, 4.0, 5.0],
+            c: vec![10.0, 11.0, 12.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = LayerSpec::new(0xF1F0, TableId(870), DataRef::Table(table_id))
+            .with_child(
+                LayerChildSpec::new(MarkDef::Line)
+                    .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+                    .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("value")),
+            )
+            .with_child(
+                LayerChildSpec::new(MarkDef::Point)
+                    .with_x(ChannelDef::quantitative(ColumnId(2)).with_title("other x"))
+                    .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("value")),
+            );
+
+        let err = spec
+            .lower(&scene)
+            .expect_err("conflicting child x should fail");
+        assert!(matches!(
+            err,
+            LoweringError::Unsupported(message)
+                if message.contains("same x channel")
+        ));
+    }
+
+    #[test]
+    fn layer_lowering_rejects_child_local_color_channel() {
+        let mut scene = Scene::new();
+        let table_id = TableId(88);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![880, 881];
+        table.data = Some(Box::new(ThreeCols {
+            a: vec![0.0, 1.0],
+            b: vec![3.0, 4.0],
+            c: vec![0.0, 1.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = LayerSpec::new(0xF200, TableId(880), DataRef::Table(table_id))
+            .with_child(
+                LayerChildSpec::new(MarkDef::Line)
+                    .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+                    .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("value")),
+            )
+            .with_child(
+                LayerChildSpec::new(MarkDef::Point)
+                    .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+                    .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("value"))
+                    .with_color(ChannelDef::nominal(ColumnId(2)).with_title("series")),
+            );
+
+        let err = spec
+            .lower(&scene)
+            .expect_err("child-local color should fail");
+        assert!(matches!(
+            err,
+            LoweringError::Unsupported(message)
+                if message.contains("child-local color")
+        ));
+    }
+
+    #[test]
+    fn unit_lowering_rejects_color_and_detail_together() {
+        let mut scene = Scene::new();
+        let table_id = TableId(89);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![890, 891];
         table.data = Some(Box::new(FourCols {
             a: vec![0.0, 1.0],
             b: vec![3.0, 4.0],
@@ -3990,8 +4384,8 @@ mod tests {
         scene.insert_table(table);
 
         let spec = UnitSpec::new(
-            0xF1E0,
-            TableId(860),
+            0xF210,
+            TableId(890),
             DataRef::Table(table_id),
             MarkDef::Line,
         )
@@ -4011,7 +4405,7 @@ mod tests {
     #[test]
     fn layer_lowering_rejects_bar_with_non_bar_marks() {
         let scene = Scene::new();
-        let spec = LayerSpec::new(0xF200, TableId(900), DataRef::Table(TableId(1)))
+        let spec = LayerSpec::new(0xF220, TableId(900), DataRef::Table(TableId(1)))
             .with_mark(MarkDef::Bar)
             .with_mark(MarkDef::Line)
             .with_x(ChannelDef::ordinal(ColumnId(0)))

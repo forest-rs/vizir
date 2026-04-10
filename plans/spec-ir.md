@@ -98,7 +98,7 @@ This keeps the public API calm while still forcing the architectural seam to exi
 
 Current supported view shapes:
 - one unit chart
-- one narrow shared-plot layer with shared data, child-local transforms, base-child positional/grouping defaults, and child encoding overrides
+- one narrow shared-plot layer with shared data, child-local transforms, unit-shaped child entries, and literal child styles
 - optional title
 - optional x/y axes
 - optional color legend
@@ -161,10 +161,10 @@ Support only:
 
 Layering rule:
 - one designated base child owns the shared chart shell and current x/y domains
-- other children may override channels and run child-local transforms, but they do not widen the
-  shared domain today
-- `color`
-- `text`
+- other children may be fully specified with their own mark, transforms, and encoding block
+- later children may inherit base-child positional/grouping defaults
+- children may also carry literal fill/stroke/opacity styles through the layer seam
+- child entries may not fork the shared x/domain or color/legend shell today
 
 And only the most useful authored meanings:
 - `x`: position or grouped category

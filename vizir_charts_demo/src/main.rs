@@ -54,6 +54,7 @@ fn main() {
         lowered_json_point_shape_size_demo(),
         lowered_json_point_opacity_demo(),
         lowered_json_point_stroke_width_demo(),
+        lowered_json_nested_layer_demo(),
         lowered_json_layer_demo(),
         lowered_area_spec_demo(),
         lowered_ranged_area_spec_demo(),
@@ -825,6 +826,59 @@ fn lowered_json_point_stroke_width_demo() -> html::HtmlSection {
     }
 }
 
+fn lowered_json_nested_layer_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(148);
+    let mut table = Table::new(source_id);
+    table.row_keys = vec![0, 1, 2, 3];
+    table.data = Some(Box::new(StyledLayerValues {
+        x: vec![0.0, 1.0, 2.0, 3.0],
+        high: vec![3.0, 4.0, 3.5, 5.0],
+        low: vec![1.0, 2.0, 1.5, 3.0],
+        line: vec![1.5, 2.8, 2.2, 3.8],
+    }));
+    scene.insert_table(table);
+
+    let parsed =
+        parse_layer_spec_json(include_str!("../../fixtures/specs/layer_nested_units.json"))
+            .expect("parse nested child units layer");
+
+    let resolver = SliceFieldResolver::new(&[
+        SchemaField {
+            name: "x",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "high",
+            column: ColumnId(1),
+        },
+        SchemaField {
+            name: "low",
+            column: ColumnId(2),
+        },
+        SchemaField {
+            name: "line",
+            column: ColumnId(3),
+        },
+    ]);
+    let spec = parsed
+        .adapt(
+            &resolver,
+            AdaptContext {
+                id_base: 0xD0_E00,
+                derived_table_base: TableId(149),
+                data: DataRef::Table(source_id),
+            },
+        )
+        .expect("adapt nested child units layer");
+
+    html::HtmlSection {
+        title: "Lowered JSON Nested Child Units",
+        description: "A styled area + line + point overlay built from fully specified child entries, proving narrow nested child units plus literal child styling.",
+        svg: render_lowered_layer_spec(&mut scene, spec),
+    }
+}
+
 #[derive(Debug)]
 struct LayerOverlayValues {
     x: Vec<f64>,
@@ -853,6 +907,14 @@ struct PointStrokeValues {
     y: Vec<f64>,
     series: Vec<f64>,
     weight: Vec<f64>,
+}
+
+#[derive(Debug)]
+struct StyledLayerValues {
+    x: Vec<f64>,
+    high: Vec<f64>,
+    low: Vec<f64>,
+    line: Vec<f64>,
 }
 
 impl TableData for PointShapeSizeValues {
@@ -905,6 +967,26 @@ impl TableData for PointStrokeValues {
             ColumnId(1) => self.y.get(row).copied(),
             ColumnId(2) => self.series.get(row).copied(),
             ColumnId(3) => self.weight.get(row).copied(),
+            _ => None,
+        }
+    }
+}
+
+impl TableData for StyledLayerValues {
+    fn row_count(&self) -> usize {
+        self.x
+            .len()
+            .min(self.high.len())
+            .min(self.low.len())
+            .min(self.line.len())
+    }
+
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        match col {
+            ColumnId(0) => self.x.get(row).copied(),
+            ColumnId(1) => self.high.get(row).copied(),
+            ColumnId(2) => self.low.get(row).copied(),
+            ColumnId(3) => self.line.get(row).copied(),
             _ => None,
         }
     }

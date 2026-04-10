@@ -20,7 +20,7 @@ Status meanings:
 | Area | Status | Notes |
 |---|---|---|
 | Single unit chart | supported | One plot, optional title, x/y axes, optional legend |
-| Shared-plot `layer` spec | partial | Shared data with child-local transforms, base-child positional/grouping defaults, and child encoding overrides; proven for overlays like line + point, area + line, and bar + text |
+| Shared-plot `layer` spec | partial | Shared data with child-local transforms, unit-shaped child entries, and literal child styles; later children can inherit base-child defaults, but they may not fork the shared x/domain or color/legend shell |
 | Existing input table via `DataRef::Table` | supported | No URL/data loading in authored spec path |
 | Deterministic lowering to `Program + ChartSpec + series plan` | supported | Same seam used by demos/tests |
 | Multi-view composition beyond shared-plot `layer` (`facet`, `repeat`, `concat`) | missing | Not modeled yet |
@@ -72,19 +72,22 @@ Status meanings:
 | Layer | Status | Notes |
 |---|---|---|
 | Rust-authored `UnitSpec` | supported | Primary lowering target |
-| Rust-authored `LayerSpec` | partial | Narrow shared-plot layering with child-local transforms, base-child positional/grouping defaults, and child encoding overrides |
+| Rust-authored `LayerSpec` | partial | Narrow shared-plot layering with child-local transforms, unit-shaped child entries, and literal child fill/stroke/opacity styles; explicit rejection for conflicting child x/color shells |
 | Name-based `ParsedUnitSpec` adapter | supported | Resolves field names and derived aliases into `ColumnId`s |
-| Name-based `ParsedLayerSpec` adapter | partial | Shared data plus child-local transforms, base-child defaults, and child encoding overrides |
-| Narrow JSON parser behind `json` feature | partial | Supports the current unit slice plus shared-plot `layer` with child-local transforms, base-child defaults, and structural `order`/`detail` channels |
+| Name-based `ParsedLayerSpec` adapter | partial | Shared data plus child-local transforms, unit-shaped child entries, and literal child styles; the shared shell is still validated during lowering |
+| Narrow JSON parser behind `json` feature | partial | Supports the current unit slice plus shared-plot `layer` with unit-shaped child entries, child-local transforms, literal child styles, and structural `order`/`detail` channels |
 | Full Vega-Lite JSON coverage | missing | Current JSON parser is intentionally narrow |
 
 ## Important fences
 
 - `color` splitting is currently rejected for `bar` and `text`.
-- Shared `layer` currently keeps one shared plot shell. Child-specific transforms and encoding
-  overrides are supported, and later children can inherit positional/grouping defaults from the
-  base child, but the base child still owns the shared x/y domains. Per-child nested unit specs
-  and independent domain resolution are not modeled yet.
+- Shared `layer` currently keeps one shared plot shell. Child entries can be fully specified with
+  their own mark, transforms, and encoding block, and later children can inherit
+  positional/grouping defaults from the base child, but the base child still owns the shared x/y
+  domains and color/legend shell. Independent per-child domain resolution is not modeled yet.
+- Literal child styles currently support constant `fill`, `stroke`, and `opacity` through the
+  layer seam, but they may not be combined with conflicting data-driven channels like shared
+  `color`, child `stroke`, or child `opacity`.
 - `aggregate` on `x`, `x2`, `color`, `y2`, `opacity`, `stroke`, `strokeWidth`, `order`, `detail`, and `text` is rejected.
 - `x2`/`y2` are currently only supported on `area`.
 - `opacity` currently requires a quantitative channel and is only supported on `bar`, `point`, and `text`.
