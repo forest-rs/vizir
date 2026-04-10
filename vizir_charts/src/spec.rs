@@ -722,10 +722,77 @@ impl UnitSpec {
     }
 }
 
+/// One child entry in a narrow shared-plot layer spec.
+///
+/// A child always contributes exactly one mark kind and may override selected channels from the
+/// parent [`LayerSpec`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LayerChildSpec {
+    mark: MarkDef,
+    encoding: EncodingSet,
+}
+
+impl LayerChildSpec {
+    /// Creates a new layer child for the given mark.
+    pub fn new(mark: MarkDef) -> Self {
+        Self {
+            mark,
+            encoding: EncodingSet::new(),
+        }
+    }
+
+    /// Replaces the child override encoding set.
+    pub fn with_encoding(mut self, encoding: EncodingSet) -> Self {
+        self.encoding = encoding;
+        self
+    }
+
+    /// Sets the child x override.
+    pub fn with_x(mut self, x: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_x(x);
+        self
+    }
+
+    /// Sets the child x2 override.
+    pub fn with_x2(mut self, x2: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_x2(x2);
+        self
+    }
+
+    /// Sets the child y override.
+    pub fn with_y(mut self, y: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_y(y);
+        self
+    }
+
+    /// Sets the child y2 override.
+    pub fn with_y2(mut self, y2: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_y2(y2);
+        self
+    }
+
+    /// Sets the child color override.
+    pub fn with_color(mut self, color: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_color(color);
+        self
+    }
+
+    /// Sets the child text override.
+    pub fn with_text(mut self, text: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_text(text);
+        self
+    }
+
+    fn mark(&self) -> MarkDef {
+        self.mark
+    }
+}
+
 /// A narrow shared-plot layered chart.
 ///
 /// Every child mark shares the same data source, transforms, encodings, and guides. This is an
-/// intentionally small composition slice for common overlays such as line + point.
+/// intentionally small composition slice for common overlays such as line + point, while allowing
+/// each child to override selected channels.
 #[derive(Clone, Debug)]
 pub struct LayerSpec {
     id_base: u64,
@@ -733,7 +800,7 @@ pub struct LayerSpec {
     data: DataRef,
     transforms: Vec<TransformSpec>,
     encoding: EncodingSet,
-    marks: Vec<MarkDef>,
+    children: Vec<LayerChildSpec>,
     width: f64,
     height: f64,
     title: Option<String>,
@@ -748,7 +815,7 @@ impl LayerSpec {
             data,
             transforms: Vec::new(),
             encoding: EncodingSet::new(),
-            marks: Vec::new(),
+            children: Vec::new(),
             width: 220.0,
             height: 120.0,
             title: None,
@@ -818,30 +885,43 @@ impl LayerSpec {
 
     /// Appends a shared-plot mark layer.
     pub fn with_mark(mut self, mark: MarkDef) -> Self {
-        self.marks.push(mark);
+        self.children.push(LayerChildSpec::new(mark));
+        self
+    }
+
+    /// Appends a shared-plot child with mark-specific encoding overrides.
+    pub fn with_child(mut self, child: LayerChildSpec) -> Self {
+        self.children.push(child);
         self
     }
 
     /// Lowers the authored layer spec into a shared chart/transform/series plan.
     pub fn lower(&self, scene: &Scene) -> Result<LoweredLayer, LoweringError> {
-        if self.marks.is_empty() {
+        if self.children.is_empty() {
             return Err(LoweringError::Unsupported(
                 "layer lowering requires at least one mark",
             ));
         }
-        if self.marks.contains(&MarkDef::Bar) && self.marks.iter().any(|mark| *mark != MarkDef::Bar)
+        if self
+            .children
+            .iter()
+            .any(|child| child.mark() == MarkDef::Bar)
+            && self
+                .children
+                .iter()
+                .any(|child| child.mark() != MarkDef::Bar)
         {
             return Err(LoweringError::Unsupported(
                 "bar layering is only supported with other bar marks in the experimental slice",
             ));
         }
 
-        let base_index = base_layer_mark_index(&self.marks, self.encoding.y2().is_some());
+        let base_index = base_layer_mark_index(&self.children);
         let base_unit = self.layer_child_unit(base_index);
         let base_lowered = base_unit.lower(scene)?;
 
         let mut series_layers = base_lowered.series_layers.clone();
-        for index in 0..self.marks.len() {
+        for index in 0..self.children.len() {
             if index == base_index {
                 continue;
             }
@@ -868,13 +948,14 @@ impl LayerSpec {
     }
 
     fn layer_child_unit(&self, index: usize) -> UnitSpec {
+        let child = &self.children[index];
         UnitSpec {
             id_base: child_layer_id_base(self.id_base, index),
             derived_table_base: self.derived_table_base,
             data: self.data,
             transforms: self.transforms.clone(),
-            mark: self.marks[index],
-            encoding: encoding_for_mark(&self.encoding, self.marks[index]),
+            mark: child.mark(),
+            encoding: merge_layer_encoding(&self.encoding, &child.encoding, child.mark()),
             width: self.width,
             height: self.height,
             title: self.title.clone(),
@@ -1642,8 +1723,19 @@ fn push_unique_col(cols: &mut Vec<ColumnId>, col: ColumnId) {
     }
 }
 
-fn encoding_for_mark(encoding: &EncodingSet, mark: MarkDef) -> EncodingSet {
-    let mut out = encoding.clone();
+fn merge_layer_encoding(
+    shared: &EncodingSet,
+    overrides: &EncodingSet,
+    mark: MarkDef,
+) -> EncodingSet {
+    let mut out = EncodingSet {
+        x: overrides.x.clone().or_else(|| shared.x.clone()),
+        x2: overrides.x2.clone().or_else(|| shared.x2.clone()),
+        y: overrides.y.clone().or_else(|| shared.y.clone()),
+        y2: overrides.y2.clone().or_else(|| shared.y2.clone()),
+        color: overrides.color.clone().or_else(|| shared.color.clone()),
+        text: overrides.text.clone().or_else(|| shared.text.clone()),
+    };
     if mark != MarkDef::Area {
         out.x2 = None;
         out.y2 = None;
@@ -1655,19 +1747,18 @@ fn child_layer_id_base(id_base: u64, index: usize) -> u64 {
     id_base.wrapping_add((index as u64).wrapping_mul(0x100_000))
 }
 
-fn base_layer_mark_index(marks: &[MarkDef], has_y2: bool) -> usize {
-    if marks.contains(&MarkDef::Bar) {
-        return marks
-            .iter()
-            .position(|mark| *mark == MarkDef::Bar)
-            .unwrap_or(0);
+fn base_layer_mark_index(children: &[LayerChildSpec]) -> usize {
+    if let Some(index) = children
+        .iter()
+        .position(|child| child.mark() == MarkDef::Bar)
+    {
+        return index;
     }
-    if marks.contains(&MarkDef::Area) {
-        let _ = has_y2;
-        return marks
-            .iter()
-            .position(|mark| *mark == MarkDef::Area)
-            .unwrap_or(0);
+    if let Some(index) = children
+        .iter()
+        .position(|child| child.mark() == MarkDef::Area)
+    {
+        return index;
     }
     0
 }
@@ -2156,6 +2247,45 @@ mod tests {
             .series_marks(&scene, layout.data)
             .expect("layered series marks");
         assert_eq!(marks.len(), 4);
+    }
+
+    #[test]
+    fn layer_child_overrides_can_change_y_channels_per_mark() {
+        let mut scene = Scene::new();
+        let table_id = TableId(81);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![500, 501, 502];
+        table.data = Some(Box::new(ThreeCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![3.0, 4.0, 5.0],
+            c: vec![1.0, 2.0, 2.5],
+        }));
+        scene.insert_table(table);
+
+        let spec = LayerSpec::new(0xF180, TableId(810), DataRef::Table(table_id))
+            .with_title("area + line")
+            .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+            .with_child(
+                LayerChildSpec::new(MarkDef::Area)
+                    .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("top"))
+                    .with_y2(ChannelDef::quantitative(ColumnId(2))),
+            )
+            .with_child(
+                LayerChildSpec::new(MarkDef::Line)
+                    .with_y(ChannelDef::quantitative(ColumnId(2)).with_title("line")),
+            );
+
+        let lowered = spec.lower(&scene).expect("lower overridden layer");
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let marks = lowered
+            .series_marks(&scene, layout.data)
+            .expect("overridden layer marks");
+        assert_eq!(marks.len(), 2);
+        assert!(
+            marks
+                .iter()
+                .all(|mark| matches!(mark.encodings, vizir_core::MarkEncodings::Path(_)))
+        );
     }
 
     #[test]

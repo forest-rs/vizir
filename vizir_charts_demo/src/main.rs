@@ -595,9 +595,10 @@ fn lowered_json_layer_demo() -> html::HtmlSection {
     let source_id = TableId(138);
     let mut table = Table::new(source_id);
     table.row_keys = vec![0, 1, 2, 3];
-    table.data = Some(Box::new(ScatterValues {
+    table.data = Some(Box::new(LayerOverlayValues {
         x: vec![0.0, 1.0, 2.0, 3.0],
-        y: vec![1.0, 2.0, 1.5, 3.0],
+        area_top: vec![3.0, 4.0, 3.5, 5.0],
+        line_y: vec![1.0, 2.0, 1.5, 3.0],
     }));
     scene.insert_table(table);
 
@@ -607,12 +608,22 @@ fn lowered_json_layer_demo() -> html::HtmlSection {
             "width": 220.0,
             "height": 120.0,
             "layer": [
-                { "mark": "line" },
-                { "mark": "point" }
+                {
+                    "mark": "area",
+                    "encoding": {
+                        "y": { "field": "area_top", "type": "quantitative", "title": "band" },
+                        "y2": { "field": "line_y", "type": "quantitative" }
+                    }
+                },
+                {
+                    "mark": "line",
+                    "encoding": {
+                        "y": { "field": "line_y", "type": "quantitative", "title": "line" }
+                    }
+                }
             ],
             "encoding": {
-                "x": { "field": "x", "type": "quantitative", "title": "x" },
-                "y": { "field": "y", "type": "quantitative", "title": "y" }
+                "x": { "field": "x", "type": "quantitative", "title": "x" }
             }
         }"#,
     )
@@ -626,6 +637,14 @@ fn lowered_json_layer_demo() -> html::HtmlSection {
         SchemaField {
             name: "y",
             column: ColumnId(1),
+        },
+        SchemaField {
+            name: "area_top",
+            column: ColumnId(1),
+        },
+        SchemaField {
+            name: "line_y",
+            column: ColumnId(2),
         },
     ]);
     let spec = parsed
@@ -641,8 +660,30 @@ fn lowered_json_layer_demo() -> html::HtmlSection {
 
     html::HtmlSection {
         title: "Lowered JSON Layer",
-        description: "A shared-plot line + point overlay built from JSON text, adapted by field names, and lowered through the new layered spec seam.",
+        description: "A shared-plot area + line overlay built from JSON text, with child-specific encoding overrides lowered through the layered spec seam.",
         svg: render_lowered_layer_spec(&mut scene, spec),
+    }
+}
+
+#[derive(Debug)]
+struct LayerOverlayValues {
+    x: Vec<f64>,
+    area_top: Vec<f64>,
+    line_y: Vec<f64>,
+}
+
+impl TableData for LayerOverlayValues {
+    fn row_count(&self) -> usize {
+        self.x.len().min(self.area_top.len()).min(self.line_y.len())
+    }
+
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        match col {
+            ColumnId(0) => self.x.get(row).copied(),
+            ColumnId(1) => self.area_top.get(row).copied(),
+            ColumnId(2) => self.line_y.get(row).copied(),
+            _ => None,
+        }
     }
 }
 

@@ -15,7 +15,9 @@ use alloc::vec::Vec;
 use vizir_core::{ColumnId, TableId};
 use vizir_transforms::{AggregateField, AggregateOp, CompareOp, Predicate, SortOrder, StackOffset};
 
-use crate::{ChannelDef, DataRef, FieldKind, LayerSpec, MarkDef, TransformSpec, UnitSpec};
+use crate::{
+    ChannelDef, DataRef, FieldKind, LayerChildSpec, LayerSpec, MarkDef, TransformSpec, UnitSpec,
+};
 
 /// Context needed to adapt a parsed unit spec into a concrete [`UnitSpec`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -539,9 +541,68 @@ impl ParsedUnitSpec {
 }
 
 /// A parsed shared-plot layer spec that still refers to fields by name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParsedLayerChildSpec {
+    mark: ParsedMarkDef,
+    encoding: ParsedEncodingSet,
+}
+
+impl ParsedLayerChildSpec {
+    /// Creates a new parsed layer child for the given mark.
+    pub fn new(mark: ParsedMarkDef) -> Self {
+        Self {
+            mark,
+            encoding: ParsedEncodingSet::new(),
+        }
+    }
+
+    /// Replaces the child override encoding set.
+    pub fn with_encoding(mut self, encoding: ParsedEncodingSet) -> Self {
+        self.encoding = encoding;
+        self
+    }
+
+    /// Sets the child x override.
+    pub fn with_x(mut self, x: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_x(x);
+        self
+    }
+
+    /// Sets the child x2 override.
+    pub fn with_x2(mut self, x2: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_x2(x2);
+        self
+    }
+
+    /// Sets the child y override.
+    pub fn with_y(mut self, y: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_y(y);
+        self
+    }
+
+    /// Sets the child y2 override.
+    pub fn with_y2(mut self, y2: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_y2(y2);
+        self
+    }
+
+    /// Sets the child color override.
+    pub fn with_color(mut self, color: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_color(color);
+        self
+    }
+
+    /// Sets the child text override.
+    pub fn with_text(mut self, text: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_text(text);
+        self
+    }
+}
+
+/// A parsed shared-plot layer spec that still refers to fields by name.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ParsedLayerSpec {
-    marks: Vec<ParsedMarkDef>,
+    children: Vec<ParsedLayerChildSpec>,
     transforms: Vec<ParsedTransformSpec>,
     encoding: ParsedEncodingSet,
     width: f64,
@@ -559,7 +620,7 @@ impl ParsedLayerSpec {
     /// Creates a new empty parsed layer spec.
     pub fn new() -> Self {
         Self {
-            marks: Vec::new(),
+            children: Vec::new(),
             transforms: Vec::new(),
             encoding: ParsedEncodingSet::new(),
             width: 220.0,
@@ -631,7 +692,13 @@ impl ParsedLayerSpec {
 
     /// Appends a parsed mark layer.
     pub fn with_mark(mut self, mark: ParsedMarkDef) -> Self {
-        self.marks.push(mark);
+        self.children.push(ParsedLayerChildSpec::new(mark));
+        self
+    }
+
+    /// Appends a parsed child with mark-specific encoding overrides.
+    pub fn with_child(mut self, child: ParsedLayerChildSpec) -> Self {
+        self.children.push(child);
         self
     }
 
@@ -670,8 +737,8 @@ impl ParsedLayerSpec {
         if let Some(text) = &self.encoding.text {
             layer = layer.with_text(adapt_channel(text, "text", &mut fields)?);
         }
-        for mark in &self.marks {
-            layer = layer.with_mark(adapt_mark(*mark));
+        for child in &self.children {
+            layer = layer.with_child(adapt_layer_child(child, &mut fields)?);
         }
 
         Ok(layer)
@@ -717,6 +784,32 @@ fn adapt_channel(
     }
     if let Some(title) = &channel.title {
         out = out.with_title(title.clone());
+    }
+    Ok(out)
+}
+
+fn adapt_layer_child(
+    child: &ParsedLayerChildSpec,
+    fields: &mut FieldBindings<'_>,
+) -> Result<LayerChildSpec, AdaptError> {
+    let mut out = LayerChildSpec::new(adapt_mark(child.mark));
+    if let Some(x) = &child.encoding.x {
+        out = out.with_x(adapt_channel(x, "layer child x", fields)?);
+    }
+    if let Some(x2) = &child.encoding.x2 {
+        out = out.with_x2(adapt_channel(x2, "layer child x2", fields)?);
+    }
+    if let Some(y) = &child.encoding.y {
+        out = out.with_y(adapt_channel(y, "layer child y", fields)?);
+    }
+    if let Some(y2) = &child.encoding.y2 {
+        out = out.with_y2(adapt_channel(y2, "layer child y2", fields)?);
+    }
+    if let Some(color) = &child.encoding.color {
+        out = out.with_color(adapt_channel(color, "layer child color", fields)?);
+    }
+    if let Some(text) = &child.encoding.text {
+        out = out.with_text(adapt_channel(text, "layer child text", fields)?);
     }
     Ok(out)
 }
@@ -1140,5 +1233,41 @@ mod tests {
             .marks(&scene, &HeuristicTextMeasurer)
             .expect("layer marks");
         assert!(marks.len() >= 4);
+    }
+
+    #[test]
+    fn parsed_layer_child_overrides_adapt() {
+        let parsed = ParsedLayerSpec::new()
+            .with_x(ParsedChannelDef::quantitative("x"))
+            .with_child(
+                ParsedLayerChildSpec::new(ParsedMarkDef::Area)
+                    .with_y(ParsedChannelDef::quantitative("y"))
+                    .with_y2(ParsedChannelDef::quantitative("y2")),
+            )
+            .with_child(
+                ParsedLayerChildSpec::new(ParsedMarkDef::Line)
+                    .with_y(ParsedChannelDef::quantitative("y2")),
+            );
+
+        let mut scene = Scene::new();
+        let table_id = TableId(71);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![20, 21, 22];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![3.0, 4.0, 5.0],
+            c: vec![1.0, 2.0, 2.5],
+            d: vec![0.0, 0.0, 0.0],
+        }));
+        scene.insert_table(table);
+
+        let layer = parsed
+            .adapt(&resolver(), context(table_id))
+            .expect("adapt overridden layer");
+        let lowered = layer.lower(&scene).expect("lower overridden layer");
+        let (_layout, marks) = lowered
+            .marks(&scene, &HeuristicTextMeasurer)
+            .expect("layer marks");
+        assert!(marks.len() >= 2);
     }
 }

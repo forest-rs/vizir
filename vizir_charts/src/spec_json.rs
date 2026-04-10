@@ -17,8 +17,9 @@ use serde_json::Value;
 use vizir_transforms::{AggregateOp, CompareOp, SortOrder, StackOffset};
 
 use crate::{
-    ParsedAggregateField, ParsedChannelDef, ParsedFieldKind, ParsedLayerSpec, ParsedMarkDef,
-    ParsedPredicate, ParsedTransformSpec, ParsedUnitSpec,
+    ParsedAggregateField, ParsedChannelDef, ParsedEncodingSet, ParsedFieldKind,
+    ParsedLayerChildSpec, ParsedLayerSpec, ParsedMarkDef, ParsedPredicate, ParsedTransformSpec,
+    ParsedUnitSpec,
 };
 
 /// Errors returned while parsing a narrow JSON unit spec.
@@ -71,24 +72,7 @@ pub fn parse_unit_spec_json(input: &str) -> Result<ParsedUnitSpec, JsonSpecError
         spec = spec.with_title(title);
     }
 
-    if let Some(x) = raw.encoding.x {
-        spec = spec.with_x(parse_channel(x)?);
-    }
-    if let Some(x2) = raw.encoding.x2 {
-        spec = spec.with_x2(parse_channel(x2)?);
-    }
-    if let Some(y) = raw.encoding.y {
-        spec = spec.with_y(parse_channel(y)?);
-    }
-    if let Some(y2) = raw.encoding.y2 {
-        spec = spec.with_y2(parse_channel(y2)?);
-    }
-    if let Some(color) = raw.encoding.color {
-        spec = spec.with_color(parse_channel(color)?);
-    }
-    if let Some(text) = raw.encoding.text {
-        spec = spec.with_text(parse_channel(text)?);
-    }
+    spec = spec.with_encoding(parse_encoding_set(raw.encoding)?);
 
     for transform in raw.transform {
         spec = spec.with_transform(parse_transform(transform)?);
@@ -107,30 +91,15 @@ pub fn parse_layer_spec_json(input: &str) -> Result<ParsedLayerSpec, JsonSpecErr
         spec = spec.with_title(title);
     }
 
-    if let Some(x) = raw.encoding.x {
-        spec = spec.with_x(parse_channel(x)?);
-    }
-    if let Some(x2) = raw.encoding.x2 {
-        spec = spec.with_x2(parse_channel(x2)?);
-    }
-    if let Some(y) = raw.encoding.y {
-        spec = spec.with_y(parse_channel(y)?);
-    }
-    if let Some(y2) = raw.encoding.y2 {
-        spec = spec.with_y2(parse_channel(y2)?);
-    }
-    if let Some(color) = raw.encoding.color {
-        spec = spec.with_color(parse_channel(color)?);
-    }
-    if let Some(text) = raw.encoding.text {
-        spec = spec.with_text(parse_channel(text)?);
-    }
+    spec = spec.with_encoding(parse_encoding_set(raw.encoding)?);
 
     for transform in raw.transform {
         spec = spec.with_transform(parse_transform(transform)?);
     }
     for layer in raw.layer {
-        spec = spec.with_mark(parse_mark(layer.mark)?);
+        let child = ParsedLayerChildSpec::new(parse_mark(layer.mark)?)
+            .with_encoding(parse_encoding_set(layer.encoding.unwrap_or_default())?);
+        spec = spec.with_child(child);
     }
 
     Ok(spec)
@@ -166,6 +135,7 @@ struct JsonLayerSpec {
 #[serde(deny_unknown_fields)]
 struct JsonLayerEntry {
     mark: JsonMark,
+    encoding: Option<JsonEncoding>,
 }
 
 #[derive(Default, Deserialize)]
@@ -306,6 +276,29 @@ fn parse_channel(channel: JsonChannel) -> Result<ParsedChannelDef, JsonSpecError
     }
     if let Some(title) = channel.title {
         out = out.with_title(title);
+    }
+    Ok(out)
+}
+
+fn parse_encoding_set(encoding: JsonEncoding) -> Result<ParsedEncodingSet, JsonSpecError> {
+    let mut out = ParsedEncodingSet::new();
+    if let Some(x) = encoding.x {
+        out = out.with_x(parse_channel(x)?);
+    }
+    if let Some(x2) = encoding.x2 {
+        out = out.with_x2(parse_channel(x2)?);
+    }
+    if let Some(y) = encoding.y {
+        out = out.with_y(parse_channel(y)?);
+    }
+    if let Some(y2) = encoding.y2 {
+        out = out.with_y2(parse_channel(y2)?);
+    }
+    if let Some(color) = encoding.color {
+        out = out.with_color(parse_channel(color)?);
+    }
+    if let Some(text) = encoding.text {
+        out = out.with_text(parse_channel(text)?);
     }
     Ok(out)
 }
@@ -632,12 +625,22 @@ mod tests {
             r#"{
                 "title": "line + point",
                 "layer": [
-                    { "mark": "line" },
-                    { "mark": "point" }
+                    {
+                        "mark": "area",
+                        "encoding": {
+                            "y": { "field": "y", "type": "quantitative" },
+                            "y2": { "field": "y2", "type": "quantitative" }
+                        }
+                    },
+                    {
+                        "mark": "line",
+                        "encoding": {
+                            "y": { "field": "y2", "type": "quantitative" }
+                        }
+                    }
                 ],
                 "encoding": {
-                    "x": { "field": "x", "type": "quantitative" },
-                    "y": { "field": "y", "type": "quantitative" }
+                    "x": { "field": "x", "type": "quantitative" }
                 }
             }"#,
         )
@@ -651,6 +654,10 @@ mod tests {
             SchemaField {
                 name: "y",
                 column: ColumnId(1),
+            },
+            SchemaField {
+                name: "y2",
+                column: ColumnId(2),
             },
         ]);
         let _layer = spec
