@@ -1775,6 +1775,53 @@ mod tests {
     }
 
     #[test]
+    fn parsed_stacked_bar_adapts_and_lowers() {
+        let parsed = ParsedUnitSpec::new(ParsedMarkDef::Bar)
+            .with_transform(ParsedTransformSpec::stack(
+                ["category"],
+                StackOffset::Zero,
+                Some("series"),
+                SortOrder::Asc,
+                "value",
+                "y0",
+                "y1",
+                ["category", "value", "series"],
+            ))
+            .with_x(ParsedChannelDef::ordinal("category"))
+            .with_y(ParsedChannelDef::quantitative("y1"))
+            .with_y2(ParsedChannelDef::quantitative("y0"))
+            .with_color(ParsedChannelDef::nominal("series"));
+
+        let mut scene = Scene::new();
+        let table_id = TableId(322);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![130, 131, 132, 133, 134];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0, 2.0, 1.0, 2.0],
+            b: vec![2.0, 3.0, 4.0, 5.0, 6.0],
+            c: vec![0.0, 0.0, 0.0, 1.0, 1.0],
+            d: vec![0.0, 0.0, 0.0, 0.0, 0.0],
+        }));
+        scene.insert_table(table);
+
+        let unit = parsed
+            .adapt(&resolver(), context(table_id))
+            .expect("adapt stacked bar");
+        let lowered = unit
+            .lower_into_scene(&mut scene)
+            .expect("lower stacked bar");
+        let (_layout, marks) = lowered
+            .marks(&scene, &HeuristicTextMeasurer)
+            .expect("stacked bar marks");
+        assert!(
+            marks
+                .iter()
+                .any(|mark| mark.kind == vizir_core::MarkKind::Rect)
+        );
+        assert!(lowered.chart().legend.is_some());
+    }
+
+    #[test]
     fn parsed_layer_child_overrides_adapt() {
         let parsed = ParsedLayerSpec::new()
             .with_x(ParsedChannelDef::quantitative("x"))

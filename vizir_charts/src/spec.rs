@@ -688,9 +688,14 @@ impl UnitSpec {
                 "categorical color splitting is not supported for text marks yet",
             ));
         }
-        if (x2.is_some() || y2.is_some()) && self.mark != MarkDef::Area {
+        if x2.is_some() && self.mark != MarkDef::Area {
             return Err(LoweringError::Unsupported(
-                "secondary position channels are currently only supported for area marks",
+                "x2 is currently only supported for area marks",
+            ));
+        }
+        if y2.is_some() && !matches!(self.mark, MarkDef::Area | MarkDef::Bar) {
+            return Err(LoweringError::Unsupported(
+                "y2 is currently only supported for area and bar marks",
             ));
         }
         if x2.is_some() && y2.is_none() {
@@ -980,9 +985,10 @@ impl UnitSpec {
                         table: output,
                         x: x.field(),
                         y: lowered_y_field,
+                        y2: y2.map(ChannelDef::field),
                         category_index_map: bar_category_index_map.clone(),
-                        group_index: index,
-                        group_count: series_values.len(),
+                        group_index: if y2.is_some() { 0 } else { index },
+                        group_count: if y2.is_some() { 1 } else { series_values.len() },
                         baseline: 0.0,
                         fill,
                         opacity: opacity.map(ChannelDef::field),
@@ -1161,6 +1167,7 @@ impl UnitSpec {
                     table: current_table,
                     x: x.field(),
                     y: lowered_y_field,
+                    y2: y2.map(ChannelDef::field),
                     category_index_map: bar_category_index_map,
                     group_index: 0,
                     group_count: 1,
@@ -2003,6 +2010,7 @@ struct BarLayer {
     table: TableId,
     x: ColumnId,
     y: ColumnId,
+    y2: Option<ColumnId>,
     category_index_map: Vec<(u64, usize)>,
     group_index: usize,
     group_count: usize,
@@ -2028,6 +2036,7 @@ impl BarLayer {
         let table_id = self.table;
         let x_col = self.x;
         let y_col = self.y;
+        let y2_col = self.y2;
         let category_index_map = self.category_index_map.clone();
         let group_index = self.group_index;
         let group_count = self.group_count;
@@ -2050,8 +2059,7 @@ impl BarLayer {
             .enumerate()
             .map(|(row, row_key)| {
                 let category_index_map = category_index_map.clone();
-                let y0 = y_scale.map(baseline);
-                let mut mark = Mark::builder(layer_row_mark_id(id_base, row_key))
+                let mark = Mark::builder(layer_row_mark_id(id_base, row_key))
                     .rect()
                     .z_index(crate::z_order::SERIES_FILL)
                     .x_compute(
@@ -2065,7 +2073,45 @@ impl BarLayer {
                                 + group_offset
                         },
                     )
-                    .y_compute(
+                    .w_const(group_width);
+                let mut mark = if let Some(y2_col) = y2_col {
+                    mark.y_compute(
+                        [
+                            InputRef::TableCol {
+                                table: table_id,
+                                col: y_col,
+                            },
+                            InputRef::TableCol {
+                                table: table_id,
+                                col: y2_col,
+                            },
+                        ],
+                        move |ctx, _| {
+                            let top = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
+                            let bottom = ctx.table_f64(table_id, row, y2_col).unwrap_or(baseline);
+                            y_scale.map(top.max(bottom))
+                        },
+                    )
+                    .h_compute(
+                        [
+                            InputRef::TableCol {
+                                table: table_id,
+                                col: y_col,
+                            },
+                            InputRef::TableCol {
+                                table: table_id,
+                                col: y2_col,
+                            },
+                        ],
+                        move |ctx, _| {
+                            let top = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
+                            let bottom = ctx.table_f64(table_id, row, y2_col).unwrap_or(baseline);
+                            (y_scale.map(top) - y_scale.map(bottom)).abs()
+                        },
+                    )
+                } else {
+                    let y0 = y_scale.map(baseline);
+                    mark.y_compute(
                         [InputRef::TableCol {
                             table: table_id,
                             col: y_col,
@@ -2075,7 +2121,6 @@ impl BarLayer {
                             y_scale.map(v).min(y0)
                         },
                     )
-                    .w_const(group_width)
                     .h_compute(
                         [InputRef::TableCol {
                             table: table_id,
@@ -2085,7 +2130,8 @@ impl BarLayer {
                             let v = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
                             (y_scale.map(v) - y0).abs()
                         },
-                    );
+                    )
+                };
                 mark = if let Some(opacity_col) = opacity_col {
                     let fill = fill.clone();
                     mark.fill_compute(
@@ -3923,6 +3969,63 @@ mod tests {
         unique.sort_by(f64::total_cmp);
         unique.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
         assert_eq!(unique.len(), 5);
+    }
+
+    #[test]
+    fn stacked_bar_lowering_keeps_color_series_in_shared_category_slots() {
+        let mut scene = Scene::new();
+        let table_id = TableId(12);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![20, 21, 22, 23, 24];
+        table.data = Some(Box::new(ThreeCols {
+            a: vec![0.0, 1.0, 2.0, 1.0, 2.0],
+            b: vec![2.0, 3.0, 4.0, 5.0, 6.0],
+            c: vec![0.0, 0.0, 0.0, 1.0, 1.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(0xAC00, TableId(120), DataRef::Table(table_id), MarkDef::Bar)
+            .with_transform(TransformSpec::stack(
+                vec![ColumnId(0)],
+                StackOffset::Zero,
+                Some(ColumnId(2)),
+                SortOrder::Asc,
+                ColumnId(1),
+                ColumnId(10),
+                ColumnId(11),
+                vec![ColumnId(0), ColumnId(1), ColumnId(2)],
+            ))
+            .with_x(ChannelDef::ordinal(ColumnId(0)).with_title("category"))
+            .with_y(ChannelDef::quantitative(ColumnId(11)).with_title("top"))
+            .with_y2(ChannelDef::quantitative(ColumnId(10)).with_title("bottom"))
+            .with_color(ChannelDef::nominal(ColumnId(2)).with_title("series"));
+
+        let lowered = spec
+            .lower_into_scene(&mut scene)
+            .expect("lower stacked bars");
+        assert!(lowered.chart().legend.is_some());
+
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let marks = lowered
+            .series_marks(&scene, layout.data)
+            .expect("stacked bar marks");
+        let diffs = scene.tick(marks);
+        let xs = diffs
+            .into_iter()
+            .filter_map(|diff| match diff {
+                MarkDiff::Enter { new, .. } => match *new {
+                    vizir_core::MarkPayload::Rect(channels) => Some(channels.rect.x0),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(xs.len(), 5);
+
+        let mut unique = xs;
+        unique.sort_by(f64::total_cmp);
+        unique.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+        assert_eq!(unique.len(), 3);
     }
 
     #[test]

@@ -281,8 +281,7 @@ struct JsonStackTransform {
     groupby: Vec<String>,
     sort: Option<JsonSortField>,
     offset: Option<String>,
-    #[serde(rename = "as")]
-    as_fields: [String; 2],
+    r#as: [String; 2],
     #[serde(default)]
     columns: Vec<String>,
 }
@@ -389,6 +388,30 @@ fn parse_transform(value: Value) -> Result<ParsedTransformSpec, JsonSpecError> {
         ));
     }
 
+    if object.contains_key("stack") {
+        let raw: JsonStackTransform = serde_json::from_value(value)?;
+        if raw.columns.is_empty() {
+            return Err(JsonSpecError::Invalid(String::from(
+                "stack transforms currently require a `columns` array",
+            )));
+        }
+        return Ok(ParsedTransformSpec::stack(
+            raw.groupby,
+            parse_stack_offset(raw.offset.as_deref().unwrap_or("zero"))?,
+            raw.sort.clone().map(|sort| sort.field),
+            parse_sort_order(
+                raw.sort
+                    .as_ref()
+                    .and_then(|sort| sort.order.as_deref())
+                    .unwrap_or("ascending"),
+            )?,
+            raw.stack,
+            raw.r#as[0].clone(),
+            raw.r#as[1].clone(),
+            raw.columns,
+        ));
+    }
+
     if object.contains_key("sort") {
         let raw: JsonSortTransform = serde_json::from_value(value)?;
         if raw.columns.is_empty() {
@@ -430,30 +453,6 @@ fn parse_transform(value: Value) -> Result<ParsedTransformSpec, JsonSpecError> {
             raw.bin.field,
             raw.bin.as_field,
             raw.bin.step,
-            raw.columns,
-        ));
-    }
-
-    if object.contains_key("stack") {
-        let raw: JsonStackTransform = serde_json::from_value(value)?;
-        if raw.columns.is_empty() {
-            return Err(JsonSpecError::Invalid(String::from(
-                "stack transforms currently require a `columns` array",
-            )));
-        }
-        return Ok(ParsedTransformSpec::stack(
-            raw.groupby,
-            parse_stack_offset(raw.offset.as_deref().unwrap_or("zero"))?,
-            raw.sort.clone().map(|sort| sort.field),
-            parse_sort_order(
-                raw.sort
-                    .as_ref()
-                    .and_then(|sort| sort.order.as_deref())
-                    .unwrap_or("ascending"),
-            )?,
-            raw.stack,
-            raw.as_fields[0].clone(),
-            raw.as_fields[1].clone(),
             raw.columns,
         ));
     }
@@ -642,6 +641,37 @@ mod tests {
                 },
             )
             .expect("adapt parsed grouped bar");
+    }
+
+    #[test]
+    fn parses_stacked_bar_fixture() {
+        let spec = parse_unit_spec_json(include_str!("../../fixtures/specs/unit_stacked_bar.json"))
+            .expect("parse stacked bar spec");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "category",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "value",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "series",
+                column: ColumnId(2),
+            },
+        ]);
+        let _unit = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xA0_200,
+                    derived_table_base: TableId(102),
+                    data: DataRef::Table(TableId(3)),
+                },
+            )
+            .expect("adapt parsed stacked bar");
     }
 
     #[test]

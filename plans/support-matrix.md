@@ -30,7 +30,7 @@ Status meanings:
 
 | Mark | Status | Notes |
 |---|---|---|
-| `bar` | supported | Ordinal/nominal `x`, quantitative `y`, plus grouped categorical `color` |
+| `bar` | supported | Ordinal/nominal `x`, quantitative `y`, optional quantitative `y2`, plus grouped categorical `color` or explicit stacked spans via stack-derived `y`/`y2` |
 | `line` | supported | Quantitative/temporal `x`, quantitative `y` |
 | `point` | supported | Quantitative/temporal `x`, quantitative `y`, plus point-only `size` and `shape` channels |
 | `area` | supported | Plain area, categorical color-split area, ranged area via `y2`, paired-edge area via `x2` + `y2` |
@@ -45,8 +45,8 @@ Status meanings:
 | `x` | supported | Ordinal, nominal, quantitative, temporal; `rule` uses x for vertical full-span thresholds |
 | `y` | supported | Quantitative only in lowering slice; `rule` uses y for horizontal full-span thresholds |
 | `x2` | partial | Area-only today; requires `y2` |
-| `y2` | partial | Area-only today |
-| `color` | partial | Categorical split with legend generation; bar marks lower as grouped bars, not stacked bars |
+| `y2` | partial | Supported on area marks and bar spans; stacked bars use it as the lower edge |
+| `color` | partial | Categorical split with legend generation; bar marks lower as grouped bars by default, or stacked bars when `y`/`y2` already describe explicit spans |
 | `size` | partial | Point-only; quantitative values map into a fixed visual size range |
 | `shape` | partial | Point-only; distinct values map into a fixed symbol palette |
 | `opacity` | partial | Bar/point/text only; quantitative values map into a fixed alpha range |
@@ -82,8 +82,8 @@ Status meanings:
 ## Important fences
 
 - `color` splitting is currently rejected for `text`.
-- Bar `color` lowering currently produces grouped bars only; stacking is not modeled in the authored
-  seam yet.
+- Bar `color` lowering produces grouped bars by default. Stacked bars are only modeled when an
+  explicit stack transform feeds `y`/`y2` spans; stacking is not inferred implicitly from `color`.
 - Shared `layer` currently keeps one shared plot shell. Child entries can be fully specified with
   their own mark, transforms, and encoding block, and later children can inherit
   positional/grouping defaults from the base child, but the base child still owns the shared x/y
@@ -95,7 +95,8 @@ Status meanings:
   layer seam, but they may not be combined with conflicting data-driven channels like shared
   `color`, child `stroke`, or child `opacity`.
 - `aggregate` on `x`, `x2`, `color`, `y2`, `opacity`, `stroke`, `strokeWidth`, `order`, `detail`, and `text` is rejected.
-- `x2`/`y2` are currently only supported on `area`.
+- `x2` is currently only supported on `area`.
+- `y2` is currently supported on `area` and `bar`.
 - `opacity` currently requires a quantitative channel and is only supported on `bar`, `point`, and `text`.
 - `stroke` and `strokeWidth` currently require point marks; `stroke` must be categorical and
   `strokeWidth` must be quantitative.

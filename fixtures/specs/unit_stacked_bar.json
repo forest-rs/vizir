@@ -1,0 +1,20 @@
+{
+  "title": "Stacked Bars",
+  "mark": "bar",
+  "transform": [
+    {
+      "stack": "value",
+      "groupby": ["category"],
+      "sort": { "field": "series", "order": "ascending" },
+      "offset": "zero",
+      "as": ["y0", "y1"],
+      "columns": ["category", "value", "series"]
+    }
+  ],
+  "encoding": {
+    "x": { "field": "category", "type": "ordinal", "title": "category" },
+    "y": { "field": "y1", "type": "quantitative", "title": "stack top" },
+    "y2": { "field": "y0", "type": "quantitative", "title": "stack bottom" },
+    "color": { "field": "series", "type": "nominal", "title": "series" }
+  }
+}

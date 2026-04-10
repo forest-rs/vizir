@@ -11,7 +11,8 @@ Current state:
 - Layer children can now carry literal fill/stroke/opacity styles through the same lowered seam.
 - `rule` now lowers as a full-span threshold mark, including layered rule overlays with child-local
   aggregate transforms.
-- Unit specs now support grouped categorical color bars through the same lowering path.
+- Unit specs now support grouped categorical color bars, plus explicit stacked bars through
+  stack-derived `y`/`y2` spans, in the same lowering path.
 - Structural `order` and `detail` channels lower for line/area marks.
 - Styling channels now include point-local `opacity`, `stroke`, and `strokeWidth`.
 - The parser-facing adapter and feature-gated JSON path target the same seam through checked-in

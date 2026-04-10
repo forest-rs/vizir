@@ -51,6 +51,7 @@ fn main() {
         lowered_spec_demo(),
         lowered_json_spec_demo(),
         lowered_json_grouped_bar_demo(),
+        lowered_json_stacked_bar_demo(),
         lowered_json_bar_text_demo(),
         lowered_json_point_shape_size_demo(),
         lowered_json_point_opacity_demo(),
@@ -623,6 +624,53 @@ fn lowered_json_grouped_bar_demo() -> html::HtmlSection {
     html::HtmlSection {
         title: "Lowered JSON Grouped Bars",
         description: "A grouped bar chart built from JSON text, proving categorical `color` lowering for bars through the authored seam.",
+        svg: render_lowered_unit_spec(&mut scene, spec),
+    }
+}
+
+fn lowered_json_stacked_bar_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(1372);
+    let mut table = Table::new(source_id);
+    table.row_keys = (0..6_u64).collect();
+    table.data = Some(Box::new(GroupedBarValues {
+        category: vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0],
+        value: vec![2.0, 4.0, 3.0, 5.0, 4.0, 6.0],
+        series: vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+    }));
+    scene.insert_table(table);
+
+    let parsed = parse_unit_spec_json(include_str!("../../fixtures/specs/unit_stacked_bar.json"))
+        .expect("parse stacked bar spec");
+
+    let resolver = SliceFieldResolver::new(&[
+        SchemaField {
+            name: "category",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "value",
+            column: ColumnId(1),
+        },
+        SchemaField {
+            name: "series",
+            column: ColumnId(2),
+        },
+    ]);
+    let spec = parsed
+        .adapt(
+            &resolver,
+            AdaptContext {
+                id_base: 0xD0_8C0,
+                derived_table_base: TableId(139),
+                data: DataRef::Table(source_id),
+            },
+        )
+        .expect("adapt stacked bar spec");
+
+    html::HtmlSection {
+        title: "Lowered JSON Stacked Bars",
+        description: "A stacked bar chart built from JSON text, proving explicit stack-transform lowering into bar `y`/`y2` spans through the authored seam.",
         svg: render_lowered_unit_spec(&mut scene, spec),
     }
 }

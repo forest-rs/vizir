@@ -171,10 +171,11 @@ And only the most useful authored meanings:
 - `x`: position or grouped category
 - `x2`: secondary position for ranged areas
 - `y`: position or aggregate value
-- `y2`: secondary position for ranged areas
+- `y2`: secondary position for ranged areas and explicit bar spans
 - `rule`: a full-span threshold from exactly one authored `x` or `y` channel
 - `color`: categorical series split for legend/fill
-  for bar marks this currently means grouped bars, not stacked bars
+  for bar marks this currently means grouped bars by default, or stacked bars when an explicit
+  stack transform drives `y`/`y2`
 - `text`: direct label channel for simple annotations later
 
 ## Proposed minimal authored types
