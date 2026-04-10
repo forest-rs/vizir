@@ -11,7 +11,7 @@
 //! - one input table already present in a [`vizir_core::Scene`],
 //! - a small transform subset,
 //! - `bar`, `line`, `point`, `area`, and `text` marks,
-//! - `x`, `x2`, `y`, `y2`, `color`, `size`, `shape`, `opacity`, `order`, `detail`, and `text` channels,
+//! - `x`, `x2`, `y`, `y2`, `color`, `size`, `shape`, `opacity`, `stroke`, `strokeWidth`, `order`, `detail`, and `text` channels,
 //! - optional chart titles.
 //!
 //! It is not a JSON parser and not a full Vega/Vega-Lite implementation.
@@ -170,6 +170,8 @@ pub struct EncodingSet {
     size: Option<ChannelDef>,
     shape: Option<ChannelDef>,
     opacity: Option<ChannelDef>,
+    stroke: Option<ChannelDef>,
+    stroke_width: Option<ChannelDef>,
     order: Option<ChannelDef>,
     detail: Option<ChannelDef>,
     text: Option<ChannelDef>,
@@ -229,6 +231,18 @@ impl EncodingSet {
         self
     }
 
+    /// Sets the stroke channel.
+    pub fn with_stroke(mut self, stroke: ChannelDef) -> Self {
+        self.stroke = Some(stroke);
+        self
+    }
+
+    /// Sets the stroke width channel.
+    pub fn with_stroke_width(mut self, stroke_width: ChannelDef) -> Self {
+        self.stroke_width = Some(stroke_width);
+        self
+    }
+
     /// Sets the order channel.
     pub fn with_order(mut self, order: ChannelDef) -> Self {
         self.order = Some(order);
@@ -277,6 +291,14 @@ impl EncodingSet {
 
     fn opacity(&self) -> Option<&ChannelDef> {
         self.opacity.as_ref()
+    }
+
+    fn stroke(&self) -> Option<&ChannelDef> {
+        self.stroke.as_ref()
+    }
+
+    fn stroke_width(&self) -> Option<&ChannelDef> {
+        self.stroke_width.as_ref()
     }
 
     fn order(&self) -> Option<&ChannelDef> {
@@ -497,6 +519,18 @@ impl UnitSpec {
         self
     }
 
+    /// Sets the stroke channel.
+    pub fn with_stroke(mut self, stroke: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_stroke(stroke);
+        self
+    }
+
+    /// Sets the stroke width channel.
+    pub fn with_stroke_width(mut self, stroke_width: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_stroke_width(stroke_width);
+        self
+    }
+
     /// Sets the order channel.
     pub fn with_order(mut self, order: ChannelDef) -> Self {
         self.encoding = self.encoding.with_order(order);
@@ -540,6 +574,8 @@ impl UnitSpec {
         let size = self.encoding.size();
         let shape = self.encoding.shape();
         let opacity = self.encoding.opacity();
+        let stroke = self.encoding.stroke();
+        let stroke_width = self.encoding.stroke_width();
         let order = self.encoding.order();
         let detail = self.encoding.detail();
         let text = self.encoding.text();
@@ -614,6 +650,20 @@ impl UnitSpec {
                 "aggregate on the opacity channel is not supported in the experimental lowering slice",
             ));
         }
+        if let Some(stroke) = stroke
+            && stroke.aggregate().is_some()
+        {
+            return Err(LoweringError::Unsupported(
+                "aggregate on the stroke channel is not supported in the experimental lowering slice",
+            ));
+        }
+        if let Some(stroke_width) = stroke_width
+            && stroke_width.aggregate().is_some()
+        {
+            return Err(LoweringError::Unsupported(
+                "aggregate on the strokeWidth channel is not supported in the experimental lowering slice",
+            ));
+        }
         if let Some(order) = order
             && order.aggregate().is_some()
         {
@@ -674,9 +724,28 @@ impl UnitSpec {
                 "opacity currently requires a quantitative channel",
             ));
         }
+        if let Some(stroke) = stroke
+            && !matches!(stroke.kind(), FieldKind::Ordinal | FieldKind::Nominal)
+        {
+            return Err(LoweringError::Unsupported(
+                "point stroke currently requires an ordinal or nominal channel",
+            ));
+        }
+        if let Some(stroke_width) = stroke_width
+            && stroke_width.kind() != FieldKind::Quantitative
+        {
+            return Err(LoweringError::Unsupported(
+                "point strokeWidth currently requires a quantitative channel",
+            ));
+        }
         if opacity.is_some() && matches!(self.mark, MarkDef::Line | MarkDef::Area) {
             return Err(LoweringError::Unsupported(
                 "opacity is currently only supported for bar, point, and text marks",
+            ));
+        }
+        if (stroke.is_some() || stroke_width.is_some()) && self.mark != MarkDef::Point {
+            return Err(LoweringError::Unsupported(
+                "stroke and strokeWidth are currently only supported for point marks",
             ));
         }
         if let Some(detail) = detail
@@ -793,6 +862,8 @@ impl UnitSpec {
                 size,
                 shape,
                 opacity,
+                stroke,
+                stroke_width,
                 order,
                 detail,
                 text,
@@ -805,6 +876,14 @@ impl UnitSpec {
         let opacity_domain = opacity
             .map(|opacity| {
                 infer_frame_domain_pair(&preview_frame, opacity.field(), None, "opacity")
+            })
+            .transpose()?;
+        let point_stroke_map = stroke
+            .map(|stroke| build_brush_map(&preview_frame, stroke.field()))
+            .unwrap_or_default();
+        let point_stroke_width_domain = stroke_width
+            .map(|stroke_width| {
+                infer_frame_domain_pair(&preview_frame, stroke_width.field(), None, "strokeWidth")
             })
             .transpose()?;
         let point_shape_map = shape
@@ -853,6 +932,8 @@ impl UnitSpec {
                         size,
                         shape,
                         opacity,
+                        stroke,
+                        stroke_width,
                         order,
                         None,
                         text,
@@ -873,6 +954,8 @@ impl UnitSpec {
                             size,
                             shape,
                             opacity,
+                            stroke,
+                            stroke_width,
                             order,
                             None,
                             text,
@@ -907,6 +990,11 @@ impl UnitSpec {
                         size_domain: point_size_domain,
                         opacity: opacity.map(ChannelDef::field),
                         opacity_domain,
+                        stroke: stroke.map(ChannelDef::field),
+                        stroke_map: point_stroke_map.clone(),
+                        default_stroke_width: 1.5,
+                        stroke_width: stroke_width.map(ChannelDef::field),
+                        stroke_width_domain: point_stroke_width_domain,
                         fill,
                     }),
                     MarkDef::Area => SeriesLayer::Area(AreaLayer {
@@ -964,6 +1052,8 @@ impl UnitSpec {
                         size,
                         shape,
                         opacity,
+                        stroke,
+                        stroke_width,
                         order,
                         Some(detail),
                         text,
@@ -983,6 +1073,8 @@ impl UnitSpec {
                         size,
                         shape,
                         opacity,
+                        stroke,
+                        stroke_width,
                         order,
                         None,
                         text,
@@ -1030,6 +1122,8 @@ impl UnitSpec {
                         size,
                         shape,
                         opacity,
+                        stroke,
+                        stroke_width,
                         order,
                         None,
                         text,
@@ -1068,6 +1162,11 @@ impl UnitSpec {
                     size_domain: point_size_domain,
                     opacity: opacity.map(ChannelDef::field),
                     opacity_domain,
+                    stroke: stroke.map(ChannelDef::field),
+                    stroke_map: point_stroke_map,
+                    default_stroke_width: 1.5,
+                    stroke_width: stroke_width.map(ChannelDef::field),
+                    stroke_width_domain: point_stroke_width_domain,
                     fill: Brush::Solid(css::TOMATO),
                 }),
                 MarkDef::Area => SeriesLayer::Area(AreaLayer {
@@ -1209,6 +1308,18 @@ impl LayerChildSpec {
         self
     }
 
+    /// Sets the child stroke override.
+    pub fn with_stroke(mut self, stroke: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_stroke(stroke);
+        self
+    }
+
+    /// Sets the child stroke width override.
+    pub fn with_stroke_width(mut self, stroke_width: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_stroke_width(stroke_width);
+        self
+    }
+
     /// Sets the child order override.
     pub fn with_order(mut self, order: ChannelDef) -> Self {
         self.encoding = self.encoding.with_order(order);
@@ -1330,6 +1441,18 @@ impl LayerSpec {
     /// Sets the opacity channel.
     pub fn with_opacity(mut self, opacity: ChannelDef) -> Self {
         self.encoding = self.encoding.with_opacity(opacity);
+        self
+    }
+
+    /// Sets the stroke channel.
+    pub fn with_stroke(mut self, stroke: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_stroke(stroke);
+        self
+    }
+
+    /// Sets the stroke width channel.
+    pub fn with_stroke_width(mut self, stroke_width: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_stroke_width(stroke_width);
         self
     }
 
@@ -1807,6 +1930,11 @@ struct PointLayer {
     size_domain: Option<(f64, f64)>,
     opacity: Option<ColumnId>,
     opacity_domain: Option<(f64, f64)>,
+    stroke: Option<ColumnId>,
+    stroke_map: Vec<(u64, Brush)>,
+    default_stroke_width: f64,
+    stroke_width: Option<ColumnId>,
+    stroke_width_domain: Option<(f64, f64)>,
     fill: Brush,
 }
 
@@ -1831,6 +1959,11 @@ impl PointLayer {
         let size_domain = self.size_domain;
         let opacity_col = self.opacity;
         let opacity_domain = self.opacity_domain;
+        let stroke_col = self.stroke;
+        let stroke_map = self.stroke_map.clone();
+        let default_stroke_width = self.default_stroke_width;
+        let stroke_width_col = self.stroke_width;
+        let stroke_width_domain = self.stroke_width_domain;
         let default_symbol = self.default_symbol;
         let shape_col = self.shape;
         let shape_map = self.shape_map.clone();
@@ -1854,8 +1987,21 @@ impl PointLayer {
                     .and_then(|col| table.data.as_deref().and_then(|data| data.f64(row, col)))
                     .map(|value| symbol_for_shape_value(value, &shape_map, default_symbol))
                     .unwrap_or(default_symbol);
+                let stroke = stroke_col
+                    .and_then(|col| table.data.as_deref().and_then(|data| data.f64(row, col)))
+                    .map(|value| {
+                        brush_for_series_value(value, &stroke_map, Brush::Solid(css::BLACK))
+                    })
+                    .unwrap_or_else(|| Brush::Solid(css::BLACK));
+                let stroke_width = stroke_width_col
+                    .and_then(|col| table.data.as_deref().and_then(|data| data.f64(row, col)))
+                    .map(|value| {
+                        stroke_width_for_value(value, stroke_width_domain, default_stroke_width)
+                    })
+                    .unwrap_or(default_stroke_width);
+                let has_stroke_style = stroke_col.is_some() || stroke_width_col.is_some();
 
-                if symbol == Symbol::Square {
+                if symbol == Symbol::Square && !has_stroke_style {
                     let mut mark = Mark::builder(layer_row_mark_id(id_base, row_key))
                         .rect()
                         .z_index(crate::z_order::SERIES_POINTS)
@@ -1925,8 +2071,7 @@ impl PointLayer {
                                     y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0));
                                 symbol.path(x, y, size)
                             },
-                        )
-                        .stroke_width_const(0.0);
+                        );
                     mark = if let Some(opacity_col) = opacity_col {
                         let fill = fill.clone();
                         mark.fill_compute(
@@ -1947,6 +2092,44 @@ impl PointLayer {
                         )
                     } else {
                         mark.fill_brush_const(fill.clone())
+                    };
+                    mark = if let Some(stroke_col) = stroke_col {
+                        let stroke_map = stroke_map.clone();
+                        mark.stroke_compute(
+                            [InputRef::TableCol {
+                                table: table_id,
+                                col: stroke_col,
+                            }],
+                            move |ctx, _| {
+                                let value =
+                                    ctx.table_f64(table_id, row, stroke_col).unwrap_or(f64::NAN);
+                                brush_for_series_value(value, &stroke_map, Brush::Solid(css::BLACK))
+                            },
+                        )
+                    } else {
+                        mark.stroke_brush_const(stroke.clone())
+                    };
+                    mark = if let Some(stroke_width_col) = stroke_width_col {
+                        mark.stroke_width_compute(
+                            [InputRef::TableCol {
+                                table: table_id,
+                                col: stroke_width_col,
+                            }],
+                            move |ctx, _| {
+                                let value = ctx
+                                    .table_f64(table_id, row, stroke_width_col)
+                                    .unwrap_or(default_stroke_width);
+                                stroke_width_for_value(
+                                    value,
+                                    stroke_width_domain,
+                                    default_stroke_width,
+                                )
+                            },
+                        )
+                    } else if has_stroke_style {
+                        mark.stroke_width_const(stroke_width)
+                    } else {
+                        mark.stroke_width_const(0.0)
                     };
                     mark.build()
                 }
@@ -2435,6 +2618,8 @@ fn required_columns(
     size: Option<&ChannelDef>,
     shape: Option<&ChannelDef>,
     opacity: Option<&ChannelDef>,
+    stroke: Option<&ChannelDef>,
+    stroke_width: Option<&ChannelDef>,
     order: Option<&ChannelDef>,
     detail: Option<&ChannelDef>,
     text: Option<&ChannelDef>,
@@ -2457,6 +2642,12 @@ fn required_columns(
     }
     if let Some(opacity) = opacity {
         push_unique_col(&mut out, opacity.field());
+    }
+    if let Some(stroke) = stroke {
+        push_unique_col(&mut out, stroke.field());
+    }
+    if let Some(stroke_width) = stroke_width {
+        push_unique_col(&mut out, stroke_width.field());
     }
     if let Some(order) = order {
         push_unique_col(&mut out, order.field());
@@ -2509,12 +2700,26 @@ fn series_columns(
     size: Option<&ChannelDef>,
     shape: Option<&ChannelDef>,
     opacity: Option<&ChannelDef>,
+    stroke: Option<&ChannelDef>,
+    stroke_width: Option<&ChannelDef>,
     order: Option<&ChannelDef>,
     detail: Option<&ChannelDef>,
     text: Option<&ChannelDef>,
 ) -> Vec<ColumnId> {
     required_columns(
-        x, x2, y_field, y2, color, size, shape, opacity, order, detail, text,
+        x,
+        x2,
+        y_field,
+        y2,
+        color,
+        size,
+        shape,
+        opacity,
+        stroke,
+        stroke_width,
+        order,
+        detail,
+        text,
     )
 }
 
@@ -2614,6 +2819,14 @@ fn build_shape_map(frame: &TableFrame, col: ColumnId) -> Vec<(u64, Symbol)> {
         .collect()
 }
 
+fn build_brush_map(frame: &TableFrame, col: ColumnId) -> Vec<(u64, Brush)> {
+    default_series_fills(distinct_values(frame, col).len())
+        .into_iter()
+        .zip(distinct_values(frame, col))
+        .map(|(brush, value)| (value.to_bits(), brush))
+        .collect()
+}
+
 fn symbol_for_shape_value(value: f64, shape_map: &[(u64, Symbol)], default: Symbol) -> Symbol {
     if !value.is_finite() {
         return default;
@@ -2622,6 +2835,16 @@ fn symbol_for_shape_value(value: f64, shape_map: &[(u64, Symbol)], default: Symb
         .iter()
         .find(|(bits, _)| *bits == value.to_bits())
         .map_or(default, |(_, symbol)| *symbol)
+}
+
+fn brush_for_series_value(value: f64, brush_map: &[(u64, Brush)], default: Brush) -> Brush {
+    if !value.is_finite() {
+        return default;
+    }
+    brush_map
+        .iter()
+        .find(|(bits, _)| *bits == value.to_bits())
+        .map_or(default, |(_, brush)| brush.clone())
 }
 
 fn point_size_for_value(value: f64, domain: Option<(f64, f64)>, default: f64) -> f64 {
@@ -2652,6 +2875,21 @@ fn opacity_for_value(value: f64, domain: Option<(f64, f64)>, default: f64) -> f6
     }
     let t = ((value - min) / (max - min)).clamp(0.0, 1.0);
     0.2 + t * 0.8
+}
+
+fn stroke_width_for_value(value: f64, domain: Option<(f64, f64)>, default: f64) -> f64 {
+    let Some((min, max)) = domain else {
+        return default;
+    };
+    if !value.is_finite() {
+        return default;
+    }
+    let (min, max) = expand_domain((min, max));
+    if min >= max {
+        return default;
+    }
+    let t = ((value - min) / (max - min)).clamp(0.0, 1.0);
+    0.5 + t * 3.5
 }
 
 #[allow(
@@ -2694,6 +2932,11 @@ fn merge_layer_encoding(
         size: overrides.size.clone().or_else(|| shared.size.clone()),
         shape: overrides.shape.clone().or_else(|| shared.shape.clone()),
         opacity: overrides.opacity.clone().or_else(|| shared.opacity.clone()),
+        stroke: overrides.stroke.clone().or_else(|| shared.stroke.clone()),
+        stroke_width: overrides
+            .stroke_width
+            .clone()
+            .or_else(|| shared.stroke_width.clone()),
         order: overrides.order.clone().or_else(|| shared.order.clone()),
         detail: overrides.detail.clone().or_else(|| shared.detail.clone()),
         text: overrides.text.clone().or_else(|| shared.text.clone()),
@@ -2815,6 +3058,12 @@ fn next_derived_col(spec: &UnitSpec) -> u32 {
     }
     if let Some(opacity) = spec.encoding.opacity() {
         max_col = max_col.max(opacity.field().0);
+    }
+    if let Some(stroke) = spec.encoding.stroke() {
+        max_col = max_col.max(stroke.field().0);
+    }
+    if let Some(stroke_width) = spec.encoding.stroke_width() {
+        max_col = max_col.max(stroke_width.field().0);
     }
     if let Some(order) = spec.encoding.order() {
         max_col = max_col.max(order.field().0);
@@ -3135,6 +3384,53 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(fills.contains(&Brush::Solid(css::TOMATO.with_alpha(0.2))));
         assert!(fills.contains(&Brush::Solid(css::TOMATO.with_alpha(1.0))));
+    }
+
+    #[test]
+    fn point_stroke_and_width_lowering_apply_path_styles() {
+        let mut scene = Scene::new();
+        let table_id = TableId(23);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![30, 31];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0],
+            b: vec![1.0, 2.0],
+            c: vec![0.0, 1.0],
+            d: vec![1.0, 5.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xBD00,
+            TableId(230),
+            DataRef::Table(table_id),
+            MarkDef::Point,
+        )
+        .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+        .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("y"))
+        .with_stroke(ChannelDef::nominal(ColumnId(2)).with_title("series"))
+        .with_stroke_width(ChannelDef::quantitative(ColumnId(3)).with_title("weight"));
+
+        let lowered = spec.lower(&scene).expect("lower stroked points");
+        let (_layout, diffs) = lowered
+            .tick(&mut scene, &HeuristicTextMeasurer)
+            .expect("tick stroked points");
+        let mut strokes = Vec::new();
+        let mut widths = Vec::new();
+        for diff in diffs {
+            let MarkDiff::Enter { new, .. } = diff else {
+                continue;
+            };
+            let vizir_core::MarkPayload::Path(channels) = *new else {
+                continue;
+            };
+            strokes.push(channels.stroke);
+            widths.push(channels.stroke_width);
+        }
+        assert!(strokes.contains(&Brush::Solid(css::CORNFLOWER_BLUE)));
+        assert!(strokes.contains(&Brush::Solid(css::TOMATO)));
+        assert!(widths.iter().any(|width| (*width - 0.5).abs() < 1e-9));
+        assert!(widths.iter().any(|width| (*width - 4.0).abs() < 1e-9));
     }
 
     #[test]

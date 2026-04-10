@@ -9,6 +9,7 @@ Current state:
 - Shared-plot layering exists with child-local transforms, base-child positional/grouping defaults,
   and child encoding overrides.
 - Structural `order` and `detail` channels lower for line/area marks.
+- Styling channels now include point-local `opacity`, `stroke`, and `strokeWidth`.
 - The parser-facing adapter and feature-gated JSON path target the same seam through checked-in
   fixtures.
 

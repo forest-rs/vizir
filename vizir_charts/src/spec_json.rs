@@ -154,6 +154,9 @@ struct JsonEncoding {
     size: Option<JsonChannel>,
     shape: Option<JsonChannel>,
     opacity: Option<JsonChannel>,
+    stroke: Option<JsonChannel>,
+    #[serde(rename = "strokeWidth")]
+    stroke_width: Option<JsonChannel>,
     order: Option<JsonChannel>,
     detail: Option<JsonChannel>,
     text: Option<JsonChannel>,
@@ -316,6 +319,12 @@ fn parse_encoding_set(encoding: JsonEncoding) -> Result<ParsedEncodingSet, JsonS
     }
     if let Some(opacity) = encoding.opacity {
         out = out.with_opacity(parse_channel(opacity)?);
+    }
+    if let Some(stroke) = encoding.stroke {
+        out = out.with_stroke(parse_channel(stroke)?);
+    }
+    if let Some(stroke_width) = encoding.stroke_width {
+        out = out.with_stroke_width(parse_channel(stroke_width)?);
     }
     if let Some(order) = encoding.order {
         out = out.with_order(parse_channel(order)?);
@@ -739,6 +748,43 @@ mod tests {
                 },
             )
             .expect("adapt parsed point opacity spec");
+    }
+
+    #[test]
+    fn parses_point_stroke_width_fixture() {
+        let spec = parse_unit_spec_json(include_str!(
+            "../../fixtures/specs/unit_point_stroke_width.json"
+        ))
+        .expect("parse point stroke/width spec");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "y",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "series",
+                column: ColumnId(2),
+            },
+            SchemaField {
+                name: "weight",
+                column: ColumnId(3),
+            },
+        ]);
+        let _unit = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xC1_160,
+                    derived_table_base: TableId(306),
+                    data: DataRef::Table(TableId(8)),
+                },
+            )
+            .expect("adapt parsed point stroke/width spec");
     }
 
     #[test]

@@ -1,0 +1,10 @@
+{
+  "title": "Point Stroke + Width",
+  "mark": "point",
+  "encoding": {
+    "x": { "field": "x", "type": "quantitative" },
+    "y": { "field": "y", "type": "quantitative" },
+    "stroke": { "field": "series", "type": "nominal" },
+    "strokeWidth": { "field": "weight", "type": "quantitative" }
+  }
+}

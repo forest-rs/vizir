@@ -996,10 +996,40 @@ impl MarkBuilder {
         self
     }
 
+    /// Set the `stroke` encoding to a computed brush (path marks only).
+    pub fn stroke_compute(
+        mut self,
+        deps: impl IntoIterator<Item = InputRef>,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> Brush + 'static,
+    ) -> Self {
+        if let MarkEncodings::Path(e) = &mut self.mark.encodings {
+            e.as_mut().stroke = Encoding::Compute {
+                deps: deps4(deps),
+                f: Box::new(f),
+            };
+        }
+        self
+    }
+
     /// Set the `stroke_width` encoding to a constant value (path marks only).
     pub fn stroke_width_const(mut self, v: f64) -> Self {
         if let MarkEncodings::Path(e) = &mut self.mark.encodings {
             e.as_mut().stroke_width = Encoding::Const(v);
+        }
+        self
+    }
+
+    /// Set the `stroke_width` encoding to a computed value (path marks only).
+    pub fn stroke_width_compute(
+        mut self,
+        deps: impl IntoIterator<Item = InputRef>,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> f64 + 'static,
+    ) -> Self {
+        if let MarkEncodings::Path(e) = &mut self.mark.encodings {
+            e.as_mut().stroke_width = Encoding::Compute {
+                deps: deps4(deps),
+                f: Box::new(f),
+            };
         }
         self
     }
@@ -1839,6 +1869,49 @@ mod tests {
         };
         assert_eq!(*kind, MarkKind::Path);
         assert!(bounds.is_some());
+    }
+
+    #[test]
+    fn path_stroke_compute_updates_payload() {
+        let mut scene = Scene::new();
+        let sig = SignalId(2);
+        scene.insert_signal(sig, 1.0_f64);
+
+        let mark_id = MarkId(2);
+        let mut triangle = BezPath::new();
+        triangle.move_to((0.0, 0.0));
+        triangle.line_to((10.0, 0.0));
+        triangle.line_to((5.0, 10.0));
+        triangle.close_path();
+
+        let mark = Mark::builder(mark_id)
+            .path()
+            .path_const(triangle)
+            .stroke_compute([InputRef::Signal { signal: sig }], move |ctx, _| {
+                let value = ctx.signal::<f64>(sig).unwrap_or(0.0);
+                if value < 2.0 {
+                    Brush::Solid(Color::from_rgba8(0, 0, 0, 255))
+                } else {
+                    Brush::Solid(Color::from_rgba8(255, 0, 0, 255))
+                }
+            })
+            .stroke_width_compute([InputRef::Signal { signal: sig }], move |ctx, _| {
+                ctx.signal::<f64>(sig).unwrap_or(0.0)
+            })
+            .build();
+
+        let _ = scene.tick([mark]);
+        scene.set_signal(sig, 3.0_f64).unwrap();
+        let diffs = scene.update();
+
+        let [MarkDiff::Update { old, new, .. }] = &diffs[..] else {
+            panic!("expected update");
+        };
+        let (MarkPayload::Path(old), MarkPayload::Path(new)) = (&**old, &**new) else {
+            panic!("expected path payloads");
+        };
+        assert_ne!(old.stroke, new.stroke);
+        assert_ne!(old.stroke_width, new.stroke_width);
     }
 
     #[test]

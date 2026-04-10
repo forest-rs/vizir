@@ -153,6 +153,8 @@ Support only:
 - `size`
 - `shape`
 - `opacity`
+- `stroke`
+- `strokeWidth`
 - `order`
 - `detail`
 - `text`

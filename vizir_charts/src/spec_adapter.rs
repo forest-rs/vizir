@@ -196,6 +196,8 @@ pub struct ParsedEncodingSet {
     size: Option<ParsedChannelDef>,
     shape: Option<ParsedChannelDef>,
     opacity: Option<ParsedChannelDef>,
+    stroke: Option<ParsedChannelDef>,
+    stroke_width: Option<ParsedChannelDef>,
     order: Option<ParsedChannelDef>,
     detail: Option<ParsedChannelDef>,
     text: Option<ParsedChannelDef>,
@@ -252,6 +254,18 @@ impl ParsedEncodingSet {
     /// Sets the opacity channel.
     pub fn with_opacity(mut self, opacity: ParsedChannelDef) -> Self {
         self.opacity = Some(opacity);
+        self
+    }
+
+    /// Sets the stroke channel.
+    pub fn with_stroke(mut self, stroke: ParsedChannelDef) -> Self {
+        self.stroke = Some(stroke);
+        self
+    }
+
+    /// Sets the stroke width channel.
+    pub fn with_stroke_width(mut self, stroke_width: ParsedChannelDef) -> Self {
+        self.stroke_width = Some(stroke_width);
         self
     }
 
@@ -537,6 +551,18 @@ impl ParsedUnitSpec {
         self
     }
 
+    /// Sets the stroke channel.
+    pub fn with_stroke(mut self, stroke: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_stroke(stroke);
+        self
+    }
+
+    /// Sets the stroke width channel.
+    pub fn with_stroke_width(mut self, stroke_width: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_stroke_width(stroke_width);
+        self
+    }
+
     /// Sets the order channel.
     pub fn with_order(mut self, order: ParsedChannelDef) -> Self {
         self.encoding = self.encoding.with_order(order);
@@ -607,6 +633,12 @@ impl ParsedUnitSpec {
         }
         if let Some(opacity) = &self.encoding.opacity {
             unit = unit.with_opacity(adapt_channel(opacity, "opacity", &mut fields)?);
+        }
+        if let Some(stroke) = &self.encoding.stroke {
+            unit = unit.with_stroke(adapt_channel(stroke, "stroke", &mut fields)?);
+        }
+        if let Some(stroke_width) = &self.encoding.stroke_width {
+            unit = unit.with_stroke_width(adapt_channel(stroke_width, "strokeWidth", &mut fields)?);
         }
         if let Some(order) = &self.encoding.order {
             unit = unit.with_order(adapt_channel(order, "order", &mut fields)?);
@@ -697,6 +729,18 @@ impl ParsedLayerChildSpec {
     /// Sets the child opacity override.
     pub fn with_opacity(mut self, opacity: ParsedChannelDef) -> Self {
         self.encoding = self.encoding.with_opacity(opacity);
+        self
+    }
+
+    /// Sets the child stroke override.
+    pub fn with_stroke(mut self, stroke: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_stroke(stroke);
+        self
+    }
+
+    /// Sets the child stroke width override.
+    pub fn with_stroke_width(mut self, stroke_width: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_stroke_width(stroke_width);
         self
     }
 
@@ -804,6 +848,18 @@ impl ParsedLayerSpec {
         self
     }
 
+    /// Sets the stroke channel.
+    pub fn with_stroke(mut self, stroke: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_stroke(stroke);
+        self
+    }
+
+    /// Sets the stroke width channel.
+    pub fn with_stroke_width(mut self, stroke_width: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_stroke_width(stroke_width);
+        self
+    }
+
     /// Sets the order channel.
     pub fn with_order(mut self, order: ParsedChannelDef) -> Self {
         self.encoding = self.encoding.with_order(order);
@@ -880,6 +936,13 @@ impl ParsedLayerSpec {
         }
         if let Some(opacity) = &self.encoding.opacity {
             layer = layer.with_opacity(adapt_channel(opacity, "opacity", &mut fields)?);
+        }
+        if let Some(stroke) = &self.encoding.stroke {
+            layer = layer.with_stroke(adapt_channel(stroke, "stroke", &mut fields)?);
+        }
+        if let Some(stroke_width) = &self.encoding.stroke_width {
+            layer =
+                layer.with_stroke_width(adapt_channel(stroke_width, "strokeWidth", &mut fields)?);
         }
         if let Some(order) = &self.encoding.order {
             layer = layer.with_order(adapt_channel(order, "order", &mut fields)?);
@@ -974,6 +1037,16 @@ fn adapt_layer_child(
     }
     if let Some(opacity) = &child.encoding.opacity {
         out = out.with_opacity(adapt_channel(opacity, "layer child opacity", &mut fields)?);
+    }
+    if let Some(stroke) = &child.encoding.stroke {
+        out = out.with_stroke(adapt_channel(stroke, "layer child stroke", &mut fields)?);
+    }
+    if let Some(stroke_width) = &child.encoding.stroke_width {
+        out = out.with_stroke_width(adapt_channel(
+            stroke_width,
+            "layer child strokeWidth",
+            &mut fields,
+        )?);
     }
     if let Some(order) = &child.encoding.order {
         out = out.with_order(adapt_channel(order, "layer child order", &mut fields)?);
@@ -1453,6 +1526,52 @@ mod tests {
             .adapt(&resolver, context(table_id))
             .expect("adapt point opacity");
         let lowered = unit.lower(&scene).expect("lower point opacity");
+        assert_eq!(lowered.output_table(), table_id);
+    }
+
+    #[test]
+    fn parsed_point_stroke_width_adapts_and_lowers() {
+        let parsed = ParsedUnitSpec::new(ParsedMarkDef::Point)
+            .with_x(ParsedChannelDef::quantitative("x"))
+            .with_y(ParsedChannelDef::quantitative("y"))
+            .with_stroke(ParsedChannelDef::nominal("series"))
+            .with_stroke_width(ParsedChannelDef::quantitative("weight"));
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "y",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "series",
+                column: ColumnId(2),
+            },
+            SchemaField {
+                name: "weight",
+                column: ColumnId(3),
+            },
+        ]);
+
+        let mut scene = Scene::new();
+        let table_id = TableId(38);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![80, 81];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0],
+            b: vec![1.0, 2.0],
+            c: vec![0.0, 1.0],
+            d: vec![1.0, 5.0],
+        }));
+        scene.insert_table(table);
+
+        let unit = parsed
+            .adapt(&resolver, context(table_id))
+            .expect("adapt point stroke/width");
+        let lowered = unit.lower(&scene).expect("lower point stroke/width");
         assert_eq!(lowered.output_table(), table_id);
     }
 
