@@ -96,13 +96,14 @@ This keeps the public API calm while still forcing the architectural seam to exi
 
 ### View shape
 
-Only a single unit chart:
-- one plot
+Current supported view shapes:
+- one unit chart
+- one narrow shared-plot layer with shared data/transforms/encoding
 - optional title
 - optional x/y axes
 - optional color legend
 
-No layering or faceting yet.
+No faceting, repeat, or concat yet.
 
 ### Data shape
 

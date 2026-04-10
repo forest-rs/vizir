@@ -15,7 +15,7 @@ use alloc::vec::Vec;
 use vizir_core::{ColumnId, TableId};
 use vizir_transforms::{AggregateField, AggregateOp, CompareOp, Predicate, SortOrder, StackOffset};
 
-use crate::{ChannelDef, DataRef, FieldKind, MarkDef, TransformSpec, UnitSpec};
+use crate::{ChannelDef, DataRef, FieldKind, LayerSpec, MarkDef, TransformSpec, UnitSpec};
 
 /// Context needed to adapt a parsed unit spec into a concrete [`UnitSpec`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -538,6 +538,146 @@ impl ParsedUnitSpec {
     }
 }
 
+/// A parsed shared-plot layer spec that still refers to fields by name.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParsedLayerSpec {
+    marks: Vec<ParsedMarkDef>,
+    transforms: Vec<ParsedTransformSpec>,
+    encoding: ParsedEncodingSet,
+    width: f64,
+    height: f64,
+    title: Option<String>,
+}
+
+impl Default for ParsedLayerSpec {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ParsedLayerSpec {
+    /// Creates a new empty parsed layer spec.
+    pub fn new() -> Self {
+        Self {
+            marks: Vec::new(),
+            transforms: Vec::new(),
+            encoding: ParsedEncodingSet::new(),
+            width: 220.0,
+            height: 120.0,
+            title: None,
+        }
+    }
+
+    /// Sets the plot size used by the adapted chart.
+    pub fn with_size(mut self, width: f64, height: f64) -> Self {
+        self.width = width;
+        self.height = height;
+        self
+    }
+
+    /// Sets the authored chart title.
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// Replaces the encoding set.
+    pub fn with_encoding(mut self, encoding: ParsedEncodingSet) -> Self {
+        self.encoding = encoding;
+        self
+    }
+
+    /// Sets the x channel.
+    pub fn with_x(mut self, x: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_x(x);
+        self
+    }
+
+    /// Sets the x2 channel.
+    pub fn with_x2(mut self, x2: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_x2(x2);
+        self
+    }
+
+    /// Sets the y channel.
+    pub fn with_y(mut self, y: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_y(y);
+        self
+    }
+
+    /// Sets the y2 channel.
+    pub fn with_y2(mut self, y2: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_y2(y2);
+        self
+    }
+
+    /// Sets the color channel.
+    pub fn with_color(mut self, color: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_color(color);
+        self
+    }
+
+    /// Sets the text channel.
+    pub fn with_text(mut self, text: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_text(text);
+        self
+    }
+
+    /// Appends a parsed transform.
+    pub fn with_transform(mut self, transform: ParsedTransformSpec) -> Self {
+        self.transforms.push(transform);
+        self
+    }
+
+    /// Appends a parsed mark layer.
+    pub fn with_mark(mut self, mark: ParsedMarkDef) -> Self {
+        self.marks.push(mark);
+        self
+    }
+
+    /// Adapts this parsed layer spec into a concrete [`LayerSpec`].
+    pub fn adapt(
+        &self,
+        resolver: &impl FieldResolver,
+        context: AdaptContext,
+    ) -> Result<LayerSpec, AdaptError> {
+        let mut fields = FieldBindings::new(resolver);
+        let mut layer = LayerSpec::new(context.id_base, context.derived_table_base, context.data)
+            .with_size(self.width, self.height);
+        if let Some(title) = &self.title {
+            layer = layer.with_title(title.clone());
+        }
+
+        for transform in &self.transforms {
+            layer = layer.with_transform(adapt_transform(transform, &mut fields)?);
+        }
+
+        if let Some(x) = &self.encoding.x {
+            layer = layer.with_x(adapt_channel(x, "x", &mut fields)?);
+        }
+        if let Some(x2) = &self.encoding.x2 {
+            layer = layer.with_x2(adapt_channel(x2, "x2", &mut fields)?);
+        }
+        if let Some(y) = &self.encoding.y {
+            layer = layer.with_y(adapt_channel(y, "y", &mut fields)?);
+        }
+        if let Some(y2) = &self.encoding.y2 {
+            layer = layer.with_y2(adapt_channel(y2, "y2", &mut fields)?);
+        }
+        if let Some(color) = &self.encoding.color {
+            layer = layer.with_color(adapt_channel(color, "color", &mut fields)?);
+        }
+        if let Some(text) = &self.encoding.text {
+            layer = layer.with_text(adapt_channel(text, "text", &mut fields)?);
+        }
+        for mark in &self.marks {
+            layer = layer.with_mark(adapt_mark(*mark));
+        }
+
+        Ok(layer)
+    }
+}
+
 fn collect_names(names: impl IntoIterator<Item = impl Into<String>>) -> Vec<String> {
     names.into_iter().map(|name| name.into()).collect()
 }
@@ -971,5 +1111,34 @@ mod tests {
         ));
 
         let _ = LoweringError::MissingChannel("y");
+    }
+
+    #[test]
+    fn parsed_layer_adapts_and_lowers_shared_marks() {
+        let parsed = ParsedLayerSpec::new()
+            .with_title("line + point")
+            .with_mark(ParsedMarkDef::Line)
+            .with_mark(ParsedMarkDef::Point)
+            .with_x(ParsedChannelDef::quantitative("x"))
+            .with_y(ParsedChannelDef::quantitative("y"));
+
+        let mut scene = Scene::new();
+        let table_id = TableId(70);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![10, 11, 12];
+        table.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![1.0, 2.0, 3.0],
+        }));
+        scene.insert_table(table);
+
+        let layer = parsed
+            .adapt(&resolver(), context(table_id))
+            .expect("adapt parsed layer");
+        let lowered = layer.lower(&scene).expect("lower parsed layer");
+        let (_layout, marks) = lowered
+            .marks(&scene, &HeuristicTextMeasurer)
+            .expect("layer marks");
+        assert!(marks.len() >= 4);
     }
 }

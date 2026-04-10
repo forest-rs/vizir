@@ -20,9 +20,10 @@ Status meanings:
 | Area | Status | Notes |
 |---|---|---|
 | Single unit chart | supported | One plot, optional title, x/y axes, optional legend |
+| Shared-plot `layer` spec | partial | Shared data/transforms/encoding only; proven for overlays like line + point |
 | Existing input table via `DataRef::Table` | supported | No URL/data loading in authored spec path |
 | Deterministic lowering to `Program + ChartSpec + series plan` | supported | Same seam used by demos/tests |
-| Multi-view composition (`layer`, `facet`, `repeat`, `concat`) | missing | Not modeled yet |
+| Multi-view composition beyond shared-plot `layer` (`facet`, `repeat`, `concat`) | missing | Not modeled yet |
 | Params / selections / event streams | missing | No interaction model yet |
 
 ### Marks
@@ -63,13 +64,17 @@ Status meanings:
 | Layer | Status | Notes |
 |---|---|---|
 | Rust-authored `UnitSpec` | supported | Primary lowering target |
+| Rust-authored `LayerSpec` | partial | Narrow shared-plot layering only |
 | Name-based `ParsedUnitSpec` adapter | supported | Resolves field names and derived aliases into `ColumnId`s |
-| Narrow JSON parser behind `json` feature | supported | Strict, limited parser for currently supported mark/channel/transform slice |
+| Name-based `ParsedLayerSpec` adapter | partial | Shared encoding/transforms only |
+| Narrow JSON parser behind `json` feature | partial | Supports the current unit slice plus shared-plot `layer` |
 | Full Vega-Lite JSON coverage | missing | Current JSON parser is intentionally narrow |
 
 ## Important fences
 
 - `color` splitting is currently rejected for `bar`.
+- Shared `layer` currently requires one shared encoding/transform/data block; per-child nested unit
+  specs are not modeled yet.
 - `aggregate` on `x`, `x2`, `color`, and `y2` is rejected.
 - `x2`/`y2` are currently only supported on `area`.
 - `text` can be authored and parsed, but lowering still returns `Unsupported`.

@@ -7,7 +7,7 @@
 //! and the existing `vizir_core` / `vizir_transforms` / `vizir_charts` runtime pieces.
 //!
 //! The supported slice is intentionally small:
-//! - one unit chart,
+//! - one unit chart or a narrow shared-plot layer spec,
 //! - one input table already present in a [`vizir_core::Scene`],
 //! - a small transform subset,
 //! - `bar`, `line`, `point`, and `area` marks,
@@ -722,6 +722,166 @@ impl UnitSpec {
     }
 }
 
+/// A narrow shared-plot layered chart.
+///
+/// Every child mark shares the same data source, transforms, encodings, and guides. This is an
+/// intentionally small composition slice for common overlays such as line + point.
+#[derive(Clone, Debug)]
+pub struct LayerSpec {
+    id_base: u64,
+    derived_table_base: TableId,
+    data: DataRef,
+    transforms: Vec<TransformSpec>,
+    encoding: EncodingSet,
+    marks: Vec<MarkDef>,
+    width: f64,
+    height: f64,
+    title: Option<String>,
+}
+
+impl LayerSpec {
+    /// Creates a new empty layer spec.
+    pub fn new(id_base: u64, derived_table_base: TableId, data: DataRef) -> Self {
+        Self {
+            id_base,
+            derived_table_base,
+            data,
+            transforms: Vec::new(),
+            encoding: EncodingSet::new(),
+            marks: Vec::new(),
+            width: 220.0,
+            height: 120.0,
+            title: None,
+        }
+    }
+
+    /// Sets the plot size used by the lowered chart.
+    pub fn with_size(mut self, width: f64, height: f64) -> Self {
+        self.width = width;
+        self.height = height;
+        self
+    }
+
+    /// Sets the authored chart title.
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// Replaces the encoding set.
+    pub fn with_encoding(mut self, encoding: EncodingSet) -> Self {
+        self.encoding = encoding;
+        self
+    }
+
+    /// Sets the x channel.
+    pub fn with_x(mut self, x: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_x(x);
+        self
+    }
+
+    /// Sets the x2 channel.
+    pub fn with_x2(mut self, x2: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_x2(x2);
+        self
+    }
+
+    /// Sets the y channel.
+    pub fn with_y(mut self, y: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_y(y);
+        self
+    }
+
+    /// Sets the y2 channel.
+    pub fn with_y2(mut self, y2: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_y2(y2);
+        self
+    }
+
+    /// Sets the color channel.
+    pub fn with_color(mut self, color: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_color(color);
+        self
+    }
+
+    /// Sets the text channel.
+    pub fn with_text(mut self, text: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_text(text);
+        self
+    }
+
+    /// Appends an authored transform.
+    pub fn with_transform(mut self, transform: TransformSpec) -> Self {
+        self.transforms.push(transform);
+        self
+    }
+
+    /// Appends a shared-plot mark layer.
+    pub fn with_mark(mut self, mark: MarkDef) -> Self {
+        self.marks.push(mark);
+        self
+    }
+
+    /// Lowers the authored layer spec into a shared chart/transform/series plan.
+    pub fn lower(&self, scene: &Scene) -> Result<LoweredLayer, LoweringError> {
+        if self.marks.is_empty() {
+            return Err(LoweringError::Unsupported(
+                "layer lowering requires at least one mark",
+            ));
+        }
+        if self.marks.contains(&MarkDef::Bar) && self.marks.iter().any(|mark| *mark != MarkDef::Bar)
+        {
+            return Err(LoweringError::Unsupported(
+                "bar layering is only supported with other bar marks in the experimental slice",
+            ));
+        }
+
+        let base_index = base_layer_mark_index(&self.marks, self.encoding.y2().is_some());
+        let base_unit = self.layer_child_unit(base_index);
+        let base_lowered = base_unit.lower(scene)?;
+
+        let mut series_layers = base_lowered.series_layers.clone();
+        for index in 0..self.marks.len() {
+            if index == base_index {
+                continue;
+            }
+            let child = self.layer_child_unit(index);
+            let lowered = child.lower(scene)?;
+            series_layers.extend(lowered.series_layers);
+        }
+
+        Ok(LoweredLayer {
+            input_table: base_lowered.input_table,
+            output_table: base_lowered.output_table,
+            derived_tables: base_lowered.derived_tables,
+            program: base_lowered.program,
+            chart: base_lowered.chart,
+            series_layers,
+        })
+    }
+
+    /// Lowers the authored layer spec and applies the derived tables to the scene.
+    pub fn lower_into_scene(&self, scene: &mut Scene) -> Result<LoweredLayer, LoweringError> {
+        let lowered = self.lower(scene)?;
+        lowered.apply_to_scene(scene)?;
+        Ok(lowered)
+    }
+
+    fn layer_child_unit(&self, index: usize) -> UnitSpec {
+        UnitSpec {
+            id_base: child_layer_id_base(self.id_base, index),
+            derived_table_base: self.derived_table_base,
+            data: self.data,
+            transforms: self.transforms.clone(),
+            mark: self.marks[index],
+            encoding: encoding_for_mark(&self.encoding, self.marks[index]),
+            width: self.width,
+            height: self.height,
+            title: self.title.clone(),
+        }
+    }
+}
+
 /// Errors returned while lowering or executing an authored unit spec.
 #[derive(Debug)]
 pub enum LoweringError {
@@ -790,6 +950,83 @@ impl LoweredUnit {
     }
 
     /// Returns the lowered transform program, if the unit spec needs derived tables.
+    pub fn program(&self) -> Option<&Program> {
+        self.program.as_ref()
+    }
+
+    /// Applies the lowered transform program to the scene.
+    pub fn apply_to_scene(&self, scene: &mut Scene) -> Result<(), LoweringError> {
+        if let Some(program) = &self.program {
+            program.apply_to_scene(scene)?;
+        }
+        Ok(())
+    }
+
+    /// Produces the full mark list for the lowered chart.
+    pub fn marks(
+        &self,
+        scene: &Scene,
+        measurer: &impl TextMeasurer,
+    ) -> Result<(ChartLayout, Vec<Mark>), LoweringError> {
+        let layout = self.chart.layout(measurer);
+        let mut marks = self.series_marks(scene, layout.data)?;
+        marks.extend(self.chart.guide_marks(measurer, &layout));
+        Ok((layout, marks))
+    }
+
+    /// Builds marks and runs a full scene tick.
+    pub fn tick(
+        &self,
+        scene: &mut Scene,
+        measurer: &impl TextMeasurer,
+    ) -> Result<(ChartLayout, Vec<MarkDiff>), LoweringError> {
+        let (layout, marks) = self.marks(scene, measurer)?;
+        let diffs = scene.tick(marks);
+        Ok((layout, diffs))
+    }
+
+    fn series_marks(&self, scene: &Scene, plot: Rect) -> Result<Vec<Mark>, LoweringError> {
+        let mut out = Vec::new();
+        for layer in &self.series_layers {
+            out.extend(layer.marks(scene, &self.chart, plot)?);
+        }
+        Ok(out)
+    }
+}
+
+/// A lowered shared-plot layered chart plan.
+#[derive(Clone, Debug)]
+pub struct LoweredLayer {
+    input_table: TableId,
+    output_table: TableId,
+    derived_tables: Vec<TableId>,
+    program: Option<Program>,
+    chart: ChartSpec,
+    series_layers: Vec<SeriesLayer>,
+}
+
+impl LoweredLayer {
+    /// Returns the original input table referenced by the authored layer spec.
+    pub fn input_table(&self) -> TableId {
+        self.input_table
+    }
+
+    /// Returns the base output table after authored transforms and aggregate lowering.
+    pub fn output_table(&self) -> TableId {
+        self.output_table
+    }
+
+    /// Returns every derived table id the lowered plan may write into the scene.
+    pub fn derived_tables(&self) -> &[TableId] {
+        &self.derived_tables
+    }
+
+    /// Returns the lowered chart specification.
+    pub fn chart(&self) -> &ChartSpec {
+        &self.chart
+    }
+
+    /// Returns the lowered transform program, if the layer spec needs derived tables.
     pub fn program(&self) -> Option<&Program> {
         self.program.as_ref()
     }
@@ -1405,6 +1642,36 @@ fn push_unique_col(cols: &mut Vec<ColumnId>, col: ColumnId) {
     }
 }
 
+fn encoding_for_mark(encoding: &EncodingSet, mark: MarkDef) -> EncodingSet {
+    let mut out = encoding.clone();
+    if mark != MarkDef::Area {
+        out.x2 = None;
+        out.y2 = None;
+    }
+    out
+}
+
+fn child_layer_id_base(id_base: u64, index: usize) -> u64 {
+    id_base.wrapping_add((index as u64).wrapping_mul(0x100_000))
+}
+
+fn base_layer_mark_index(marks: &[MarkDef], has_y2: bool) -> usize {
+    if marks.contains(&MarkDef::Bar) {
+        return marks
+            .iter()
+            .position(|mark| *mark == MarkDef::Bar)
+            .unwrap_or(0);
+    }
+    if marks.contains(&MarkDef::Area) {
+        let _ = has_y2;
+        return marks
+            .iter()
+            .position(|mark| *mark == MarkDef::Area)
+            .unwrap_or(0);
+    }
+    0
+}
+
 fn next_derived_col(spec: &UnitSpec) -> u32 {
     let mut max_col = 0_u32;
     if let Some(x) = spec.encoding.x() {
@@ -1861,6 +2128,50 @@ mod tests {
         assert!(matches!(
             marks[0].encodings,
             vizir_core::MarkEncodings::Path(_)
+        ));
+    }
+
+    #[test]
+    fn layer_lowering_combines_line_and_point_marks() {
+        let mut scene = Scene::new();
+        let table_id = TableId(80);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![400, 401, 402];
+        table.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![1.0, 2.0, 3.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = LayerSpec::new(0xF100, TableId(800), DataRef::Table(table_id))
+            .with_title("line + point")
+            .with_mark(MarkDef::Line)
+            .with_mark(MarkDef::Point)
+            .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+            .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("y"));
+
+        let lowered = spec.lower(&scene).expect("lower layered chart");
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let marks = lowered
+            .series_marks(&scene, layout.data)
+            .expect("layered series marks");
+        assert_eq!(marks.len(), 4);
+    }
+
+    #[test]
+    fn layer_lowering_rejects_bar_with_non_bar_marks() {
+        let scene = Scene::new();
+        let spec = LayerSpec::new(0xF200, TableId(900), DataRef::Table(TableId(1)))
+            .with_mark(MarkDef::Bar)
+            .with_mark(MarkDef::Line)
+            .with_x(ChannelDef::ordinal(ColumnId(0)))
+            .with_y(ChannelDef::quantitative(ColumnId(1)));
+
+        let err = spec.lower(&scene).expect_err("mixed bar layer should fail");
+        assert!(matches!(
+            err,
+            LoweringError::Unsupported(message)
+                if message.contains("bar layering")
         ));
     }
 }

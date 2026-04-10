@@ -17,8 +17,8 @@ use serde_json::Value;
 use vizir_transforms::{AggregateOp, CompareOp, SortOrder, StackOffset};
 
 use crate::{
-    ParsedAggregateField, ParsedChannelDef, ParsedFieldKind, ParsedMarkDef, ParsedPredicate,
-    ParsedTransformSpec, ParsedUnitSpec,
+    ParsedAggregateField, ParsedChannelDef, ParsedFieldKind, ParsedLayerSpec, ParsedMarkDef,
+    ParsedPredicate, ParsedTransformSpec, ParsedUnitSpec,
 };
 
 /// Errors returned while parsing a narrow JSON unit spec.
@@ -51,6 +51,13 @@ impl ParsedUnitSpec {
     /// Parses a narrow JSON unit spec into a [`ParsedUnitSpec`].
     pub fn from_json_str(input: &str) -> Result<Self, JsonSpecError> {
         parse_unit_spec_json(input)
+    }
+}
+
+impl ParsedLayerSpec {
+    /// Parses a narrow JSON layer spec into a [`ParsedLayerSpec`].
+    pub fn from_json_str(input: &str) -> Result<Self, JsonSpecError> {
+        parse_layer_spec_json(input)
     }
 }
 
@@ -90,6 +97,45 @@ pub fn parse_unit_spec_json(input: &str) -> Result<ParsedUnitSpec, JsonSpecError
     Ok(spec)
 }
 
+/// Parses a narrow JSON shared-plot layer spec into a [`ParsedLayerSpec`].
+pub fn parse_layer_spec_json(input: &str) -> Result<ParsedLayerSpec, JsonSpecError> {
+    let raw: JsonLayerSpec = serde_json::from_str(input)?;
+
+    let mut spec =
+        ParsedLayerSpec::new().with_size(raw.width.unwrap_or(220.0), raw.height.unwrap_or(120.0));
+    if let Some(title) = raw.title {
+        spec = spec.with_title(title);
+    }
+
+    if let Some(x) = raw.encoding.x {
+        spec = spec.with_x(parse_channel(x)?);
+    }
+    if let Some(x2) = raw.encoding.x2 {
+        spec = spec.with_x2(parse_channel(x2)?);
+    }
+    if let Some(y) = raw.encoding.y {
+        spec = spec.with_y(parse_channel(y)?);
+    }
+    if let Some(y2) = raw.encoding.y2 {
+        spec = spec.with_y2(parse_channel(y2)?);
+    }
+    if let Some(color) = raw.encoding.color {
+        spec = spec.with_color(parse_channel(color)?);
+    }
+    if let Some(text) = raw.encoding.text {
+        spec = spec.with_text(parse_channel(text)?);
+    }
+
+    for transform in raw.transform {
+        spec = spec.with_transform(parse_transform(transform)?);
+    }
+    for layer in raw.layer {
+        spec = spec.with_mark(parse_mark(layer.mark)?);
+    }
+
+    Ok(spec)
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct JsonUnitSpec {
@@ -101,6 +147,25 @@ struct JsonUnitSpec {
     width: Option<f64>,
     height: Option<f64>,
     title: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JsonLayerSpec {
+    layer: Vec<JsonLayerEntry>,
+    #[serde(default)]
+    encoding: JsonEncoding,
+    #[serde(default)]
+    transform: Vec<Value>,
+    width: Option<f64>,
+    height: Option<f64>,
+    title: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JsonLayerEntry {
+    mark: JsonMark,
 }
 
 #[derive(Default, Deserialize)]
@@ -559,5 +624,44 @@ mod tests {
         let _ = spec;
         let _sum = AggregateOp::Sum;
         let _bar = ParsedMarkDef::Bar;
+    }
+
+    #[test]
+    fn parses_shared_plot_layer_spec() {
+        let spec = parse_layer_spec_json(
+            r#"{
+                "title": "line + point",
+                "layer": [
+                    { "mark": "line" },
+                    { "mark": "point" }
+                ],
+                "encoding": {
+                    "x": { "field": "x", "type": "quantitative" },
+                    "y": { "field": "y", "type": "quantitative" }
+                }
+            }"#,
+        )
+        .expect("parse layer spec");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "y",
+                column: ColumnId(1),
+            },
+        ]);
+        let _layer = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xC0_000,
+                    derived_table_base: TableId(300),
+                    data: DataRef::Table(TableId(3)),
+                },
+            )
+            .expect("adapt parsed layer");
     }
 }

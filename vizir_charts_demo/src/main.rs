@@ -14,7 +14,8 @@ use vizir_charts::{
     LegendPlacement, LegendSwatchesSpec, MarkDef, PLOT_BACKGROUND, RectMarkSpec, RuleMarkSpec,
     ScaleBand, ScaleLinearSpec, ScaleLogSpec, ScaleTimeSpec, SchemaField, SectorMarkSpec, Size,
     SliceFieldResolver, StackedAreaChartSpec, StackedAreaMarkSpec, StackedBarChartSpec,
-    StrokeStyle, Symbol, TextMarkSpec, TitleSpec, UnitSpec, parse_unit_spec_json,
+    StrokeStyle, Symbol, TextMarkSpec, TitleSpec, UnitSpec, parse_layer_spec_json,
+    parse_unit_spec_json,
 };
 use vizir_core::{ColumnId, Mark, Scene, Table, TableData, TableId};
 use vizir_transforms::{
@@ -49,6 +50,7 @@ fn main() {
         aggregate_demo(),
         lowered_spec_demo(),
         lowered_json_spec_demo(),
+        lowered_json_layer_demo(),
         lowered_area_spec_demo(),
         lowered_ranged_area_spec_demo(),
         histogram_demo(),
@@ -89,6 +91,22 @@ fn render_lowered_unit_spec(scene: &mut Scene, spec: UnitSpec) -> String {
     let (layout, marks) = lowered
         .marks(scene, &measurer)
         .expect("build lowered authored unit marks");
+    let diffs = scene.tick(marks);
+
+    let mut svg_scene = svg::SvgScene::default();
+    svg_scene.set_view_box(layout.view);
+    svg_scene.apply_diffs(&diffs);
+    svg_scene.to_svg_string()
+}
+
+fn render_lowered_layer_spec(scene: &mut Scene, spec: vizir_charts::LayerSpec) -> String {
+    let measurer = HeuristicTextMeasurer;
+    let lowered = spec
+        .lower_into_scene(scene)
+        .expect("lower and apply authored layer spec");
+    let (layout, marks) = lowered
+        .marks(scene, &measurer)
+        .expect("build lowered authored layer marks");
     let diffs = scene.tick(marks);
 
     let mut svg_scene = svg::SvgScene::default();
@@ -569,6 +587,62 @@ fn lowered_json_spec_demo() -> html::HtmlSection {
         title: "Lowered JSON UnitSpec",
         description: "An aggregate bar chart built from actual JSON text, parsed into `ParsedUnitSpec`, adapted by field names, and lowered through the authored seam.",
         svg: render_lowered_unit_spec(&mut scene, spec),
+    }
+}
+
+fn lowered_json_layer_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(138);
+    let mut table = Table::new(source_id);
+    table.row_keys = vec![0, 1, 2, 3];
+    table.data = Some(Box::new(ScatterValues {
+        x: vec![0.0, 1.0, 2.0, 3.0],
+        y: vec![1.0, 2.0, 1.5, 3.0],
+    }));
+    scene.insert_table(table);
+
+    let parsed = parse_layer_spec_json(
+        r#"{
+            "title": "JSON Lowered Layer",
+            "width": 220.0,
+            "height": 120.0,
+            "layer": [
+                { "mark": "line" },
+                { "mark": "point" }
+            ],
+            "encoding": {
+                "x": { "field": "x", "type": "quantitative", "title": "x" },
+                "y": { "field": "y", "type": "quantitative", "title": "y" }
+            }
+        }"#,
+    )
+    .expect("parse json layer spec");
+
+    let resolver = SliceFieldResolver::new(&[
+        SchemaField {
+            name: "x",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "y",
+            column: ColumnId(1),
+        },
+    ]);
+    let spec = parsed
+        .adapt(
+            &resolver,
+            AdaptContext {
+                id_base: 0xD0_A00,
+                derived_table_base: TableId(139),
+                data: DataRef::Table(source_id),
+            },
+        )
+        .expect("adapt json parsed layer");
+
+    html::HtmlSection {
+        title: "Lowered JSON Layer",
+        description: "A shared-plot line + point overlay built from JSON text, adapted by field names, and lowered through the new layered spec seam.",
+        svg: render_lowered_layer_spec(&mut scene, spec),
     }
 }
 
