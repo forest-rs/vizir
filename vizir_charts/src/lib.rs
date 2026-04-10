@@ -37,6 +37,8 @@ mod scale;
 mod sector_mark;
 pub mod spec;
 mod spec_adapter;
+#[cfg(feature = "json")]
+mod spec_json;
 mod stacked_area_chart;
 mod stacked_area_mark;
 mod stacked_bar_chart;
@@ -76,6 +78,8 @@ pub use spec_adapter::{
     ParsedEncodingSet, ParsedFieldKind, ParsedMarkDef, ParsedPredicate, ParsedTransformSpec,
     ParsedUnitSpec, SchemaField, SliceFieldResolver,
 };
+#[cfg(feature = "json")]
+pub use spec_json::{JsonSpecError, parse_unit_spec_json};
 pub use stacked_area_chart::StackedAreaChartSpec;
 pub use stacked_area_mark::StackedAreaMarkSpec;
 pub use stacked_bar_chart::StackedBarChartSpec;

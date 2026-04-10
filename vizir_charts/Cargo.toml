@@ -13,6 +13,8 @@ categories = ["graphics", "no-std"]
 kurbo.workspace = true
 libm = { version = "0.2.15", optional = true }
 peniko.workspace = true
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 vizir_core.workspace = true
 vizir_transforms.workspace = true
 
@@ -21,6 +23,7 @@ workspace = true
 
 [features]
 default = ["libm"]
+json = ["std", "dep:serde", "dep:serde_json"]
 std = ["vizir_core/std", "kurbo/std", "peniko/std", "vizir_transforms/std"]
 libm = [
   "dep:libm",

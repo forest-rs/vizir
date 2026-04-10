@@ -24,6 +24,8 @@ hashbrown = { version = "0.16.1", default-features = false, features = [
 ] }
 kurbo = { version = "0.13.0", default-features = false }
 peniko = { version = "0.6.0", default-features = false }
+serde = { version = "1.0.228", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1.0.145", default-features = false, features = ["alloc"] }
 smallvec = { version = "1.13.2", default-features = false }
 
 vizir_charts = { path = "vizir_charts", default-features = false }

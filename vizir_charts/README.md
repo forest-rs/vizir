@@ -7,6 +7,11 @@ It is not a Vega/Vega-Lite implementation: there is no declarative grammar and
 no automatic compilation step. Instead, higher-level layers can use these
 building blocks to create stable-identity marks and feed them into a `vizir_core::Scene`.
 
+Optional `json` feature:
+- Enables a narrow serde-backed JSON parser that produces `ParsedUnitSpec` values for the
+  experimental authored-spec seam.
+- This is intentionally limited to the currently supported mark/channel/transform slice.
+
 ## Plans
 
 Living roadmap/design notes are in `plans/` at the workspace root:
