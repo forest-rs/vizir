@@ -34,15 +34,16 @@ Status meanings:
 | `line` | supported | Quantitative/temporal `x`, quantitative `y` |
 | `point` | supported | Quantitative/temporal `x`, quantitative `y`, plus point-only `size` and `shape` channels |
 | `area` | supported | Plain area, categorical color-split area, ranged area via `y2`, paired-edge area via `x2` + `y2` |
+| `rule` | partial | Full-span threshold line from exactly one authored `x` or `y` channel; useful in layered overlays |
 | `text` | partial | Numeric text labels over shared x/y scales; text field formatting is supported, but string-backed text data is not |
-| `rect`, `rule`, `arc`, `tick`, `trail`, `image`, `geoshape` | missing | Some runtime/chart primitives exist, but not in authored spec lowering |
+| `rect`, `arc`, `tick`, `trail`, `image`, `geoshape` | missing | Some runtime/chart primitives exist, but not in authored spec lowering |
 
 ### Channels
 
 | Channel | Status | Notes |
 |---|---|---|
-| `x` | supported | Ordinal, nominal, quantitative, temporal |
-| `y` | supported | Quantitative only in lowering slice |
+| `x` | supported | Ordinal, nominal, quantitative, temporal; `rule` uses x for vertical full-span thresholds |
+| `y` | supported | Quantitative only in lowering slice; `rule` uses y for horizontal full-span thresholds |
 | `x2` | partial | Area-only today; requires `y2` |
 | `y2` | partial | Area-only today |
 | `color` | partial | Categorical split only; legend generation supported |
@@ -85,6 +86,9 @@ Status meanings:
   their own mark, transforms, and encoding block, and later children can inherit
   positional/grouping defaults from the base child, but the base child still owns the shared x/y
   domains and color/legend shell. Independent per-child domain resolution is not modeled yet.
+- `rule` currently means a full-span threshold mark, not an arbitrary segment. It requires exactly
+  one authored `x` or `y` channel, and layered rules do not inherit positional channels from the
+  shared shell.
 - Literal child styles currently support constant `fill`, `stroke`, and `opacity` through the
   layer seam, but they may not be combined with conflicting data-driven channels like shared
   `color`, child `stroke`, or child `opacity`.

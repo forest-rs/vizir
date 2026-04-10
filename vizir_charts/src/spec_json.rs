@@ -296,6 +296,7 @@ fn parse_mark(mark: JsonMark) -> Result<ParsedMarkDef, JsonSpecError> {
         "line" => Ok(ParsedMarkDef::Line),
         "point" => Ok(ParsedMarkDef::Point),
         "area" => Ok(ParsedMarkDef::Area),
+        "rule" => Ok(ParsedMarkDef::Rule),
         "text" => Ok(ParsedMarkDef::Text),
         _ => Err(JsonSpecError::Invalid(format!(
             "unsupported mark type `{kind}`"
@@ -748,6 +749,34 @@ mod tests {
     }
 
     #[test]
+    fn parses_rule_mark_spec() {
+        let spec = parse_unit_spec_json(
+            r#"{
+                "mark": "rule",
+                "encoding": {
+                    "y": { "field": "threshold", "type": "quantitative", "title": "threshold" }
+                }
+            }"#,
+        )
+        .expect("parse rule mark spec");
+
+        let resolver = SliceFieldResolver::new(&[SchemaField {
+            name: "threshold",
+            column: ColumnId(1),
+        }]);
+        let _unit = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xC1_050,
+                    derived_table_base: TableId(301),
+                    data: DataRef::Table(TableId(4)),
+                },
+            )
+            .expect("adapt parsed rule mark");
+    }
+
+    #[test]
     fn parses_point_shape_size_fixture() {
         let spec = parse_unit_spec_json(include_str!(
             "../../fixtures/specs/unit_point_shape_size.json"
@@ -1019,5 +1048,32 @@ mod tests {
                 },
             )
             .expect("adapt parsed nested child units layer");
+    }
+
+    #[test]
+    fn parses_line_rule_layer_fixture() {
+        let spec = parse_layer_spec_json(include_str!("../../fixtures/specs/layer_line_rule.json"))
+            .expect("parse line + rule layer");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "y",
+                column: ColumnId(1),
+            },
+        ]);
+        let _layer = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xC2_300,
+                    derived_table_base: TableId(308),
+                    data: DataRef::Table(TableId(10)),
+                },
+            )
+            .expect("adapt parsed line + rule layer");
     }
 }

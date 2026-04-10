@@ -140,6 +140,7 @@ Support:
 - `Line`
 - `Point`
 - `Area`
+- `Rule`
 - `Text`
 
 ### Channel shape
@@ -171,6 +172,7 @@ And only the most useful authored meanings:
 - `x2`: secondary position for ranged areas
 - `y`: position or aggregate value
 - `y2`: secondary position for ranged areas
+- `rule`: a full-span threshold from exactly one authored `x` or `y` channel
 - `color`: categorical series split for legend/fill
 - `text`: direct label channel for simple annotations later
 

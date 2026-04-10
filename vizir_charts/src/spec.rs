@@ -10,7 +10,7 @@
 //! - one unit chart or a narrow shared-plot layer spec,
 //! - one input table already present in a [`vizir_core::Scene`],
 //! - a small transform subset,
-//! - `bar`, `line`, `point`, `area`, and `text` marks,
+//! - `bar`, `line`, `point`, `area`, `rule`, and `text` marks,
 //! - `x`, `x2`, `y`, `y2`, `color`, `size`, `shape`, `opacity`, `stroke`, `strokeWidth`, `order`, `detail`, and `text` channels,
 //! - optional chart titles.
 //!
@@ -76,6 +76,8 @@ pub enum MarkDef {
     Point,
     /// A filled area over continuous x/y axes.
     Area,
+    /// A full-span threshold line from either x or y.
+    Rule,
     /// A text label positioned by x/y and formatted from a numeric field.
     Text,
 }
@@ -559,6 +561,9 @@ impl UnitSpec {
     pub fn lower(&self, scene: &Scene) -> Result<LoweredUnit, LoweringError> {
         let DataRef::Table(input_table) = self.data;
         ensure_table_exists(scene, input_table)?;
+        if self.mark == MarkDef::Rule {
+            return self.lower_rule(scene, input_table);
+        }
 
         let x = self
             .encoding
@@ -791,6 +796,7 @@ impl UnitSpec {
                     ));
                 }
             }
+            MarkDef::Rule => unreachable!("rule lowering is handled before generic validation"),
             MarkDef::Text => {
                 if text.is_none() {
                     return Err(LoweringError::MissingChannel("text"));
@@ -1010,6 +1016,7 @@ impl UnitSpec {
                         fill,
                         stroke: None,
                     }),
+                    MarkDef::Rule => unreachable!("rule lowering is handled by lower_rule"),
                     MarkDef::Text => SeriesLayer::Text(TextLayer {
                         id_base: self.id_base.wrapping_add(0x2_000 + index as u64),
                         table: output,
@@ -1103,7 +1110,7 @@ impl UnitSpec {
                         fill: Brush::Solid(css::CORNFLOWER_BLUE),
                         stroke: None,
                     }),
-                    MarkDef::Bar | MarkDef::Point | MarkDef::Text => {
+                    MarkDef::Bar | MarkDef::Point | MarkDef::Rule | MarkDef::Text => {
                         unreachable!("detail is validated for line/area marks only")
                     }
                 });
@@ -1186,6 +1193,7 @@ impl UnitSpec {
                     fill: Brush::Solid(css::CORNFLOWER_BLUE),
                     stroke: None,
                 }),
+                MarkDef::Rule => unreachable!("rule lowering is handled by lower_rule"),
                 MarkDef::Text => SeriesLayer::Text(TextLayer {
                     id_base: self.id_base.wrapping_add(0x1_200),
                     table: current_table,
@@ -1231,6 +1239,120 @@ impl UnitSpec {
         let lowered = self.lower(scene)?;
         lowered.apply_to_scene(scene)?;
         Ok(lowered)
+    }
+
+    fn lower_rule(&self, scene: &Scene, input_table: TableId) -> Result<LoweredUnit, LoweringError> {
+        let x = self.encoding.x();
+        let y = self.encoding.y();
+        let x2 = self.encoding.x2();
+        let y2 = self.encoding.y2();
+        let color = self.encoding.color();
+        let size = self.encoding.size();
+        let shape = self.encoding.shape();
+        let opacity = self.encoding.opacity();
+        let stroke = self.encoding.stroke();
+        let stroke_width = self.encoding.stroke_width();
+        let order = self.encoding.order();
+        let detail = self.encoding.detail();
+        let text = self.encoding.text();
+
+        if x.is_some() == y.is_some() {
+            return Err(LoweringError::Unsupported(
+                "rule lowering requires exactly one of x or y",
+            ));
+        }
+        if x2.is_some()
+            || y2.is_some()
+            || color.is_some()
+            || size.is_some()
+            || shape.is_some()
+            || opacity.is_some()
+            || stroke.is_some()
+            || stroke_width.is_some()
+            || order.is_some()
+            || detail.is_some()
+            || text.is_some()
+        {
+            return Err(LoweringError::Unsupported(
+                "rule lowering currently supports only a single x or y channel",
+            ));
+        }
+        if let Some(x) = x
+            && x.aggregate().is_some()
+        {
+            return Err(LoweringError::Unsupported(
+                "aggregate on the x channel is not supported for rule marks",
+            ));
+        }
+        if let Some(y) = y {
+            if y.aggregate().is_some() {
+                return Err(LoweringError::Unsupported(
+                    "aggregate on the y channel is not supported for rule marks; use an aggregate transform instead",
+                ));
+            }
+            if y.kind() != FieldKind::Quantitative {
+                return Err(LoweringError::Unsupported(
+                    "horizontal rule lowering requires a quantitative y channel",
+                ));
+            }
+        }
+
+        let mut next_table = self.derived_table_base.0;
+        let mut derived_tables = Vec::new();
+        let mut base_program = Program::new();
+        let mut current_table = input_table;
+
+        for authored in &self.transforms {
+            let output = alloc_table(&mut next_table);
+            lower_authored_transform(&mut base_program, authored, current_table, output);
+            derived_tables.push(output);
+            current_table = output;
+        }
+
+        let preview_frame = preview_output_frame(
+            scene,
+            &base_program,
+            input_table,
+            current_table,
+            dedup_cols(match (x, y) {
+                (Some(x), None) => vec![x.field()],
+                (None, Some(y)) => vec![y.field()],
+                _ => unreachable!("validated exactly one rule channel"),
+            }),
+        )?;
+
+        let chart = build_rule_chart_spec(self, &preview_frame, x, y)?;
+        let series_layers = vec![match (x, y) {
+            (Some(x), None) => SeriesLayer::Rule(RuleLayer {
+                id_base: self.id_base.wrapping_add(0x1_000),
+                table: current_table,
+                orientation: RuleOrientation::Vertical {
+                    x: x.field(),
+                    kind: x.kind(),
+                },
+                stroke: StrokeStyle::solid(css::BLACK, 1.0),
+            }),
+            (None, Some(y)) => SeriesLayer::Rule(RuleLayer {
+                id_base: self.id_base.wrapping_add(0x1_000),
+                table: current_table,
+                orientation: RuleOrientation::Horizontal { y: y.field() },
+                stroke: StrokeStyle::solid(css::BLACK, 1.0),
+            }),
+            _ => unreachable!("validated exactly one rule channel"),
+        }];
+
+        Ok(LoweredUnit {
+            input_table,
+            output_table: current_table,
+            derived_tables,
+            program: if base_program.transforms().is_empty() {
+                None
+            } else {
+                Some(base_program)
+            },
+            chart,
+            series_layers,
+        })
     }
 }
 
@@ -1833,6 +1955,7 @@ enum SeriesLayer {
     Line(LineLayer),
     Point(PointLayer),
     Area(AreaLayer),
+    Rule(RuleLayer),
     Text(TextLayer),
 }
 
@@ -1848,6 +1971,7 @@ impl SeriesLayer {
             Self::Line(layer) => layer.marks(scene, chart, plot),
             Self::Point(layer) => layer.marks(scene, chart, plot),
             Self::Area(layer) => layer.marks(scene, chart, plot),
+            Self::Rule(layer) => layer.marks(scene, chart, plot),
             Self::Text(layer) => layer.marks(scene, chart, plot),
         }
     }
@@ -2274,6 +2398,115 @@ impl AreaLayer {
 }
 
 #[derive(Clone, Debug)]
+enum RuleOrientation {
+    Vertical { x: ColumnId, kind: FieldKind },
+    Horizontal { y: ColumnId },
+}
+
+#[derive(Clone, Debug)]
+struct RuleLayer {
+    id_base: u64,
+    table: TableId,
+    orientation: RuleOrientation,
+    stroke: StrokeStyle,
+}
+
+impl RuleLayer {
+    fn marks(
+        &self,
+        scene: &Scene,
+        chart: &ChartSpec,
+        plot: Rect,
+    ) -> Result<Vec<Mark>, LoweringError> {
+        let table = scene
+            .tables
+            .get(&self.table)
+            .ok_or(LoweringError::MissingTable(self.table))?;
+        let row_keys = table.row_keys.clone();
+        let id_base = self.id_base;
+        let stroke = self.stroke.clone();
+
+        Ok(match self.orientation {
+            RuleOrientation::Vertical { x, kind } => match kind {
+                FieldKind::Ordinal | FieldKind::Nominal => {
+                    let band = chart
+                        .x_axis()
+                        .ok_or(LoweringError::MissingChannel("x"))?
+                        .scale_band(plot);
+                    row_keys
+                        .iter()
+                        .copied()
+                        .enumerate()
+                        .map(|(row, row_key)| {
+                            crate::RuleMarkSpec::vertical(
+                                layer_row_mark_id(id_base, row_key),
+                                band.x(row) + 0.5 * band.band_width(),
+                                plot.y0,
+                                plot.y1,
+                            )
+                            .with_stroke(stroke.brush.clone(), stroke.stroke_width)
+                            .mark()
+                        })
+                        .collect()
+                }
+                FieldKind::Quantitative | FieldKind::Temporal => {
+                    let x_scale = chart
+                        .x_scale_continuous(plot)
+                        .ok_or(LoweringError::MissingChannel("x"))?;
+                    row_keys
+                        .iter()
+                        .copied()
+                        .enumerate()
+                        .map(|(row, row_key)| {
+                            crate::RuleMarkSpec::vertical(
+                                layer_row_mark_id(id_base, row_key),
+                                x_scale.map(
+                                    table
+                                        .data
+                                        .as_deref()
+                                        .and_then(|data| data.f64(row, x))
+                                        .unwrap_or(0.0),
+                                ),
+                                plot.y0,
+                                plot.y1,
+                            )
+                            .with_stroke(stroke.brush.clone(), stroke.stroke_width)
+                            .mark()
+                        })
+                        .collect()
+                }
+            },
+            RuleOrientation::Horizontal { y } => {
+                let y_scale = chart
+                    .y_scale_continuous(plot)
+                    .ok_or(LoweringError::MissingChannel("y"))?;
+                row_keys
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .map(|(row, row_key)| {
+                        crate::RuleMarkSpec::horizontal(
+                            layer_row_mark_id(id_base, row_key),
+                            y_scale.map(
+                                table
+                                    .data
+                                    .as_deref()
+                                    .and_then(|data| data.f64(row, y))
+                                    .unwrap_or(0.0),
+                            ),
+                            plot.x0,
+                            plot.x1,
+                        )
+                        .with_stroke(stroke.brush.clone(), stroke.stroke_width)
+                        .mark()
+                    })
+                    .collect()
+            }
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
 struct TextLayer {
     id_base: u64,
     table: TableId,
@@ -2509,6 +2742,43 @@ fn build_chart_spec(
     })
 }
 
+fn build_rule_chart_spec(
+    spec: &UnitSpec,
+    frame: &TableFrame,
+    x: Option<&ChannelDef>,
+    y: Option<&ChannelDef>,
+) -> Result<ChartSpec, LoweringError> {
+    let title = spec.title.as_ref().map(|title| {
+        TitleSpec::new(
+            MarkId::from_raw(spec.id_base.wrapping_add(0x200)),
+            title.clone(),
+        )
+        .with_font_size(12.0)
+        .with_fill(css::BLACK)
+    });
+
+    Ok(ChartSpec {
+        title,
+        plot_size: Size {
+            width: spec.width,
+            height: spec.height,
+        },
+        layout: ChartLayoutSpec {
+            view_size: None,
+            outer_padding: 10.0,
+            plot_padding: 0.0,
+            ..ChartLayoutSpec::default()
+        },
+        axis_left: y
+            .map(|y| build_y_axis(spec, frame, y.field(), None, y.title(), MarkDef::Rule))
+            .transpose()?,
+        axis_right: None,
+        axis_top: None,
+        axis_bottom: x.map(|x| build_x_axis(spec, frame, x, None)).transpose()?,
+        legend: None,
+    })
+}
+
 fn build_x_axis(
     spec: &UnitSpec,
     frame: &TableFrame,
@@ -2577,7 +2847,9 @@ fn build_y_axis(
     let domain = match mark {
         MarkDef::Bar => include_zero(expand_domain(domain)),
         MarkDef::Area if y2_field.is_none() => include_zero(expand_domain(domain)),
-        MarkDef::Area | MarkDef::Line | MarkDef::Point | MarkDef::Text => expand_domain(domain),
+        MarkDef::Area | MarkDef::Line | MarkDef::Point | MarkDef::Rule | MarkDef::Text => {
+            expand_domain(domain)
+        }
     };
     let mut axis = AxisSpec::left(
         spec.id_base.wrapping_add(0x11_000),
@@ -3007,6 +3279,23 @@ fn merge_layer_encoding(
     overrides: &EncodingSet,
     mark: MarkDef,
 ) -> EncodingSet {
+    if mark == MarkDef::Rule {
+        return EncodingSet {
+            x: overrides.x.clone(),
+            x2: None,
+            y: overrides.y.clone(),
+            y2: None,
+            color: None,
+            size: None,
+            shape: None,
+            opacity: overrides.opacity.clone(),
+            stroke: overrides.stroke.clone(),
+            stroke_width: overrides.stroke_width.clone(),
+            order: None,
+            detail: None,
+            text: None,
+        };
+    }
     let mut out = EncodingSet {
         x: overrides.x.clone().or_else(|| shared.x.clone()),
         x2: overrides.x2.clone().or_else(|| shared.x2.clone()),
@@ -3080,6 +3369,11 @@ fn validate_layer_child_literal_style(
     if style.fill.is_some() && encoding.color().is_some() {
         return Err(LoweringError::Unsupported(
             "layer children cannot combine literal fill style with a color channel",
+        ));
+    }
+    if style.fill.is_some() && mark == MarkDef::Rule {
+        return Err(LoweringError::Unsupported(
+            "literal fill style is not supported on rule layer children",
         ));
     }
     if style.opacity.is_some() && encoding.opacity().is_some() {
@@ -3159,6 +3453,19 @@ fn apply_layer_child_style(
                     }
                 }
             }
+            SeriesLayer::Rule(rule) => {
+                if style.fill.is_some() {
+                    return Err(LoweringError::Unsupported(
+                        "literal fill style is not supported on rule layer children",
+                    ));
+                }
+                if let Some(stroke) = &style.stroke {
+                    rule.stroke = stroke.clone();
+                }
+                if let Some(opacity) = style.opacity {
+                    rule.stroke.brush = brush_with_opacity(&rule.stroke.brush, opacity);
+                }
+            }
             SeriesLayer::Text(text) => {
                 if let Some(fill) = &style.fill {
                     text.fill = fill.clone();
@@ -3236,6 +3543,24 @@ fn base_layer_mark_index(children: &[LayerChildSpec]) -> usize {
     if let Some(index) = children
         .iter()
         .position(|child| child.mark() == MarkDef::Area)
+    {
+        return index;
+    }
+    if let Some(index) = children
+        .iter()
+        .position(|child| child.mark() == MarkDef::Line)
+    {
+        return index;
+    }
+    if let Some(index) = children
+        .iter()
+        .position(|child| child.mark() == MarkDef::Point)
+    {
+        return index;
+    }
+    if let Some(index) = children
+        .iter()
+        .position(|child| child.mark() == MarkDef::Text)
     {
         return index;
     }
@@ -3812,6 +4137,30 @@ mod tests {
     }
 
     #[test]
+    fn horizontal_rule_lowering_emits_full_width_marks() {
+        let mut scene = Scene::new();
+        let table_id = TableId(42);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![310, 311];
+        table.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 1.0],
+            b: vec![2.0, 4.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(0xDE00, TableId(420), DataRef::Table(table_id), MarkDef::Rule)
+            .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("threshold"));
+
+        let lowered = spec.lower(&scene).expect("lower horizontal rule");
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let marks = lowered
+            .series_marks(&scene, layout.data)
+            .expect("rule marks");
+        assert_eq!(marks.len(), 2);
+        assert!(marks.iter().all(|mark| mark.kind == MarkKind::Path));
+    }
+
+    #[test]
     fn area_color_lowering_creates_series_paths_and_legend() {
         let mut scene = Scene::new();
         let table_id = TableId(50);
@@ -4105,6 +4454,62 @@ mod tests {
             .get(&lowered.derived_tables()[0])
             .expect("filtered child table");
         assert_eq!(filtered.row_keys, vec![601, 602]);
+    }
+
+    #[test]
+    fn layered_rule_child_can_draw_an_aggregated_mean_threshold() {
+        let mut scene = Scene::new();
+        let table_id = TableId(822);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![610, 611, 612, 613];
+        table.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 1.0, 2.0, 3.0],
+            b: vec![1.0, 2.0, 3.0, 4.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = LayerSpec::new(0xF1A8, TableId(821), DataRef::Table(table_id))
+            .with_child(
+                LayerChildSpec::new(MarkDef::Line)
+                    .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+                    .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("value")),
+            )
+            .with_child(
+                LayerChildSpec::new(MarkDef::Rule)
+                    .with_transform(TransformSpec::aggregate(
+                        vec![],
+                        vec![AggregateField {
+                            op: AggregateOp::Mean,
+                            input: ColumnId(1),
+                            output: ColumnId(2),
+                        }],
+                    ))
+                    .with_y(ChannelDef::quantitative(ColumnId(2)).with_title("mean"))
+                    .with_stroke_style(StrokeStyle::solid(css::TOMATO, 2.0)),
+            );
+
+        let lowered = spec
+            .lower_into_scene(&mut scene)
+            .expect("lower layered mean rule");
+        assert_eq!(lowered.derived_tables().len(), 1);
+
+        let (_layout, diffs) = lowered
+            .tick(&mut scene, &HeuristicTextMeasurer)
+            .expect("tick layered mean rule");
+        let mut strokes = Vec::new();
+        let mut widths = Vec::new();
+        for diff in diffs {
+            let MarkDiff::Enter { new, .. } = diff else {
+                continue;
+            };
+            let vizir_core::MarkPayload::Path(channels) = *new else {
+                continue;
+            };
+            strokes.push(channels.stroke);
+            widths.push(channels.stroke_width);
+        }
+        assert!(strokes.contains(&Brush::Solid(css::TOMATO)));
+        assert!(widths.iter().any(|width| (*width - 2.0).abs() < 1e-9));
     }
 
     #[test]

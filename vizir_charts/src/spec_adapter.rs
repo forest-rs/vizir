@@ -107,6 +107,8 @@ pub enum ParsedMarkDef {
     Point,
     /// A filled area over continuous x/y axes.
     Area,
+    /// A full-span threshold line from either x or y.
+    Rule,
     /// A text label positioned by x/y and formatted from a numeric field.
     Text,
 }
@@ -1005,6 +1007,7 @@ fn adapt_mark(mark: ParsedMarkDef) -> MarkDef {
         ParsedMarkDef::Line => MarkDef::Line,
         ParsedMarkDef::Point => MarkDef::Point,
         ParsedMarkDef::Area => MarkDef::Area,
+        ParsedMarkDef::Rule => MarkDef::Rule,
         ParsedMarkDef::Text => MarkDef::Text,
     }
 }
@@ -1472,6 +1475,35 @@ mod tests {
     }
 
     #[test]
+    fn parsed_rule_mark_adapts_and_lowers() {
+        let parsed =
+            ParsedUnitSpec::new(ParsedMarkDef::Rule).with_y(ParsedChannelDef::quantitative("y"));
+
+        let mut scene = Scene::new();
+        let table_id = TableId(311);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![115, 116];
+        table.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 1.0],
+            b: vec![2.0, 4.0],
+        }));
+        scene.insert_table(table);
+
+        let unit = parsed
+            .adapt(&resolver(), context(table_id))
+            .expect("adapt rule mark");
+        let lowered = unit.lower(&scene).expect("lower rule mark");
+        let (_layout, marks) = lowered
+            .marks(&scene, &HeuristicTextMeasurer)
+            .expect("rule marks");
+        let path_count = marks
+            .iter()
+            .filter(|mark| mark.kind == vizir_core::MarkKind::Path)
+            .count();
+        assert!(path_count >= 2);
+    }
+
+    #[test]
     fn parsed_point_shape_size_adapts_and_lowers() {
         let parsed = ParsedUnitSpec::new(ParsedMarkDef::Point)
             .with_x(ParsedChannelDef::quantitative("x"))
@@ -1787,6 +1819,44 @@ mod tests {
             .get(&lowered.derived_tables()[0])
             .expect("filtered child table");
         assert_eq!(filtered.row_keys, vec![31, 32]);
+    }
+
+    #[test]
+    fn parsed_layer_rule_child_adapts_and_lowers() {
+        let parsed = ParsedLayerSpec::new()
+            .with_child(
+                ParsedLayerChildSpec::new(ParsedMarkDef::Line)
+                    .with_x(ParsedChannelDef::quantitative("x"))
+                    .with_y(ParsedChannelDef::quantitative("y")),
+            )
+            .with_child(
+                ParsedLayerChildSpec::new(ParsedMarkDef::Rule)
+                    .with_transform(ParsedTransformSpec::aggregate(
+                        Vec::<String>::new(),
+                        vec![ParsedAggregateField::new(AggregateOp::Mean, "y", "mean_y")],
+                    ))
+                    .with_y(ParsedChannelDef::quantitative("mean_y"))
+                    .with_stroke_style(StrokeStyle::solid(
+                        peniko::color::palette::css::TOMATO,
+                        2.0,
+                    )),
+            );
+
+        let mut scene = Scene::new();
+        let table_id = TableId(721);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![34, 35, 36, 37];
+        table.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 1.0, 2.0, 3.0],
+            b: vec![1.0, 2.0, 3.0, 4.0],
+        }));
+        scene.insert_table(table);
+
+        let layer = parsed
+            .adapt(&resolver(), context(table_id))
+            .expect("adapt layered rule");
+        let lowered = layer.lower(&scene).expect("lower layered rule");
+        assert_eq!(lowered.derived_tables().len(), 1);
     }
 
     #[test]

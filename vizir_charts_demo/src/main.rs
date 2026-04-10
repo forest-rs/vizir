@@ -55,6 +55,7 @@ fn main() {
         lowered_json_point_opacity_demo(),
         lowered_json_point_stroke_width_demo(),
         lowered_json_nested_layer_demo(),
+        lowered_json_rule_layer_demo(),
         lowered_json_layer_demo(),
         lowered_area_spec_demo(),
         lowered_ranged_area_spec_demo(),
@@ -879,6 +880,50 @@ fn lowered_json_nested_layer_demo() -> html::HtmlSection {
     }
 }
 
+fn lowered_json_rule_layer_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(150);
+    let mut table = Table::new(source_id);
+    table.row_keys = vec![0, 1, 2, 3, 4];
+    table.data = Some(Box::new(LineSeriesValues {
+        x: vec![0.0, 1.0, 2.0, 3.0, 4.0],
+        y: vec![1.0, 2.5, 1.5, 3.5, 2.0],
+    }));
+    scene.insert_table(table);
+
+    let parsed = parse_layer_spec_json(include_str!(
+        "../../fixtures/specs/layer_line_rule.json"
+    ))
+    .expect("parse rule layer");
+
+    let resolver = SliceFieldResolver::new(&[
+        SchemaField {
+            name: "x",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "y",
+            column: ColumnId(1),
+        },
+    ]);
+    let spec = parsed
+        .adapt(
+            &resolver,
+            AdaptContext {
+                id_base: 0xD0_F00,
+                derived_table_base: TableId(151),
+                data: DataRef::Table(source_id),
+            },
+        )
+        .expect("adapt rule layer");
+
+    html::HtmlSection {
+        title: "Lowered JSON Rule Layer",
+        description: "A line with a child-local aggregated mean rule, proving narrow `rule` lowering inside layered specs.",
+        svg: render_lowered_layer_spec(&mut scene, spec),
+    }
+}
+
 #[derive(Debug)]
 struct LayerOverlayValues {
     x: Vec<f64>,
@@ -915,6 +960,12 @@ struct StyledLayerValues {
     high: Vec<f64>,
     low: Vec<f64>,
     line: Vec<f64>,
+}
+
+#[derive(Debug)]
+struct LineSeriesValues {
+    x: Vec<f64>,
+    y: Vec<f64>,
 }
 
 impl TableData for PointShapeSizeValues {
@@ -987,6 +1038,20 @@ impl TableData for StyledLayerValues {
             ColumnId(1) => self.high.get(row).copied(),
             ColumnId(2) => self.low.get(row).copied(),
             ColumnId(3) => self.line.get(row).copied(),
+            _ => None,
+        }
+    }
+}
+
+impl TableData for LineSeriesValues {
+    fn row_count(&self) -> usize {
+        self.x.len().min(self.y.len())
+    }
+
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        match col {
+            ColumnId(0) => self.x.get(row).copied(),
+            ColumnId(1) => self.y.get(row).copied(),
             _ => None,
         }
     }

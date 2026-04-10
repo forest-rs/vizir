@@ -1,0 +1,30 @@
+{
+  "title": "Line + Mean Rule",
+  "width": 220.0,
+  "height": 120.0,
+  "layer": [
+    {
+      "mark": "line",
+      "encoding": {
+        "x": { "field": "x", "type": "quantitative", "title": "x" },
+        "y": { "field": "y", "type": "quantitative", "title": "value" }
+      }
+    },
+    {
+      "mark": "rule",
+      "transform": [
+        {
+          "aggregate": [{ "op": "mean", "field": "y", "as": "mean_y" }],
+          "groupby": []
+        }
+      ],
+      "encoding": {
+        "y": { "field": "mean_y", "type": "quantitative", "title": "mean" }
+      },
+      "style": {
+        "stroke": "#DC2626",
+        "strokeWidth": 2.0
+      }
+    }
+  ]
+}
