@@ -174,6 +174,7 @@ And only the most useful authored meanings:
 - `y2`: secondary position for ranged areas
 - `rule`: a full-span threshold from exactly one authored `x` or `y` channel
 - `color`: categorical series split for legend/fill
+  for bar marks this currently means grouped bars, not stacked bars
 - `text`: direct label channel for simple annotations later
 
 ## Proposed minimal authored types

@@ -50,6 +50,7 @@ fn main() {
         aggregate_demo(),
         lowered_spec_demo(),
         lowered_json_spec_demo(),
+        lowered_json_grouped_bar_demo(),
         lowered_json_bar_text_demo(),
         lowered_json_point_shape_size_demo(),
         lowered_json_point_opacity_demo(),
@@ -579,6 +580,53 @@ fn lowered_json_spec_demo() -> html::HtmlSection {
     }
 }
 
+fn lowered_json_grouped_bar_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(1371);
+    let mut table = Table::new(source_id);
+    table.row_keys = (0..6_u64).collect();
+    table.data = Some(Box::new(GroupedBarValues {
+        category: vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0],
+        value: vec![2.0, 4.0, 3.0, 5.0, 4.0, 6.0],
+        series: vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+    }));
+    scene.insert_table(table);
+
+    let parsed = parse_unit_spec_json(include_str!("../../fixtures/specs/unit_grouped_bar.json"))
+        .expect("parse grouped bar spec");
+
+    let resolver = SliceFieldResolver::new(&[
+        SchemaField {
+            name: "category",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "value",
+            column: ColumnId(1),
+        },
+        SchemaField {
+            name: "series",
+            column: ColumnId(2),
+        },
+    ]);
+    let spec = parsed
+        .adapt(
+            &resolver,
+            AdaptContext {
+                id_base: 0xD0_880,
+                derived_table_base: TableId(138),
+                data: DataRef::Table(source_id),
+            },
+        )
+        .expect("adapt grouped bar spec");
+
+    html::HtmlSection {
+        title: "Lowered JSON Grouped Bars",
+        description: "A grouped bar chart built from JSON text, proving categorical `color` lowering for bars through the authored seam.",
+        svg: render_lowered_unit_spec(&mut scene, spec),
+    }
+}
+
 fn lowered_json_layer_demo() -> html::HtmlSection {
     let mut scene = Scene::new();
     let source_id = TableId(138);
@@ -891,10 +939,8 @@ fn lowered_json_rule_layer_demo() -> html::HtmlSection {
     }));
     scene.insert_table(table);
 
-    let parsed = parse_layer_spec_json(include_str!(
-        "../../fixtures/specs/layer_line_rule.json"
-    ))
-    .expect("parse rule layer");
+    let parsed = parse_layer_spec_json(include_str!("../../fixtures/specs/layer_line_rule.json"))
+        .expect("parse rule layer");
 
     let resolver = SliceFieldResolver::new(&[
         SchemaField {
@@ -952,6 +998,13 @@ struct PointStrokeValues {
     y: Vec<f64>,
     series: Vec<f64>,
     weight: Vec<f64>,
+}
+
+#[derive(Debug)]
+struct GroupedBarValues {
+    category: Vec<f64>,
+    value: Vec<f64>,
+    series: Vec<f64>,
 }
 
 #[derive(Debug)]
@@ -1018,6 +1071,24 @@ impl TableData for PointStrokeValues {
             ColumnId(1) => self.y.get(row).copied(),
             ColumnId(2) => self.series.get(row).copied(),
             ColumnId(3) => self.weight.get(row).copied(),
+            _ => None,
+        }
+    }
+}
+
+impl TableData for GroupedBarValues {
+    fn row_count(&self) -> usize {
+        self.category
+            .len()
+            .min(self.value.len())
+            .min(self.series.len())
+    }
+
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        match col {
+            ColumnId(0) => self.category.get(row).copied(),
+            ColumnId(1) => self.value.get(row).copied(),
+            ColumnId(2) => self.series.get(row).copied(),
             _ => None,
         }
     }

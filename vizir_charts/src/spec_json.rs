@@ -614,6 +614,37 @@ mod tests {
     }
 
     #[test]
+    fn parses_grouped_bar_fixture() {
+        let spec = parse_unit_spec_json(include_str!("../../fixtures/specs/unit_grouped_bar.json"))
+            .expect("parse grouped bar spec");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "category",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "value",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "series",
+                column: ColumnId(2),
+            },
+        ]);
+        let _unit = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xA0_100,
+                    derived_table_base: TableId(101),
+                    data: DataRef::Table(TableId(2)),
+                },
+            )
+            .expect("adapt parsed grouped bar");
+    }
+
+    #[test]
     fn parses_transform_aliases_into_parsed_spec() {
         let spec = parse_unit_spec_json(
             r#"{

@@ -683,11 +683,6 @@ impl UnitSpec {
                 "aggregate on the detail channel is not supported in the experimental lowering slice",
             ));
         }
-        if color.is_some() && self.mark == MarkDef::Bar {
-            return Err(LoweringError::Unsupported(
-                "categorical color splitting is not supported for bar marks yet",
-            ));
-        }
         if color.is_some() && self.mark == MarkDef::Text {
             return Err(LoweringError::Unsupported(
                 "categorical color splitting is not supported for text marks yet",
@@ -895,6 +890,11 @@ impl UnitSpec {
         let point_shape_map = shape
             .map(|shape| build_shape_map(&preview_frame, shape.field()))
             .unwrap_or_default();
+        let bar_category_index_map = if self.mark == MarkDef::Bar {
+            build_category_index_map(&preview_frame, x.field())
+        } else {
+            Vec::new()
+        };
 
         let mut program = if base_program.transforms().is_empty() {
             None
@@ -975,7 +975,19 @@ impl UnitSpec {
                     fill: fill.clone(),
                 });
                 series_layers.push(match self.mark {
-                    MarkDef::Bar => unreachable!("bar + color is rejected above"),
+                    MarkDef::Bar => SeriesLayer::Bar(BarLayer {
+                        id_base: self.id_base.wrapping_add(0x1_000 + index as u64),
+                        table: output,
+                        x: x.field(),
+                        y: lowered_y_field,
+                        category_index_map: bar_category_index_map.clone(),
+                        group_index: index,
+                        group_count: series_values.len(),
+                        baseline: 0.0,
+                        fill,
+                        opacity: opacity.map(ChannelDef::field),
+                        opacity_domain,
+                    }),
                     MarkDef::Line => SeriesLayer::Line(LineLayer {
                         id: MarkId::from_raw(self.id_base.wrapping_add(0x1_000 + index as u64)),
                         table: output,
@@ -1147,7 +1159,11 @@ impl UnitSpec {
                 MarkDef::Bar => SeriesLayer::Bar(BarLayer {
                     id_base: self.id_base.wrapping_add(0x1_000),
                     table: current_table,
+                    x: x.field(),
                     y: lowered_y_field,
+                    category_index_map: bar_category_index_map,
+                    group_index: 0,
+                    group_count: 1,
                     baseline: 0.0,
                     fill: Brush::Solid(css::CORNFLOWER_BLUE),
                     opacity: opacity.map(ChannelDef::field),
@@ -1241,7 +1257,11 @@ impl UnitSpec {
         Ok(lowered)
     }
 
-    fn lower_rule(&self, scene: &Scene, input_table: TableId) -> Result<LoweredUnit, LoweringError> {
+    fn lower_rule(
+        &self,
+        scene: &Scene,
+        input_table: TableId,
+    ) -> Result<LoweredUnit, LoweringError> {
         let x = self.encoding.x();
         let y = self.encoding.y();
         let x2 = self.encoding.x2();
@@ -1981,7 +2001,11 @@ impl SeriesLayer {
 struct BarLayer {
     id_base: u64,
     table: TableId,
+    x: ColumnId,
     y: ColumnId,
+    category_index_map: Vec<(u64, usize)>,
+    group_index: usize,
+    group_count: usize,
     baseline: f64,
     fill: Brush,
     opacity: Option<ColumnId>,
@@ -2002,7 +2026,11 @@ impl BarLayer {
         let row_keys = table.row_keys.clone();
         let id_base = self.id_base;
         let table_id = self.table;
+        let x_col = self.x;
         let y_col = self.y;
+        let category_index_map = self.category_index_map.clone();
+        let group_index = self.group_index;
+        let group_count = self.group_count;
         let baseline = self.baseline;
         let fill = self.fill.clone();
         let opacity_col = self.opacity;
@@ -2011,6 +2039,8 @@ impl BarLayer {
             .x_axis()
             .ok_or(LoweringError::MissingChannel("x"))?
             .scale_band(plot);
+        let (group_offset, group_width) =
+            grouped_bar_slot_geometry(band.band_width(), group_index, group_count);
         let y_scale = chart
             .y_scale_continuous(plot)
             .ok_or(LoweringError::MissingChannel("y"))?;
@@ -2019,11 +2049,22 @@ impl BarLayer {
             .copied()
             .enumerate()
             .map(|(row, row_key)| {
+                let category_index_map = category_index_map.clone();
                 let y0 = y_scale.map(baseline);
                 let mut mark = Mark::builder(layer_row_mark_id(id_base, row_key))
                     .rect()
                     .z_index(crate::z_order::SERIES_FILL)
-                    .x_const(band.x(row))
+                    .x_compute(
+                        [InputRef::TableCol {
+                            table: table_id,
+                            col: x_col,
+                        }],
+                        move |ctx, _| {
+                            let value = ctx.table_f64(table_id, row, x_col).unwrap_or(f64::NAN);
+                            band.x(category_index_for_value(value, &category_index_map))
+                                + group_offset
+                        },
+                    )
                     .y_compute(
                         [InputRef::TableCol {
                             table: table_id,
@@ -2034,7 +2075,7 @@ impl BarLayer {
                             y_scale.map(v).min(y0)
                         },
                     )
-                    .w_const(band.band_width())
+                    .w_const(group_width)
                     .h_compute(
                         [InputRef::TableCol {
                             table: table_id,
@@ -3097,15 +3138,10 @@ fn include_zero((min, max): (f64, f64)) -> (f64, f64) {
 }
 
 fn category_labels(frame: &TableFrame, col: ColumnId, kind: FieldKind) -> Vec<String> {
-    let mut labels = Vec::with_capacity(frame.row_count());
-    for row in 0..frame.row_count() {
-        let label = frame
-            .f64(row, col)
-            .map(|v| format_channel_value(v, kind))
-            .unwrap_or_else(|| String::from("?"));
-        labels.push(label);
-    }
-    labels
+    distinct_values(frame, col)
+        .into_iter()
+        .map(|v| format_channel_value(v, kind))
+        .collect()
 }
 
 fn distinct_values(frame: &TableFrame, col: ColumnId) -> Vec<f64> {
@@ -3159,6 +3195,36 @@ fn default_series_fills(count: usize) -> Vec<Brush> {
     (0..count)
         .map(|index| Brush::Solid(PALETTE[index % PALETTE.len()]))
         .collect()
+}
+
+fn build_category_index_map(frame: &TableFrame, col: ColumnId) -> Vec<(u64, usize)> {
+    distinct_values(frame, col)
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| (value.to_bits(), index))
+        .collect()
+}
+
+fn category_index_for_value(value: f64, index_map: &[(u64, usize)]) -> usize {
+    index_map
+        .iter()
+        .find_map(|(bits, index)| (*bits == value.to_bits()).then_some(*index))
+        .unwrap_or(0)
+}
+
+fn grouped_bar_slot_geometry(
+    band_width: f64,
+    group_index: usize,
+    group_count: usize,
+) -> (f64, f64) {
+    if group_count <= 1 {
+        return (0.0, band_width);
+    }
+    let outer_gap = band_width * 0.1;
+    let slot_gap = outer_gap / (group_count as f64 + 1.0);
+    let slot_width = (band_width - outer_gap) / group_count as f64;
+    let x = slot_gap + group_index as f64 * slot_width;
+    (x, slot_width)
 }
 
 fn build_shape_map(frame: &TableFrame, col: ColumnId) -> Vec<(u64, Symbol)> {
@@ -3814,6 +3880,52 @@ mod tests {
     }
 
     #[test]
+    fn grouped_bar_lowering_places_color_series_in_distinct_category_slots() {
+        let mut scene = Scene::new();
+        let table_id = TableId(11);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![10, 11, 12, 13, 14];
+        table.data = Some(Box::new(ThreeCols {
+            a: vec![0.0, 1.0, 2.0, 1.0, 2.0],
+            b: vec![2.0, 3.0, 4.0, 5.0, 6.0],
+            c: vec![0.0, 0.0, 0.0, 1.0, 1.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(0xAB00, TableId(110), DataRef::Table(table_id), MarkDef::Bar)
+            .with_x(ChannelDef::ordinal(ColumnId(0)).with_title("category"))
+            .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("value"))
+            .with_color(ChannelDef::nominal(ColumnId(2)).with_title("series"));
+
+        let lowered = spec
+            .lower_into_scene(&mut scene)
+            .expect("lower grouped bars");
+        assert!(lowered.chart().legend.is_some());
+
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let marks = lowered
+            .series_marks(&scene, layout.data)
+            .expect("grouped bar marks");
+        let diffs = scene.tick(marks);
+        let xs = diffs
+            .into_iter()
+            .filter_map(|diff| match diff {
+                MarkDiff::Enter { new, .. } => match *new {
+                    vizir_core::MarkPayload::Rect(channels) => Some(channels.rect.x0),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(xs.len(), 5);
+
+        let mut unique = xs;
+        unique.sort_by(f64::total_cmp);
+        unique.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+        assert_eq!(unique.len(), 5);
+    }
+
+    #[test]
     fn point_color_lowering_creates_series_tables_and_legend() {
         let mut scene = Scene::new();
         let table_id = TableId(20);
@@ -4148,8 +4260,13 @@ mod tests {
         }));
         scene.insert_table(table);
 
-        let spec = UnitSpec::new(0xDE00, TableId(420), DataRef::Table(table_id), MarkDef::Rule)
-            .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("threshold"));
+        let spec = UnitSpec::new(
+            0xDE00,
+            TableId(420),
+            DataRef::Table(table_id),
+            MarkDef::Rule,
+        )
+        .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("threshold"));
 
         let lowered = spec.lower(&scene).expect("lower horizontal rule");
         let layout = lowered.chart().layout(&HeuristicTextMeasurer);

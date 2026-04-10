@@ -1,0 +1,11 @@
+{
+  "title": "Grouped Bars",
+  "width": 220.0,
+  "height": 120.0,
+  "encoding": {
+    "x": { "field": "category", "type": "ordinal", "title": "category" },
+    "y": { "field": "value", "type": "quantitative", "title": "value" },
+    "color": { "field": "series", "type": "nominal", "title": "series" }
+  },
+  "mark": "bar"
+}

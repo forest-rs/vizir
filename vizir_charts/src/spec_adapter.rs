@@ -1317,6 +1317,10 @@ mod tests {
                 name: "y2",
                 column: ColumnId(3),
             },
+            SchemaField {
+                name: "series",
+                column: ColumnId(2),
+            },
         ])
     }
 
@@ -1733,6 +1737,41 @@ mod tests {
             .marks(&scene, &HeuristicTextMeasurer)
             .expect("layer marks");
         assert!(marks.len() >= 4);
+    }
+
+    #[test]
+    fn parsed_grouped_bar_adapts_and_lowers() {
+        let parsed = ParsedUnitSpec::new(ParsedMarkDef::Bar)
+            .with_x(ParsedChannelDef::ordinal("category"))
+            .with_y(ParsedChannelDef::quantitative("value"))
+            .with_color(ParsedChannelDef::nominal("series"));
+
+        let mut scene = Scene::new();
+        let table_id = TableId(321);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![124, 125, 126, 127, 128];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0, 2.0, 1.0, 2.0],
+            b: vec![2.0, 3.0, 4.0, 5.0, 6.0],
+            c: vec![0.0, 0.0, 0.0, 1.0, 1.0],
+            d: vec![0.0, 0.0, 0.0, 0.0, 0.0],
+        }));
+        scene.insert_table(table);
+
+        let unit = parsed
+            .adapt(&resolver(), context(table_id))
+            .expect("adapt grouped bar");
+        let lowered = unit
+            .lower_into_scene(&mut scene)
+            .expect("lower grouped bar");
+        let (_layout, marks) = lowered
+            .marks(&scene, &HeuristicTextMeasurer)
+            .expect("grouped bar marks");
+        assert!(
+            marks
+                .iter()
+                .any(|mark| mark.kind == vizir_core::MarkKind::Rect)
+        );
     }
 
     #[test]

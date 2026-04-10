@@ -30,7 +30,7 @@ Status meanings:
 
 | Mark | Status | Notes |
 |---|---|---|
-| `bar` | supported | Ordinal/nominal `x`, quantitative `y` |
+| `bar` | supported | Ordinal/nominal `x`, quantitative `y`, plus grouped categorical `color` |
 | `line` | supported | Quantitative/temporal `x`, quantitative `y` |
 | `point` | supported | Quantitative/temporal `x`, quantitative `y`, plus point-only `size` and `shape` channels |
 | `area` | supported | Plain area, categorical color-split area, ranged area via `y2`, paired-edge area via `x2` + `y2` |
@@ -46,7 +46,7 @@ Status meanings:
 | `y` | supported | Quantitative only in lowering slice; `rule` uses y for horizontal full-span thresholds |
 | `x2` | partial | Area-only today; requires `y2` |
 | `y2` | partial | Area-only today |
-| `color` | partial | Categorical split only; legend generation supported |
+| `color` | partial | Categorical split with legend generation; bar marks lower as grouped bars, not stacked bars |
 | `size` | partial | Point-only; quantitative values map into a fixed visual size range |
 | `shape` | partial | Point-only; distinct values map into a fixed symbol palette |
 | `opacity` | partial | Bar/point/text only; quantitative values map into a fixed alpha range |
@@ -81,7 +81,9 @@ Status meanings:
 
 ## Important fences
 
-- `color` splitting is currently rejected for `bar` and `text`.
+- `color` splitting is currently rejected for `text`.
+- Bar `color` lowering currently produces grouped bars only; stacking is not modeled in the authored
+  seam yet.
 - Shared `layer` currently keeps one shared plot shell. Child entries can be fully specified with
   their own mark, transforms, and encoding block, and later children can inherit
   positional/grouping defaults from the base child, but the base child still owns the shared x/y
