@@ -39,8 +39,8 @@ use crate::float::FloatExt;
 
 use crate::{
     AxisSpec, ChartLayout, ChartLayoutSpec, ChartSpec, GridStyle, LegendItem, LegendOrient,
-    LegendPlacement, LegendSwatchesSpec, PointMarkSpec, ScaleBandSpec, ScaleLinearSpec,
-    ScaleTimeSpec, Size, StrokeStyle, Symbol, TextMeasurer, TitleSpec, format_time_seconds,
+    LegendPlacement, LegendSwatchesSpec, ScaleBandSpec, ScaleLinearSpec, ScaleTimeSpec, Size,
+    StrokeStyle, Symbol, TextMeasurer, TitleSpec, format_time_seconds,
 };
 
 /// A reference to authored chart data.
@@ -660,6 +660,7 @@ impl UnitSpec {
                         stroke: StrokeStyle::solid(fill, 2.0),
                     }),
                     MarkDef::Point => SeriesLayer::Point(PointLayer {
+                        id_base: self.id_base.wrapping_add(0x1_000 + index as u64),
                         table: output,
                         x: x.field(),
                         y: lowered_y_field,
@@ -678,6 +679,7 @@ impl UnitSpec {
                         fill,
                     }),
                     MarkDef::Text => SeriesLayer::Text(TextLayer {
+                        id_base: self.id_base.wrapping_add(0x2_000 + index as u64),
                         table: output,
                         x: x.field(),
                         x_kind: x.kind(),
@@ -695,6 +697,7 @@ impl UnitSpec {
         } else {
             series_layers.push(match self.mark {
                 MarkDef::Bar => SeriesLayer::Bar(BarLayer {
+                    id_base: self.id_base.wrapping_add(0x1_000),
                     table: current_table,
                     y: lowered_y_field,
                     baseline: 0.0,
@@ -708,6 +711,7 @@ impl UnitSpec {
                     stroke: StrokeStyle::solid(css::BLACK, 2.0),
                 }),
                 MarkDef::Point => SeriesLayer::Point(PointLayer {
+                    id_base: self.id_base.wrapping_add(0x1_100),
                     table: current_table,
                     x: x.field(),
                     y: lowered_y_field,
@@ -726,6 +730,7 @@ impl UnitSpec {
                     fill: Brush::Solid(css::CORNFLOWER_BLUE),
                 }),
                 MarkDef::Text => SeriesLayer::Text(TextLayer {
+                    id_base: self.id_base.wrapping_add(0x1_200),
                     table: current_table,
                     x: x.field(),
                     x_kind: x.kind(),
@@ -1240,6 +1245,7 @@ impl SeriesLayer {
 
 #[derive(Clone, Debug)]
 struct BarLayer {
+    id_base: u64,
     table: TableId,
     y: ColumnId,
     baseline: f64,
@@ -1258,6 +1264,11 @@ impl BarLayer {
             .get(&self.table)
             .ok_or(LoweringError::MissingTable(self.table))?;
         let row_keys = table.row_keys.clone();
+        let id_base = self.id_base;
+        let table_id = self.table;
+        let y_col = self.y;
+        let baseline = self.baseline;
+        let fill = self.fill.clone();
         let band = chart
             .x_axis()
             .ok_or(LoweringError::MissingChannel("x"))?
@@ -1265,10 +1276,41 @@ impl BarLayer {
         let y_scale = chart
             .y_scale_continuous(plot)
             .ok_or(LoweringError::MissingChannel("y"))?;
-        Ok(crate::BarMarkSpec::new(self.table, self.y, band, y_scale)
-            .with_baseline(self.baseline)
-            .with_fill(self.fill.clone())
-            .marks(&row_keys))
+        Ok(row_keys
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(row, row_key)| {
+                let y0 = y_scale.map(baseline);
+                Mark::builder(layer_row_mark_id(id_base, row_key))
+                    .rect()
+                    .z_index(crate::z_order::SERIES_FILL)
+                    .x_const(band.x(row))
+                    .y_compute(
+                        [InputRef::TableCol {
+                            table: table_id,
+                            col: y_col,
+                        }],
+                        move |ctx, _| {
+                            let v = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
+                            y_scale.map(v).min(y0)
+                        },
+                    )
+                    .w_const(band.band_width())
+                    .h_compute(
+                        [InputRef::TableCol {
+                            table: table_id,
+                            col: y_col,
+                        }],
+                        move |ctx, _| {
+                            let v = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
+                            (y_scale.map(v) - y0).abs()
+                        },
+                    )
+                    .fill_brush_const(fill.clone())
+                    .build()
+            })
+            .collect())
     }
 }
 
@@ -1304,6 +1346,7 @@ impl LineLayer {
 
 #[derive(Clone, Debug)]
 struct PointLayer {
+    id_base: u64,
     table: TableId,
     x: ColumnId,
     y: ColumnId,
@@ -1324,19 +1367,76 @@ impl PointLayer {
             .get(&self.table)
             .ok_or(LoweringError::MissingTable(self.table))?;
         let row_keys = table.row_keys.clone();
+        let id_base = self.id_base;
+        let table_id = self.table;
+        let x_col = self.x;
+        let y_col = self.y;
+        let size = self.size;
+        let symbol = self.symbol;
+        let fill = self.fill.clone();
         let x_scale = chart
             .x_scale_continuous(plot)
             .ok_or(LoweringError::MissingChannel("x"))?;
         let y_scale = chart
             .y_scale_continuous(plot)
             .ok_or(LoweringError::MissingChannel("y"))?;
-        Ok(
-            PointMarkSpec::new(self.table, self.x, self.y, x_scale, y_scale)
-                .with_symbol(self.symbol)
-                .with_size(self.size)
-                .with_fill(self.fill.clone())
-                .marks(&row_keys),
-        )
+        Ok(row_keys
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(row, row_key)| match symbol {
+                Symbol::Square => Mark::builder(layer_row_mark_id(id_base, row_key))
+                    .rect()
+                    .z_index(crate::z_order::SERIES_POINTS)
+                    .x_compute(
+                        [InputRef::TableCol {
+                            table: table_id,
+                            col: x_col,
+                        }],
+                        move |ctx, _| {
+                            x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0))
+                                - size / 2.0
+                        },
+                    )
+                    .y_compute(
+                        [InputRef::TableCol {
+                            table: table_id,
+                            col: y_col,
+                        }],
+                        move |ctx, _| {
+                            y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0))
+                                - size / 2.0
+                        },
+                    )
+                    .w_const(size)
+                    .h_const(size)
+                    .fill_brush_const(fill.clone())
+                    .build(),
+                Symbol::Circle => Mark::builder(layer_row_mark_id(id_base, row_key))
+                    .path()
+                    .z_index(crate::z_order::SERIES_POINTS)
+                    .path_compute(
+                        [
+                            InputRef::TableCol {
+                                table: table_id,
+                                col: x_col,
+                            },
+                            InputRef::TableCol {
+                                table: table_id,
+                                col: y_col,
+                            },
+                        ],
+                        move |ctx, _| {
+                            let x = x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0));
+                            let y = y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0));
+                            symbol.path(x, y, size)
+                        },
+                    )
+                    .fill_brush_const(fill.clone())
+                    .stroke_width_const(0.0)
+                    .build(),
+            })
+            .collect())
     }
 }
 
@@ -1393,6 +1493,7 @@ impl AreaLayer {
 
 #[derive(Clone, Debug)]
 struct TextLayer {
+    id_base: u64,
     table: TableId,
     x: ColumnId,
     x_kind: FieldKind,
@@ -1414,6 +1515,7 @@ impl TextLayer {
             .get(&self.table)
             .ok_or(LoweringError::MissingTable(self.table))?;
         let row_keys = table.row_keys.clone();
+        let id_base = self.id_base;
         let table_id = self.table;
         let x_col = self.x;
         let y_col = self.y;
@@ -1434,7 +1536,7 @@ impl TextLayer {
                     .copied()
                     .enumerate()
                     .map(|(row, row_key)| {
-                        Mark::builder(MarkId::for_row(table_id, row_key))
+                        Mark::builder(layer_row_mark_id(id_base, row_key))
                             .text()
                             .z_index(crate::z_order::SERIES_LABELS)
                             .x_compute(
@@ -1487,7 +1589,7 @@ impl TextLayer {
                     .copied()
                     .enumerate()
                     .map(|(row, row_key)| {
-                        Mark::builder(MarkId::for_row(table_id, row_key))
+                        Mark::builder(layer_row_mark_id(id_base, row_key))
                             .text()
                             .z_index(crate::z_order::SERIES_LABELS)
                             .x_const(band.x(row) + 0.5 * band_width)
@@ -1992,6 +2094,12 @@ fn merge_programs(out: &mut Option<Program>, program: Option<Program>) {
     for transform in program.transforms().iter().cloned() {
         dst.push(transform);
     }
+}
+
+fn layer_row_mark_id(id_base: u64, row_key: u64) -> MarkId {
+    MarkId::from_raw(
+        id_base ^ row_key.rotate_left(17) ^ row_key.wrapping_mul(0xD6E8_FEB8_6659_FD93),
+    )
 }
 
 fn next_derived_col(spec: &UnitSpec) -> u32 {
