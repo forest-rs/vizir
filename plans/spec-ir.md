@@ -9,7 +9,7 @@ This slice is intentionally small:
 - one unit chart
 - one dataset already present in a `vizir_core::Scene`
 - a small transform subset
-- `bar` / `line` / `point`
+- `bar` / `line` / `point` / `area`
 - `x`, `y`, `color`, `text`
 - generated `ChartSpec` + series mark specs + optional transform program
 
@@ -136,12 +136,7 @@ Support:
 - `Bar`
 - `Line`
 - `Point`
-
-Do not include `Area` in the first slice. It is close, but `bar`/`line`/`point` already cover:
-- discrete x + continuous y
-- continuous x + continuous y
-- legend/color wiring
-- transform-driven aggregation
+- `Area`
 
 ### Channel shape
 

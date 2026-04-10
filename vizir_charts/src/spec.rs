@@ -10,7 +10,7 @@
 //! - one unit chart,
 //! - one input table already present in a [`vizir_core::Scene`],
 //! - a small transform subset,
-//! - `bar`, `line`, and `point` marks,
+//! - `bar`, `line`, `point`, and `area` marks,
 //! - `x`, `y`, and categorical `color` channels,
 //! - optional chart titles.
 //!
@@ -72,6 +72,8 @@ pub enum MarkDef {
     Line,
     /// One symbol per row over continuous x/y axes.
     Point,
+    /// A filled area over continuous x/y axes.
+    Area,
 }
 
 /// A single authored channel definition.
@@ -446,10 +448,10 @@ impl UnitSpec {
                     ));
                 }
             }
-            MarkDef::Line | MarkDef::Point => {
+            MarkDef::Line | MarkDef::Point | MarkDef::Area => {
                 if !matches!(x.kind(), FieldKind::Quantitative | FieldKind::Temporal) {
                     return Err(LoweringError::Unsupported(
-                        "line/point lowering currently requires a quantitative or temporal x channel",
+                        "line/point/area lowering currently requires a quantitative or temporal x channel",
                     ));
                 }
             }
@@ -532,7 +534,7 @@ impl UnitSpec {
                     },
                     columns: vec![x.field(), lowered_y_field],
                 });
-                if matches!(self.mark, MarkDef::Line) {
+                if matches!(self.mark, MarkDef::Line | MarkDef::Area) {
                     p.push(Transform::Sort {
                         input: output,
                         output,
@@ -564,6 +566,14 @@ impl UnitSpec {
                         size: 6.0,
                         fill,
                     }),
+                    MarkDef::Area => SeriesLayer::Area(AreaLayer {
+                        id: MarkId::from_raw(self.id_base.wrapping_add(0x1_000 + index as u64)),
+                        table: output,
+                        x: x.field(),
+                        y: lowered_y_field,
+                        baseline: 0.0,
+                        fill,
+                    }),
                 });
             }
         } else {
@@ -588,6 +598,14 @@ impl UnitSpec {
                     symbol: Symbol::Circle,
                     size: 6.0,
                     fill: Brush::Solid(css::TOMATO),
+                }),
+                MarkDef::Area => SeriesLayer::Area(AreaLayer {
+                    id: MarkId::from_raw(self.id_base.wrapping_add(0x1_000)),
+                    table: current_table,
+                    x: x.field(),
+                    y: lowered_y_field,
+                    baseline: 0.0,
+                    fill: Brush::Solid(css::CORNFLOWER_BLUE),
                 }),
             });
         }
@@ -736,6 +754,7 @@ enum SeriesLayer {
     Bar(BarLayer),
     Line(LineLayer),
     Point(PointLayer),
+    Area(AreaLayer),
 }
 
 impl SeriesLayer {
@@ -749,6 +768,7 @@ impl SeriesLayer {
             Self::Bar(layer) => layer.marks(scene, chart, plot),
             Self::Line(layer) => layer.marks(scene, chart, plot),
             Self::Point(layer) => layer.marks(scene, chart, plot),
+            Self::Area(layer) => layer.marks(scene, chart, plot),
         }
     }
 }
@@ -851,6 +871,38 @@ impl PointLayer {
                 .with_size(self.size)
                 .with_fill(self.fill.clone())
                 .marks(&row_keys),
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+struct AreaLayer {
+    id: MarkId,
+    table: TableId,
+    x: ColumnId,
+    y: ColumnId,
+    baseline: f64,
+    fill: Brush,
+}
+
+impl AreaLayer {
+    fn marks(
+        &self,
+        _scene: &Scene,
+        chart: &ChartSpec,
+        plot: Rect,
+    ) -> Result<Vec<Mark>, LoweringError> {
+        let x_scale = chart
+            .x_scale_continuous(plot)
+            .ok_or(LoweringError::MissingChannel("x"))?;
+        let y_scale = chart
+            .y_scale_continuous(plot)
+            .ok_or(LoweringError::MissingChannel("y"))?;
+        Ok(
+            crate::AreaMarkSpec::new(self.id.0, self.table, self.x, self.y, x_scale, y_scale)
+                .with_baseline(self.baseline)
+                .with_fill(self.fill.clone())
+                .marks(),
         )
     }
 }
@@ -971,7 +1023,7 @@ fn build_y_axis(
 ) -> Result<AxisSpec, LoweringError> {
     let domain = infer_frame_domain(frame, y_field, "y")?;
     let domain = match mark {
-        MarkDef::Bar => include_zero(expand_domain(domain)),
+        MarkDef::Bar | MarkDef::Area => include_zero(expand_domain(domain)),
         MarkDef::Line | MarkDef::Point => expand_domain(domain),
     };
     let mut axis = AxisSpec::left(
@@ -1475,6 +1527,82 @@ mod tests {
             marks
                 .iter()
                 .any(|mark| matches!(mark.encodings, vizir_core::MarkEncodings::Path(_)))
+        );
+    }
+
+    #[test]
+    fn area_lowering_emits_one_series_path() {
+        let mut scene = Scene::new();
+        let table_id = TableId(40);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![100, 101, 102];
+        table.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![1.0, 3.0, 2.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xDD00,
+            TableId(400),
+            DataRef::Table(table_id),
+            MarkDef::Area,
+        )
+        .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+        .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("y"));
+
+        let lowered = spec.lower(&scene).expect("lower area chart");
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let marks = lowered
+            .series_marks(&scene, layout.data)
+            .expect("area series marks");
+        assert_eq!(marks.len(), 1);
+        assert!(matches!(
+            marks[0].encodings,
+            vizir_core::MarkEncodings::Path(_)
+        ));
+    }
+
+    #[test]
+    fn area_color_lowering_creates_series_paths_and_legend() {
+        let mut scene = Scene::new();
+        let table_id = TableId(50);
+        let mut table = Table::new(table_id);
+        table.row_keys = (0..6_u64).collect();
+        table.data = Some(Box::new(ThreeCols {
+            a: vec![0.0, 1.0, 2.0, 0.0, 1.0, 2.0],
+            b: vec![1.0, 2.0, 1.5, 0.5, 1.0, 2.5],
+            c: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xEE00,
+            TableId(500),
+            DataRef::Table(table_id),
+            MarkDef::Area,
+        )
+        .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+        .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("y"))
+        .with_color(ChannelDef::nominal(ColumnId(2)).with_title("series"));
+
+        let lowered = spec.lower(&scene).expect("lower colored area chart");
+        assert!(lowered.program().is_some());
+        assert_eq!(lowered.derived_tables().len(), 2);
+        assert!(lowered.chart().legend.is_some());
+
+        lowered
+            .apply_to_scene(&mut scene)
+            .expect("apply colored area program");
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let marks = lowered
+            .series_marks(&scene, layout.data)
+            .expect("colored area series marks");
+        assert_eq!(marks.len(), 2);
+        assert!(
+            marks
+                .iter()
+                .all(|mark| matches!(mark.encodings, vizir_core::MarkEncodings::Path(_)))
         );
     }
 }
