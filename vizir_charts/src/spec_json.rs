@@ -151,6 +151,8 @@ struct JsonEncoding {
     y: Option<JsonChannel>,
     y2: Option<JsonChannel>,
     color: Option<JsonChannel>,
+    size: Option<JsonChannel>,
+    shape: Option<JsonChannel>,
     text: Option<JsonChannel>,
 }
 
@@ -302,6 +304,12 @@ fn parse_encoding_set(encoding: JsonEncoding) -> Result<ParsedEncodingSet, JsonS
     }
     if let Some(color) = encoding.color {
         out = out.with_color(parse_channel(color)?);
+    }
+    if let Some(size) = encoding.size {
+        out = out.with_size_channel(parse_channel(size)?);
+    }
+    if let Some(shape) = encoding.shape {
+        out = out.with_shape(parse_channel(shape)?);
     }
     if let Some(text) = encoding.text {
         out = out.with_text(parse_channel(text)?);
@@ -650,6 +658,43 @@ mod tests {
                 },
             )
             .expect("adapt parsed text mark");
+    }
+
+    #[test]
+    fn parses_point_shape_size_fixture() {
+        let spec = parse_unit_spec_json(include_str!(
+            "../../fixtures/specs/unit_point_shape_size.json"
+        ))
+        .expect("parse point shape/size spec");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "y",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "magnitude",
+                column: ColumnId(2),
+            },
+            SchemaField {
+                name: "series",
+                column: ColumnId(3),
+            },
+        ]);
+        let _unit = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xC1_100,
+                    derived_table_base: TableId(304),
+                    data: DataRef::Table(TableId(6)),
+                },
+            )
+            .expect("adapt parsed point shape/size spec");
     }
 
     #[test]

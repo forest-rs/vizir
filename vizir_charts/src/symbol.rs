@@ -12,6 +12,10 @@ pub enum Symbol {
     Square,
     /// A circle.
     Circle,
+    /// A diamond.
+    Diamond,
+    /// An upright triangle.
+    Triangle,
 }
 
 impl Symbol {
@@ -20,6 +24,8 @@ impl Symbol {
         match self {
             Self::Square => square_path(cx, cy, size),
             Self::Circle => circle_path(cx, cy, size),
+            Self::Diamond => diamond_path(cx, cy, size),
+            Self::Triangle => triangle_path(cx, cy, size),
         }
     }
 }
@@ -46,4 +52,26 @@ fn circle_path(cx: f64, cy: f64, size: f64) -> BezPath {
     // target device/pixel size.
     let tolerance = 0.1;
     circle.path_elements(tolerance).collect()
+}
+
+fn diamond_path(cx: f64, cy: f64, size: f64) -> BezPath {
+    let half = size * 0.5;
+    let mut p = BezPath::new();
+    p.move_to((cx, cy - half));
+    p.line_to((cx + half, cy));
+    p.line_to((cx, cy + half));
+    p.line_to((cx - half, cy));
+    p.close_path();
+    p
+}
+
+fn triangle_path(cx: f64, cy: f64, size: f64) -> BezPath {
+    let half = size * 0.5;
+    let height = size * 0.866_025_403_784_438_6;
+    let mut p = BezPath::new();
+    p.move_to((cx, cy - (2.0 * height / 3.0)));
+    p.line_to((cx + half, cy + (height / 3.0)));
+    p.line_to((cx - half, cy + (height / 3.0)));
+    p.close_path();
+    p
 }

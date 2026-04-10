@@ -150,7 +150,14 @@ Support only:
 - `y`
 - `y2`
 - `color`
+- `size`
+- `shape`
 - `text`
+
+Layering rule:
+- one designated base child owns the shared chart shell and current x/y domains
+- other children may override channels and run child-local transforms, but they do not widen the
+  shared domain today
 - `color`
 - `text`
 

@@ -32,7 +32,7 @@ Status meanings:
 |---|---|---|
 | `bar` | supported | Ordinal/nominal `x`, quantitative `y` |
 | `line` | supported | Quantitative/temporal `x`, quantitative `y` |
-| `point` | supported | Quantitative/temporal `x`, quantitative `y` |
+| `point` | supported | Quantitative/temporal `x`, quantitative `y`, plus point-only `size` and `shape` channels |
 | `area` | supported | Plain area, categorical color-split area, ranged area via `y2`, paired-edge area via `x2` + `y2` |
 | `text` | partial | Numeric text labels over shared x/y scales; text field formatting is supported, but string-backed text data is not |
 | `rect`, `rule`, `arc`, `tick`, `trail`, `image`, `geoshape` | missing | Some runtime/chart primitives exist, but not in authored spec lowering |
@@ -46,8 +46,10 @@ Status meanings:
 | `x2` | partial | Area-only today; requires `y2` |
 | `y2` | partial | Area-only today |
 | `color` | partial | Categorical split only; legend generation supported |
+| `size` | partial | Point-only; quantitative values map into a fixed visual size range |
+| `shape` | partial | Point-only; distinct values map into a fixed symbol palette |
 | `text` | partial | Supported for `text` marks; text-as-annotation on other marks is not lowered yet |
-| `size`, `shape`, `order`, `detail`, `tooltip`, `opacity`, `row`, `column`, etc. | missing | Not modeled in authored seam |
+| `order`, `detail`, `tooltip`, `opacity`, `row`, `column`, etc. | missing | Not modeled in authored seam |
 
 ### Transforms
 
@@ -75,8 +77,8 @@ Status meanings:
 
 - `color` splitting is currently rejected for `bar` and `text`.
 - Shared `layer` currently keeps one shared plot shell. Child-specific transforms and encoding
-  overrides are supported, but per-child nested unit specs and independent domain resolution are
-  not modeled yet.
+  overrides are supported, but the base child still owns the shared x/y domains. Per-child nested
+  unit specs and independent domain resolution are not modeled yet.
 - `aggregate` on `x`, `x2`, `color`, `y2`, and `text` is rejected.
 - `x2`/`y2` are currently only supported on `area`.
 - `text` currently formats numeric columns only; string-backed table data is not in the runtime yet.

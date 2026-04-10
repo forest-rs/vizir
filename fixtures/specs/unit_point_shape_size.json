@@ -1,0 +1,12 @@
+{
+  "mark": "point",
+  "title": "JSON Point Size + Shape",
+  "width": 220.0,
+  "height": 120.0,
+  "encoding": {
+    "x": { "field": "x", "type": "quantitative", "title": "x" },
+    "y": { "field": "y", "type": "quantitative", "title": "y" },
+    "size": { "field": "magnitude", "type": "quantitative", "title": "magnitude" },
+    "shape": { "field": "series", "type": "nominal", "title": "series" }
+  }
+}

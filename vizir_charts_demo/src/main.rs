@@ -51,6 +51,7 @@ fn main() {
         lowered_spec_demo(),
         lowered_json_spec_demo(),
         lowered_json_bar_text_demo(),
+        lowered_json_point_shape_size_demo(),
         lowered_json_layer_demo(),
         lowered_area_spec_demo(),
         lowered_ranged_area_spec_demo(),
@@ -667,11 +668,93 @@ fn lowered_json_bar_text_demo() -> html::HtmlSection {
     }
 }
 
+fn lowered_json_point_shape_size_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(142);
+    let mut table = Table::new(source_id);
+    table.row_keys = vec![0, 1, 2, 3];
+    table.data = Some(Box::new(PointShapeSizeValues {
+        x: vec![0.0, 1.0, 2.0, 3.0],
+        y: vec![1.0, 2.5, 2.0, 3.5],
+        magnitude: vec![1.0, 5.0, 3.0, 7.0],
+        series: vec![0.0, 1.0, 2.0, 3.0],
+    }));
+    scene.insert_table(table);
+
+    let parsed = parse_unit_spec_json(include_str!(
+        "../../fixtures/specs/unit_point_shape_size.json"
+    ))
+    .expect("parse json point size/shape spec");
+
+    let resolver = SliceFieldResolver::new(&[
+        SchemaField {
+            name: "x",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "y",
+            column: ColumnId(1),
+        },
+        SchemaField {
+            name: "magnitude",
+            column: ColumnId(2),
+        },
+        SchemaField {
+            name: "series",
+            column: ColumnId(3),
+        },
+    ]);
+    let spec = parsed
+        .adapt(
+            &resolver,
+            AdaptContext {
+                id_base: 0xD0_B00,
+                derived_table_base: TableId(143),
+                data: DataRef::Table(source_id),
+            },
+        )
+        .expect("adapt json point size/shape spec");
+
+    html::HtmlSection {
+        title: "Lowered JSON Point Size + Shape",
+        description: "A point chart built from JSON text, proving point-local `size` and `shape` channels through the authored lowering seam.",
+        svg: render_lowered_unit_spec(&mut scene, spec),
+    }
+}
+
 #[derive(Debug)]
 struct LayerOverlayValues {
     x: Vec<f64>,
     area_top: Vec<f64>,
     line_y: Vec<f64>,
+}
+
+#[derive(Debug)]
+struct PointShapeSizeValues {
+    x: Vec<f64>,
+    y: Vec<f64>,
+    magnitude: Vec<f64>,
+    series: Vec<f64>,
+}
+
+impl TableData for PointShapeSizeValues {
+    fn row_count(&self) -> usize {
+        self.x
+            .len()
+            .min(self.y.len())
+            .min(self.magnitude.len())
+            .min(self.series.len())
+    }
+
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        match col {
+            ColumnId(0) => self.x.get(row).copied(),
+            ColumnId(1) => self.y.get(row).copied(),
+            ColumnId(2) => self.magnitude.get(row).copied(),
+            ColumnId(3) => self.series.get(row).copied(),
+            _ => None,
+        }
+    }
 }
 
 impl TableData for LayerOverlayValues {

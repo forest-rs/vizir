@@ -193,6 +193,8 @@ pub struct ParsedEncodingSet {
     y: Option<ParsedChannelDef>,
     y2: Option<ParsedChannelDef>,
     color: Option<ParsedChannelDef>,
+    size: Option<ParsedChannelDef>,
+    shape: Option<ParsedChannelDef>,
     text: Option<ParsedChannelDef>,
 }
 
@@ -229,6 +231,18 @@ impl ParsedEncodingSet {
     /// Sets the color channel.
     pub fn with_color(mut self, color: ParsedChannelDef) -> Self {
         self.color = Some(color);
+        self
+    }
+
+    /// Sets the size channel.
+    pub fn with_size_channel(mut self, size: ParsedChannelDef) -> Self {
+        self.size = Some(size);
+        self
+    }
+
+    /// Sets the shape channel.
+    pub fn with_shape(mut self, shape: ParsedChannelDef) -> Self {
+        self.shape = Some(shape);
         self
     }
 
@@ -484,6 +498,18 @@ impl ParsedUnitSpec {
         self
     }
 
+    /// Sets the size channel.
+    pub fn with_size_channel(mut self, size: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_size_channel(size);
+        self
+    }
+
+    /// Sets the shape channel.
+    pub fn with_shape(mut self, shape: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_shape(shape);
+        self
+    }
+
     /// Sets the text channel.
     pub fn with_text(mut self, text: ParsedChannelDef) -> Self {
         self.encoding = self.encoding.with_text(text);
@@ -533,6 +559,12 @@ impl ParsedUnitSpec {
         }
         if let Some(color) = &self.encoding.color {
             unit = unit.with_color(adapt_channel(color, "color", &mut fields)?);
+        }
+        if let Some(size) = &self.encoding.size {
+            unit = unit.with_size_channel(adapt_channel(size, "size", &mut fields)?);
+        }
+        if let Some(shape) = &self.encoding.shape {
+            unit = unit.with_shape(adapt_channel(shape, "shape", &mut fields)?);
         }
         if let Some(text) = &self.encoding.text {
             unit = unit.with_text(adapt_channel(text, "text", &mut fields)?);
@@ -599,6 +631,18 @@ impl ParsedLayerChildSpec {
     /// Sets the child color override.
     pub fn with_color(mut self, color: ParsedChannelDef) -> Self {
         self.encoding = self.encoding.with_color(color);
+        self
+    }
+
+    /// Sets the child size override.
+    pub fn with_size_channel(mut self, size: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_size_channel(size);
+        self
+    }
+
+    /// Sets the child shape override.
+    pub fn with_shape(mut self, shape: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_shape(shape);
         self
     }
 
@@ -744,6 +788,12 @@ impl ParsedLayerSpec {
         if let Some(color) = &self.encoding.color {
             layer = layer.with_color(adapt_channel(color, "color", &mut fields)?);
         }
+        if let Some(size) = &self.encoding.size {
+            layer = layer.with_size_channel(adapt_channel(size, "size", &mut fields)?);
+        }
+        if let Some(shape) = &self.encoding.shape {
+            layer = layer.with_shape(adapt_channel(shape, "shape", &mut fields)?);
+        }
         if let Some(text) = &self.encoding.text {
             layer = layer.with_text(adapt_channel(text, "text", &mut fields)?);
         }
@@ -822,6 +872,12 @@ fn adapt_layer_child(
     }
     if let Some(color) = &child.encoding.color {
         out = out.with_color(adapt_channel(color, "layer child color", &mut fields)?);
+    }
+    if let Some(size) = &child.encoding.size {
+        out = out.with_size_channel(adapt_channel(size, "layer child size", &mut fields)?);
+    }
+    if let Some(shape) = &child.encoding.shape {
+        out = out.with_shape(adapt_channel(shape, "layer child shape", &mut fields)?);
     }
     if let Some(text) = &child.encoding.text {
         out = out.with_text(adapt_channel(text, "layer child text", &mut fields)?);
@@ -1194,6 +1250,66 @@ mod tests {
             marks
                 .iter()
                 .any(|mark| mark.kind == vizir_core::MarkKind::Text)
+        );
+    }
+
+    #[test]
+    fn parsed_point_shape_size_adapts_and_lowers() {
+        let parsed = ParsedUnitSpec::new(ParsedMarkDef::Point)
+            .with_x(ParsedChannelDef::quantitative("x"))
+            .with_y(ParsedChannelDef::quantitative("y"))
+            .with_size_channel(ParsedChannelDef::quantitative("size"))
+            .with_shape(ParsedChannelDef::nominal("shape"));
+
+        let mut scene = Scene::new();
+        let table_id = TableId(32);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![120, 121, 122, 123];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0, 2.0, 3.0],
+            b: vec![1.0, 2.0, 3.0, 2.5],
+            c: vec![1.0, 4.0, 2.0, 7.0],
+            d: vec![0.0, 1.0, 2.0, 3.0],
+        }));
+        scene.insert_table(table);
+
+        let unit = parsed
+            .adapt(
+                &SliceFieldResolver::new(&[
+                    SchemaField {
+                        name: "x",
+                        column: ColumnId(0),
+                    },
+                    SchemaField {
+                        name: "y",
+                        column: ColumnId(1),
+                    },
+                    SchemaField {
+                        name: "size",
+                        column: ColumnId(2),
+                    },
+                    SchemaField {
+                        name: "shape",
+                        column: ColumnId(3),
+                    },
+                ]),
+                context(table_id),
+            )
+            .expect("adapt point shape/size");
+        let lowered = unit.lower(&scene).expect("lower point shape/size");
+        let (_layout, marks) = lowered
+            .marks(&scene, &HeuristicTextMeasurer)
+            .expect("point marks");
+        assert!(marks.len() >= 4);
+        assert!(
+            marks
+                .iter()
+                .any(|mark| mark.kind == vizir_core::MarkKind::Rect)
+        );
+        assert!(
+            marks
+                .iter()
+                .any(|mark| mark.kind == vizir_core::MarkKind::Path)
         );
     }
 

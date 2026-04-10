@@ -15,8 +15,7 @@ use crate::symbol::Symbol;
 
 /// A point mark derived from a table.
 ///
-/// This generates one [`vizir_core::MarkKind::Rect`] mark per row key, using a square as the
-/// point glyph.
+/// This generates one point mark per row key, using the configured symbol glyph.
 #[derive(Clone, Debug)]
 pub struct PointMarkSpec {
     /// Source table id.
@@ -133,7 +132,7 @@ impl PointMarkSpec {
                         .h_const(size)
                         .fill_brush_const(fill.clone())
                         .build(),
-                    Symbol::Circle => Mark::builder(id)
+                    Symbol::Circle | Symbol::Diamond | Symbol::Triangle => Mark::builder(id)
                         .path()
                         .z_index(z_index)
                         .path_compute(

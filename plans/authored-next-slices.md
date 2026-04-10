@@ -24,7 +24,9 @@ Planned slices:
    - Keep shared data and shared plot guides.
    - Let each child append its own transform chain after shared transforms.
    - Keep the base child responsible for the chart shell and current domain policy.
-2. Authored text mark slice
+2. Authored point richness + text mark slice
+   - Add point-local `size` and `shape` channels through the same seam.
+   - Keep `shape` as a small fixed symbol palette rather than an open-ended marker language.
    - Add `text` as an authored mark kind.
    - Lower numeric text fields via formatting from existing numeric table access.
    - Keep string-backed text out of scope until runtime storage grows.

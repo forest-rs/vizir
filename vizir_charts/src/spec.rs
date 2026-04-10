@@ -11,7 +11,7 @@
 //! - one input table already present in a [`vizir_core::Scene`],
 //! - a small transform subset,
 //! - `bar`, `line`, `point`, `area`, and `text` marks,
-//! - `x`, `x2`, `y`, `y2`, and categorical `color` channels,
+//! - `x`, `x2`, `y`, `y2`, `color`, `size`, `shape`, and `text` channels,
 //! - optional chart titles.
 //!
 //! It is not a JSON parser and not a full Vega/Vega-Lite implementation.
@@ -167,6 +167,8 @@ pub struct EncodingSet {
     y: Option<ChannelDef>,
     y2: Option<ChannelDef>,
     color: Option<ChannelDef>,
+    size: Option<ChannelDef>,
+    shape: Option<ChannelDef>,
     text: Option<ChannelDef>,
 }
 
@@ -206,6 +208,18 @@ impl EncodingSet {
         self
     }
 
+    /// Sets the size channel.
+    pub fn with_size(mut self, size: ChannelDef) -> Self {
+        self.size = Some(size);
+        self
+    }
+
+    /// Sets the shape channel.
+    pub fn with_shape(mut self, shape: ChannelDef) -> Self {
+        self.shape = Some(shape);
+        self
+    }
+
     /// Sets the text channel.
     pub fn with_text(mut self, text: ChannelDef) -> Self {
         self.text = Some(text);
@@ -230,6 +244,14 @@ impl EncodingSet {
 
     fn color(&self) -> Option<&ChannelDef> {
         self.color.as_ref()
+    }
+
+    fn size(&self) -> Option<&ChannelDef> {
+        self.size.as_ref()
+    }
+
+    fn shape(&self) -> Option<&ChannelDef> {
+        self.shape.as_ref()
     }
 
     fn text(&self) -> Option<&ChannelDef> {
@@ -424,6 +446,18 @@ impl UnitSpec {
         self
     }
 
+    /// Sets the size channel.
+    pub fn with_size_channel(mut self, size: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_size(size);
+        self
+    }
+
+    /// Sets the shape channel.
+    pub fn with_shape(mut self, shape: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_shape(shape);
+        self
+    }
+
     /// Sets the text channel.
     pub fn with_text(mut self, text: ChannelDef) -> Self {
         self.encoding = self.encoding.with_text(text);
@@ -452,6 +486,8 @@ impl UnitSpec {
             .ok_or(LoweringError::MissingChannel("y"))?;
         let y2 = self.encoding.y2();
         let color = self.encoding.color();
+        let size = self.encoding.size();
+        let shape = self.encoding.shape();
         let text = self.encoding.text();
         if self.mark != MarkDef::Text && text.is_some() {
             return Err(LoweringError::Unsupported(
@@ -503,6 +539,20 @@ impl UnitSpec {
                 "aggregate on the text channel is not supported in the experimental lowering slice",
             ));
         }
+        if let Some(size) = size
+            && size.aggregate().is_some()
+        {
+            return Err(LoweringError::Unsupported(
+                "aggregate on the size channel is not supported in the experimental lowering slice",
+            ));
+        }
+        if let Some(shape) = shape
+            && shape.aggregate().is_some()
+        {
+            return Err(LoweringError::Unsupported(
+                "aggregate on the shape channel is not supported in the experimental lowering slice",
+            ));
+        }
         if color.is_some() && self.mark == MarkDef::Bar {
             return Err(LoweringError::Unsupported(
                 "categorical color splitting is not supported for bar marks yet",
@@ -521,6 +571,25 @@ impl UnitSpec {
         if x2.is_some() && y2.is_none() {
             return Err(LoweringError::Unsupported(
                 "x2 currently requires y2 so the area can form an explicit lower edge",
+            ));
+        }
+        if (size.is_some() || shape.is_some()) && self.mark != MarkDef::Point {
+            return Err(LoweringError::Unsupported(
+                "size and shape channels are currently only supported for point marks",
+            ));
+        }
+        if let Some(size) = size
+            && size.kind() != FieldKind::Quantitative
+        {
+            return Err(LoweringError::Unsupported(
+                "point size currently requires a quantitative channel",
+            ));
+        }
+        if let Some(shape) = shape
+            && shape.kind() == FieldKind::Temporal
+        {
+            return Err(LoweringError::Unsupported(
+                "point shape does not support temporal channels in the experimental lowering slice",
             ));
         }
 
@@ -598,8 +667,15 @@ impl UnitSpec {
             &base_program,
             input_table,
             current_table,
-            required_columns(x, x2, lowered_y_field, y2, color, text),
+            required_columns(x, x2, lowered_y_field, y2, color, size, shape, text),
         )?;
+
+        let point_size_domain = size
+            .map(|size| infer_frame_domain_pair(&preview_frame, size.field(), None, "size"))
+            .transpose()?;
+        let point_shape_map = shape
+            .map(|shape| build_shape_map(&preview_frame, shape.field()))
+            .unwrap_or_default();
 
         let mut program = if base_program.transforms().is_empty() {
             None
@@ -633,7 +709,16 @@ impl UnitSpec {
                         op: vizir_transforms::CompareOp::Eq,
                         value,
                     },
-                    columns: series_columns(x, x2, lowered_y_field, y2, Some(color), text),
+                    columns: series_columns(
+                        x,
+                        x2,
+                        lowered_y_field,
+                        y2,
+                        Some(color),
+                        size,
+                        shape,
+                        text,
+                    ),
                 });
                 if matches!(self.mark, MarkDef::Line | MarkDef::Area) {
                     p.push(Transform::Sort {
@@ -641,7 +726,16 @@ impl UnitSpec {
                         output,
                         by: x.field(),
                         order: SortOrder::Asc,
-                        columns: series_columns(x, x2, lowered_y_field, y2, None, text),
+                        columns: series_columns(
+                            x,
+                            x2,
+                            lowered_y_field,
+                            y2,
+                            None,
+                            size,
+                            shape,
+                            text,
+                        ),
                     });
                 }
                 derived_tables.push(output);
@@ -664,8 +758,12 @@ impl UnitSpec {
                         table: output,
                         x: x.field(),
                         y: lowered_y_field,
-                        symbol: Symbol::Circle,
-                        size: 6.0,
+                        default_symbol: Symbol::Circle,
+                        shape: shape.map(ChannelDef::field),
+                        shape_map: point_shape_map.clone(),
+                        default_size: 6.0,
+                        size: size.map(ChannelDef::field),
+                        size_domain: point_size_domain,
                         fill,
                     }),
                     MarkDef::Area => SeriesLayer::Area(AreaLayer {
@@ -715,8 +813,12 @@ impl UnitSpec {
                     table: current_table,
                     x: x.field(),
                     y: lowered_y_field,
-                    symbol: Symbol::Circle,
-                    size: 6.0,
+                    default_symbol: Symbol::Circle,
+                    shape: shape.map(ChannelDef::field),
+                    shape_map: point_shape_map,
+                    default_size: 6.0,
+                    size: size.map(ChannelDef::field),
+                    size_domain: point_size_domain,
                     fill: Brush::Solid(css::TOMATO),
                 }),
                 MarkDef::Area => SeriesLayer::Area(AreaLayer {
@@ -838,6 +940,18 @@ impl LayerChildSpec {
         self
     }
 
+    /// Sets the child size override.
+    pub fn with_size_channel(mut self, size: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_size(size);
+        self
+    }
+
+    /// Sets the child shape override.
+    pub fn with_shape(mut self, shape: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_shape(shape);
+        self
+    }
+
     /// Sets the child text override.
     pub fn with_text(mut self, text: ChannelDef) -> Self {
         self.encoding = self.encoding.with_text(text);
@@ -929,6 +1043,18 @@ impl LayerSpec {
     /// Sets the color channel.
     pub fn with_color(mut self, color: ChannelDef) -> Self {
         self.encoding = self.encoding.with_color(color);
+        self
+    }
+
+    /// Sets the size channel.
+    pub fn with_size_channel(mut self, size: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_size(size);
+        self
+    }
+
+    /// Sets the shape channel.
+    pub fn with_shape(mut self, shape: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_shape(shape);
         self
     }
 
@@ -1350,8 +1476,12 @@ struct PointLayer {
     table: TableId,
     x: ColumnId,
     y: ColumnId,
-    symbol: Symbol,
-    size: f64,
+    default_symbol: Symbol,
+    shape: Option<ColumnId>,
+    shape_map: Vec<(u64, Symbol)>,
+    default_size: f64,
+    size: Option<ColumnId>,
+    size_domain: Option<(f64, f64)>,
     fill: Brush,
 }
 
@@ -1371,8 +1501,12 @@ impl PointLayer {
         let table_id = self.table;
         let x_col = self.x;
         let y_col = self.y;
-        let size = self.size;
-        let symbol = self.symbol;
+        let default_size = self.default_size;
+        let size_col = self.size;
+        let size_domain = self.size_domain;
+        let default_symbol = self.default_symbol;
+        let shape_col = self.shape;
+        let shape_map = self.shape_map.clone();
         let fill = self.fill.clone();
         let x_scale = chart
             .x_scale_continuous(plot)
@@ -1384,57 +1518,71 @@ impl PointLayer {
             .iter()
             .copied()
             .enumerate()
-            .map(|(row, row_key)| match symbol {
-                Symbol::Square => Mark::builder(layer_row_mark_id(id_base, row_key))
-                    .rect()
-                    .z_index(crate::z_order::SERIES_POINTS)
-                    .x_compute(
-                        [InputRef::TableCol {
-                            table: table_id,
-                            col: x_col,
-                        }],
-                        move |ctx, _| {
-                            x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0))
-                                - size / 2.0
-                        },
-                    )
-                    .y_compute(
-                        [InputRef::TableCol {
-                            table: table_id,
-                            col: y_col,
-                        }],
-                        move |ctx, _| {
-                            y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0))
-                                - size / 2.0
-                        },
-                    )
-                    .w_const(size)
-                    .h_const(size)
-                    .fill_brush_const(fill.clone())
-                    .build(),
-                Symbol::Circle => Mark::builder(layer_row_mark_id(id_base, row_key))
-                    .path()
-                    .z_index(crate::z_order::SERIES_POINTS)
-                    .path_compute(
-                        [
-                            InputRef::TableCol {
+            .map(|(row, row_key)| {
+                let size = size_col
+                    .and_then(|col| table.data.as_deref().and_then(|data| data.f64(row, col)))
+                    .map(|value| point_size_for_value(value, size_domain, default_size))
+                    .unwrap_or(default_size);
+                let symbol = shape_col
+                    .and_then(|col| table.data.as_deref().and_then(|data| data.f64(row, col)))
+                    .map(|value| symbol_for_shape_value(value, &shape_map, default_symbol))
+                    .unwrap_or(default_symbol);
+
+                if symbol == Symbol::Square {
+                    Mark::builder(layer_row_mark_id(id_base, row_key))
+                        .rect()
+                        .z_index(crate::z_order::SERIES_POINTS)
+                        .x_compute(
+                            [InputRef::TableCol {
                                 table: table_id,
                                 col: x_col,
+                            }],
+                            move |ctx, _| {
+                                x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0))
+                                    - size / 2.0
                             },
-                            InputRef::TableCol {
+                        )
+                        .y_compute(
+                            [InputRef::TableCol {
                                 table: table_id,
                                 col: y_col,
+                            }],
+                            move |ctx, _| {
+                                y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0))
+                                    - size / 2.0
                             },
-                        ],
-                        move |ctx, _| {
-                            let x = x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0));
-                            let y = y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0));
-                            symbol.path(x, y, size)
-                        },
-                    )
-                    .fill_brush_const(fill.clone())
-                    .stroke_width_const(0.0)
-                    .build(),
+                        )
+                        .w_const(size)
+                        .h_const(size)
+                        .fill_brush_const(fill.clone())
+                        .build()
+                } else {
+                    Mark::builder(layer_row_mark_id(id_base, row_key))
+                        .path()
+                        .z_index(crate::z_order::SERIES_POINTS)
+                        .path_compute(
+                            [
+                                InputRef::TableCol {
+                                    table: table_id,
+                                    col: x_col,
+                                },
+                                InputRef::TableCol {
+                                    table: table_id,
+                                    col: y_col,
+                                },
+                            ],
+                            move |ctx, _| {
+                                let x =
+                                    x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0));
+                                let y =
+                                    y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0));
+                                symbol.path(x, y, size)
+                            },
+                        )
+                        .fill_brush_const(fill.clone())
+                        .stroke_width_const(0.0)
+                        .build()
+                }
             })
             .collect())
     }
@@ -1871,6 +2019,8 @@ fn required_columns(
     y_field: ColumnId,
     y2: Option<&ChannelDef>,
     color: Option<&ChannelDef>,
+    size: Option<&ChannelDef>,
+    shape: Option<&ChannelDef>,
     text: Option<&ChannelDef>,
 ) -> Vec<ColumnId> {
     let mut out = vec![x.field(), y_field];
@@ -1882,6 +2032,12 @@ fn required_columns(
     }
     if let Some(color) = color {
         push_unique_col(&mut out, color.field());
+    }
+    if let Some(size) = size {
+        push_unique_col(&mut out, size.field());
+    }
+    if let Some(shape) = shape {
+        push_unique_col(&mut out, shape.field());
     }
     if let Some(text) = text {
         push_unique_col(&mut out, text.field());
@@ -1925,9 +2081,11 @@ fn series_columns(
     y_field: ColumnId,
     y2: Option<&ChannelDef>,
     color: Option<&ChannelDef>,
+    size: Option<&ChannelDef>,
+    shape: Option<&ChannelDef>,
     text: Option<&ChannelDef>,
 ) -> Vec<ColumnId> {
-    required_columns(x, x2, y_field, y2, color, text)
+    required_columns(x, x2, y_field, y2, color, size, shape, text)
 }
 
 fn expand_domain((min, max): (f64, f64)) -> (f64, f64) {
@@ -2012,6 +2170,45 @@ fn default_series_fills(count: usize) -> Vec<Brush> {
         .collect()
 }
 
+fn build_shape_map(frame: &TableFrame, col: ColumnId) -> Vec<(u64, Symbol)> {
+    const PALETTE: [Symbol; 4] = [
+        Symbol::Circle,
+        Symbol::Square,
+        Symbol::Diamond,
+        Symbol::Triangle,
+    ];
+    distinct_values(frame, col)
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| (value.to_bits(), PALETTE[index % PALETTE.len()]))
+        .collect()
+}
+
+fn symbol_for_shape_value(value: f64, shape_map: &[(u64, Symbol)], default: Symbol) -> Symbol {
+    if !value.is_finite() {
+        return default;
+    }
+    shape_map
+        .iter()
+        .find(|(bits, _)| *bits == value.to_bits())
+        .map_or(default, |(_, symbol)| *symbol)
+}
+
+fn point_size_for_value(value: f64, domain: Option<(f64, f64)>, default: f64) -> f64 {
+    let Some((min, max)) = domain else {
+        return default;
+    };
+    if !value.is_finite() {
+        return default;
+    }
+    let (min, max) = expand_domain((min, max));
+    if min >= max {
+        return default;
+    }
+    let t = ((value - min) / (max - min)).clamp(0.0, 1.0);
+    4.0 + t * 8.0
+}
+
 fn dedup_cols(mut cols: Vec<ColumnId>) -> Vec<ColumnId> {
     let mut out = Vec::with_capacity(cols.len());
     for col in cols.drain(..) {
@@ -2037,6 +2234,8 @@ fn merge_layer_encoding(
         y: overrides.y.clone().or_else(|| shared.y.clone()),
         y2: overrides.y2.clone().or_else(|| shared.y2.clone()),
         color: overrides.color.clone().or_else(|| shared.color.clone()),
+        size: overrides.size.clone().or_else(|| shared.size.clone()),
+        shape: overrides.shape.clone().or_else(|| shared.shape.clone()),
         text: overrides.text.clone().or_else(|| shared.text.clone()),
     };
     if mark != MarkDef::Area {
@@ -2342,6 +2541,48 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn point_size_mapping_uses_visual_range() {
+        assert_eq!(point_size_for_value(f64::NAN, Some((1.0, 5.0)), 6.0), 6.0);
+        assert!((point_size_for_value(1.0, Some((1.0, 5.0)), 6.0) - 4.0).abs() < 1e-9);
+        assert!((point_size_for_value(5.0, Some((1.0, 5.0)), 6.0) - 12.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn point_shape_size_lowering_emits_mixed_symbols() {
+        let mut scene = Scene::new();
+        let table_id = TableId(21);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![20, 21, 22, 23];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0, 2.0, 3.0],
+            b: vec![1.0, 2.0, 3.0, 2.5],
+            c: vec![1.0, 4.0, 2.0, 7.0],
+            d: vec![0.0, 1.0, 2.0, 3.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xBC00,
+            TableId(210),
+            DataRef::Table(table_id),
+            MarkDef::Point,
+        )
+        .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+        .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("y"))
+        .with_size_channel(ChannelDef::quantitative(ColumnId(2)).with_title("size"))
+        .with_shape(ChannelDef::nominal(ColumnId(3)).with_title("shape"));
+
+        let lowered = spec.lower(&scene).expect("lower point shape/size");
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let marks = lowered
+            .series_marks(&scene, layout.data)
+            .expect("point marks");
+        assert_eq!(marks.len(), 4);
+        assert!(marks.iter().any(|mark| mark.kind == MarkKind::Rect));
+        assert!(marks.iter().any(|mark| mark.kind == MarkKind::Path));
     }
 
     #[test]
@@ -2732,6 +2973,42 @@ mod tests {
             .expect("bar + text marks");
         assert!(marks.iter().any(|mark| mark.kind == MarkKind::Rect));
         assert!(marks.iter().any(|mark| mark.kind == MarkKind::Text));
+    }
+
+    #[test]
+    fn layered_domains_follow_the_base_child() {
+        let mut scene = Scene::new();
+        let table_id = TableId(84);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![800, 801, 802];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![3.0, 4.0, 5.0],
+            c: vec![1.0, 1.5, 2.0],
+            d: vec![6.0, 7.0, 8.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = LayerSpec::new(0xF1C0, TableId(840), DataRef::Table(table_id))
+            .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+            .with_child(
+                LayerChildSpec::new(MarkDef::Area)
+                    .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("band"))
+                    .with_y2(ChannelDef::quantitative(ColumnId(2))),
+            )
+            .with_child(
+                LayerChildSpec::new(MarkDef::Line)
+                    .with_y(ChannelDef::quantitative(ColumnId(3)).with_title("line")),
+            );
+
+        let lowered = spec.lower(&scene).expect("lower layered domains");
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let y_scale = lowered
+            .chart()
+            .y_scale_continuous(layout.data)
+            .expect("y scale");
+        assert_eq!(y_scale.domain_min(), 1.0);
+        assert_eq!(y_scale.domain_max(), 5.0);
     }
 
     #[test]
