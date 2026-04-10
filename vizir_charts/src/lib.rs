@@ -36,6 +36,7 @@ mod rule_mark;
 mod scale;
 mod sector_mark;
 pub mod spec;
+mod spec_adapter;
 mod stacked_area_chart;
 mod stacked_area_mark;
 mod stacked_bar_chart;
@@ -69,6 +70,11 @@ pub use sector_mark::SectorMarkSpec;
 pub use spec::{
     ChannelDef, DataRef, EncodingSet, FieldKind, LoweredUnit, LoweringError, MarkDef,
     TransformSpec, UnitSpec,
+};
+pub use spec_adapter::{
+    AdaptContext, AdaptError, FieldResolver, ParsedAggregateField, ParsedChannelDef,
+    ParsedEncodingSet, ParsedFieldKind, ParsedMarkDef, ParsedPredicate, ParsedTransformSpec,
+    ParsedUnitSpec, SchemaField, SliceFieldResolver,
 };
 pub use stacked_area_chart::StackedAreaChartSpec;
 pub use stacked_area_mark::StackedAreaMarkSpec;
