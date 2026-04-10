@@ -12,12 +12,6 @@
     },
     {
       "mark": "line",
-      "transform": [
-        {
-          "filter": { "field": "line_y", "op": ">=", "value": 1.5 },
-          "columns": ["x", "line_y"]
-        }
-      ],
       "encoding": {
         "y": { "field": "line_y", "type": "quantitative", "title": "line" }
       }

@@ -620,7 +620,7 @@ fn lowered_json_layer_demo() -> html::HtmlSection {
 
     html::HtmlSection {
         title: "Lowered JSON Layer",
-        description: "A shared-plot area + line overlay built from JSON text, with child-specific transforms and encoding overrides lowered through the layered spec seam.",
+        description: "A shared-plot area + line overlay built from JSON text, with child-specific encoding overrides lowered through the layered spec seam.",
         svg: render_lowered_layer_spec(&mut scene, spec),
     }
 }
