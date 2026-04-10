@@ -34,6 +34,7 @@ mod rect_mark;
 mod rule_mark;
 mod scale;
 mod sector_mark;
+pub mod spec;
 mod stacked_area_chart;
 mod stacked_area_mark;
 mod stacked_bar_chart;
@@ -63,6 +64,10 @@ pub use scale::{
     infer_domain_f64,
 };
 pub use sector_mark::SectorMarkSpec;
+pub use spec::{
+    ChannelDef, DataRef, EncodingSet, FieldKind, LoweredUnit, LoweringError, MarkDef,
+    TransformSpec, UnitSpec,
+};
 pub use stacked_area_chart::StackedAreaChartSpec;
 pub use stacked_area_mark::StackedAreaMarkSpec;
 pub use stacked_bar_chart::StackedBarChartSpec;

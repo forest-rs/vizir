@@ -9,11 +9,12 @@ use kurbo::{Point, Rect};
 use peniko::Color;
 use peniko::color::palette::css;
 use vizir_charts::{
-    AxisSpec, AxisStyle, BarMarkSpec, ChartLayout, ChartLayoutSpec, ChartSpec, GridStyle,
-    HeuristicTextMeasurer, LegendItem, LegendOrient, LegendPlacement, LegendSwatchesSpec,
-    PLOT_BACKGROUND, RectMarkSpec, RuleMarkSpec, ScaleBand, ScaleLinearSpec, ScaleLogSpec,
-    ScaleTimeSpec, SectorMarkSpec, Size, StackedAreaChartSpec, StackedAreaMarkSpec,
-    StackedBarChartSpec, StrokeStyle, Symbol, TextMarkSpec, TitleSpec,
+    AxisSpec, AxisStyle, BarMarkSpec, ChannelDef, ChartLayout, ChartLayoutSpec, ChartSpec, DataRef,
+    GridStyle, HeuristicTextMeasurer, LegendItem, LegendOrient, LegendPlacement,
+    LegendSwatchesSpec, MarkDef, PLOT_BACKGROUND, RectMarkSpec, RuleMarkSpec, ScaleBand,
+    ScaleLinearSpec, ScaleLogSpec, ScaleTimeSpec, SectorMarkSpec, Size, StackedAreaChartSpec,
+    StackedAreaMarkSpec, StackedBarChartSpec, StrokeStyle, Symbol, TextMarkSpec, TitleSpec,
+    UnitSpec,
 };
 use vizir_core::{ColId, Mark, Scene, Table, TableData, TableId};
 use vizir_transforms::{
@@ -46,6 +47,7 @@ fn main() {
         axis_label_angle_demo(),
         transforms_demo(),
         aggregate_demo(),
+        lowered_spec_demo(),
         histogram_demo(),
         stack_demo(),
         stacked_area_demo(),
@@ -453,6 +455,53 @@ fn aggregate_demo() -> html::HtmlSection {
         title: "Aggregate",
         description: "A Vega-Lite-ish pattern: source -> aggregate(groupby) -> bar marks.",
         svg,
+    }
+}
+
+fn lowered_spec_demo() -> html::HtmlSection {
+    // The same shape as `aggregate_demo`, but lowered from an authored unit spec.
+    let mut scene = Scene::new();
+    let source_id = TableId(130);
+    let cat_col = ColId(0);
+    let val_col = ColId(1);
+
+    let cat = vec![0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 3.0];
+    let v = vec![1.0, 2.0, 3.0, 4.0, 5.0, 2.0, 1.0, 6.0];
+    let mut table = Table::new(source_id);
+    table.row_keys = (0..cat.len() as u64).collect();
+    table.data = Some(Box::new(CategoryValues { cat, v }));
+    scene.insert_table(table);
+
+    let measurer = HeuristicTextMeasurer;
+    let spec = UnitSpec::new(
+        0xD0_000,
+        TableId(131),
+        DataRef::Table(source_id),
+        MarkDef::Bar,
+    )
+    .with_title("Lowered UnitSpec")
+    .with_size(220.0, 120.0)
+    .with_x(ChannelDef::ordinal(cat_col).with_title("category"))
+    .with_y(
+        ChannelDef::quantitative(val_col)
+            .with_aggregate(AggregateOp::Sum)
+            .with_title("sum(value)"),
+    );
+
+    let lowered = spec
+        .lower_into_scene(&mut scene)
+        .expect("lower and apply UnitSpec");
+    let (layout, marks) = lowered.marks(&scene, &measurer).expect("lowered marks");
+    let diffs = scene.tick(marks);
+
+    let mut svg_scene = svg::SvgScene::default();
+    svg_scene.set_view_box(layout.view);
+    svg_scene.apply_diffs(&diffs);
+
+    html::HtmlSection {
+        title: "Lowered UnitSpec",
+        description: "An aggregate bar chart built through `vizir_charts::spec` and lowered into transforms, guides, and series marks.",
+        svg: svg_scene.to_svg_string(),
     }
 }
 

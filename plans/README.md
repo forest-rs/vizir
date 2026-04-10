@@ -25,6 +25,7 @@ We want to stay “Vega-ish” where it makes sense. Local reference copies live
 ## Index
 
 - Core + evolution: `plans/engine-evolution.md`
+- Spec IR + lowering slice: `plans/spec-ir.md`
 - Marks + mark specs: `plans/mark-specs.md`
 - Guides (axes/legends/grid): `plans/guides.md`
 - Scales: `plans/scales.md`
