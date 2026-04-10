@@ -1,0 +1,18 @@
+{
+  "title": "JSON Bar + Text",
+  "width": 220.0,
+  "height": 120.0,
+  "layer": [
+    { "mark": "bar" },
+    {
+      "mark": "text",
+      "encoding": {
+        "text": { "field": "value", "type": "quantitative" }
+      }
+    }
+  ],
+  "encoding": {
+    "x": { "field": "category", "type": "ordinal", "title": "category" },
+    "y": { "field": "value", "type": "quantitative", "title": "value" }
+  }
+}

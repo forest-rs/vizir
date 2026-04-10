@@ -105,6 +105,8 @@ pub enum ParsedMarkDef {
     Point,
     /// A filled area over continuous x/y axes.
     Area,
+    /// A text label positioned by x/y and formatted from a numeric field.
+    Text,
 }
 
 /// A parsed field kind.
@@ -763,6 +765,7 @@ fn adapt_mark(mark: ParsedMarkDef) -> MarkDef {
         ParsedMarkDef::Line => MarkDef::Line,
         ParsedMarkDef::Point => MarkDef::Point,
         ParsedMarkDef::Area => MarkDef::Area,
+        ParsedMarkDef::Text => MarkDef::Text,
     }
 }
 
@@ -1160,6 +1163,37 @@ mod tests {
             marks
                 .iter()
                 .any(|mark| matches!(mark.encodings, vizir_core::MarkEncodings::Path(_)))
+        );
+    }
+
+    #[test]
+    fn parsed_text_mark_adapts_and_lowers() {
+        let parsed = ParsedUnitSpec::new(ParsedMarkDef::Text)
+            .with_x(ParsedChannelDef::ordinal("x"))
+            .with_y(ParsedChannelDef::quantitative("y"))
+            .with_text(ParsedChannelDef::quantitative("y"));
+
+        let mut scene = Scene::new();
+        let table_id = TableId(31);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![110, 111, 112];
+        table.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![5.0, 4.0, 6.0],
+        }));
+        scene.insert_table(table);
+
+        let unit = parsed
+            .adapt(&resolver(), context(table_id))
+            .expect("adapt text mark");
+        let lowered = unit.lower(&scene).expect("lower text mark");
+        let (_layout, marks) = lowered
+            .marks(&scene, &HeuristicTextMeasurer)
+            .expect("text marks");
+        assert!(
+            marks
+                .iter()
+                .any(|mark| mark.kind == vizir_core::MarkKind::Text)
         );
     }
 

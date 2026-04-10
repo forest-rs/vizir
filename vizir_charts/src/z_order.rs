@@ -20,6 +20,8 @@ pub const SERIES_FILL: i32 = 0;
 pub const SERIES_STROKE: i32 = 10;
 /// Point series marks drawn above lines.
 pub const SERIES_POINTS: i32 = 20;
+/// Text labels drawn above filled/stroked series.
+pub const SERIES_LABELS: i32 = 25;
 
 /// Axis domain line and tick marks.
 pub const AXIS_RULES: i32 = 30;

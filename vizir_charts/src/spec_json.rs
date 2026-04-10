@@ -262,6 +262,7 @@ fn parse_mark(mark: JsonMark) -> Result<ParsedMarkDef, JsonSpecError> {
         "line" => Ok(ParsedMarkDef::Line),
         "point" => Ok(ParsedMarkDef::Point),
         "area" => Ok(ParsedMarkDef::Area),
+        "text" => Ok(ParsedMarkDef::Text),
         _ => Err(JsonSpecError::Invalid(format!(
             "unsupported mark type `{kind}`"
         ))),
@@ -625,37 +626,9 @@ mod tests {
     }
 
     #[test]
-    fn parses_shared_plot_layer_spec() {
-        let spec = parse_layer_spec_json(
-            r#"{
-                "title": "line + point",
-                "layer": [
-                    {
-                        "mark": "area",
-                        "encoding": {
-                            "y": { "field": "y", "type": "quantitative" },
-                            "y2": { "field": "y2", "type": "quantitative" }
-                        }
-                    },
-                    {
-                        "mark": "line",
-                        "transform": [
-                            {
-                                "filter": { "field": "y2", "op": ">=", "value": 2.0 },
-                                "columns": ["x", "y2"]
-                            }
-                        ],
-                        "encoding": {
-                            "y": { "field": "y2", "type": "quantitative" }
-                        }
-                    }
-                ],
-                "encoding": {
-                    "x": { "field": "x", "type": "quantitative" }
-                }
-            }"#,
-        )
-        .expect("parse layer spec");
+    fn parses_text_mark_spec() {
+        let spec = parse_unit_spec_json(include_str!("../../fixtures/specs/unit_text.json"))
+            .expect("parse text mark spec");
 
         let resolver = SliceFieldResolver::new(&[
             SchemaField {
@@ -666,8 +639,35 @@ mod tests {
                 name: "y",
                 column: ColumnId(1),
             },
+        ]);
+        let _unit = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xC1_000,
+                    derived_table_base: TableId(301),
+                    data: DataRef::Table(TableId(4)),
+                },
+            )
+            .expect("adapt parsed text mark");
+    }
+
+    #[test]
+    fn parses_shared_plot_layer_spec() {
+        let spec = parse_layer_spec_json(include_str!("../../fixtures/specs/layer_area_line.json"))
+            .expect("parse layer spec");
+
+        let resolver = SliceFieldResolver::new(&[
             SchemaField {
-                name: "y2",
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "area_top",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "line_y",
                 column: ColumnId(2),
             },
         ]);
@@ -681,5 +681,32 @@ mod tests {
                 },
             )
             .expect("adapt parsed layer");
+    }
+
+    #[test]
+    fn parses_bar_text_layer_fixture() {
+        let spec = parse_layer_spec_json(include_str!("../../fixtures/specs/layer_bar_text.json"))
+            .expect("parse bar + text layer");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "category",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "value",
+                column: ColumnId(1),
+            },
+        ]);
+        let _layer = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xC2_000,
+                    derived_table_base: TableId(302),
+                    data: DataRef::Table(TableId(5)),
+                },
+            )
+            .expect("adapt parsed bar + text layer");
     }
 }

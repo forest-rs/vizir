@@ -10,7 +10,7 @@
 //! - one unit chart or a narrow shared-plot layer spec,
 //! - one input table already present in a [`vizir_core::Scene`],
 //! - a small transform subset,
-//! - `bar`, `line`, `point`, and `area` marks,
+//! - `bar`, `line`, `point`, `area`, and `text` marks,
 //! - `x`, `x2`, `y`, `y2`, and categorical `color` channels,
 //! - optional chart titles.
 //!
@@ -26,7 +26,9 @@ use alloc::vec::Vec;
 use kurbo::Rect;
 use peniko::Brush;
 use peniko::color::palette::css;
-use vizir_core::{ColumnId, Mark, MarkDiff, MarkId, Scene, TableId};
+use vizir_core::{
+    ColumnId, InputRef, Mark, MarkDiff, MarkId, Scene, TableId, TextAnchor, TextBaseline,
+};
 use vizir_transforms::{
     AggregateField, AggregateOp, Predicate, Program, SceneExecutionError, SortOrder, StackOffset,
     TableFrame, TableFrameError, Transform,
@@ -74,6 +76,8 @@ pub enum MarkDef {
     Point,
     /// A filled area over continuous x/y axes.
     Area,
+    /// A text label positioned by x/y and formatted from a numeric field.
+    Text,
 }
 
 /// A single authored channel definition.
@@ -448,9 +452,10 @@ impl UnitSpec {
             .ok_or(LoweringError::MissingChannel("y"))?;
         let y2 = self.encoding.y2();
         let color = self.encoding.color();
-        if self.encoding.text().is_some() {
+        let text = self.encoding.text();
+        if self.mark != MarkDef::Text && text.is_some() {
             return Err(LoweringError::Unsupported(
-                "the experimental lowering slice does not render text channels yet",
+                "text channels currently only lower on text marks",
             ));
         }
         if x.aggregate().is_some() {
@@ -491,9 +496,21 @@ impl UnitSpec {
                 "the experimental lowering slice requires a quantitative y2 channel",
             ));
         }
+        if let Some(text) = text
+            && text.aggregate().is_some()
+        {
+            return Err(LoweringError::Unsupported(
+                "aggregate on the text channel is not supported in the experimental lowering slice",
+            ));
+        }
         if color.is_some() && self.mark == MarkDef::Bar {
             return Err(LoweringError::Unsupported(
                 "categorical color splitting is not supported for bar marks yet",
+            ));
+        }
+        if color.is_some() && self.mark == MarkDef::Text {
+            return Err(LoweringError::Unsupported(
+                "categorical color splitting is not supported for text marks yet",
             ));
         }
         if (x2.is_some() || y2.is_some()) && self.mark != MarkDef::Area {
@@ -520,6 +537,11 @@ impl UnitSpec {
                     return Err(LoweringError::Unsupported(
                         "line/point/area lowering currently requires a quantitative or temporal x channel",
                     ));
+                }
+            }
+            MarkDef::Text => {
+                if text.is_none() {
+                    return Err(LoweringError::MissingChannel("text"));
                 }
             }
         }
@@ -576,7 +598,7 @@ impl UnitSpec {
             &base_program,
             input_table,
             current_table,
-            required_columns(x, x2, lowered_y_field, y2, color),
+            required_columns(x, x2, lowered_y_field, y2, color, text),
         )?;
 
         let mut program = if base_program.transforms().is_empty() {
@@ -611,7 +633,7 @@ impl UnitSpec {
                         op: vizir_transforms::CompareOp::Eq,
                         value,
                     },
-                    columns: series_columns(x, x2, lowered_y_field, y2, Some(color)),
+                    columns: series_columns(x, x2, lowered_y_field, y2, Some(color), text),
                 });
                 if matches!(self.mark, MarkDef::Line | MarkDef::Area) {
                     p.push(Transform::Sort {
@@ -619,7 +641,7 @@ impl UnitSpec {
                         output,
                         by: x.field(),
                         order: SortOrder::Asc,
-                        columns: series_columns(x, x2, lowered_y_field, y2, None),
+                        columns: series_columns(x, x2, lowered_y_field, y2, None, text),
                     });
                 }
                 derived_tables.push(output);
@@ -653,6 +675,19 @@ impl UnitSpec {
                         y: lowered_y_field,
                         y2: y2.map(ChannelDef::field),
                         baseline: 0.0,
+                        fill,
+                    }),
+                    MarkDef::Text => SeriesLayer::Text(TextLayer {
+                        table: output,
+                        x: x.field(),
+                        x_kind: x.kind(),
+                        y: lowered_y_field,
+                        text: text
+                            .expect("text mark validates text channel before color lowering")
+                            .field(),
+                        text_kind: text
+                            .expect("text mark validates text channel before color lowering")
+                            .kind(),
                         fill,
                     }),
                 });
@@ -689,6 +724,19 @@ impl UnitSpec {
                     y2: y2.map(ChannelDef::field),
                     baseline: 0.0,
                     fill: Brush::Solid(css::CORNFLOWER_BLUE),
+                }),
+                MarkDef::Text => SeriesLayer::Text(TextLayer {
+                    table: current_table,
+                    x: x.field(),
+                    x_kind: x.kind(),
+                    y: lowered_y_field,
+                    text: text
+                        .expect("text mark validates text channel before series lowering")
+                        .field(),
+                    text_kind: text
+                        .expect("text mark validates text channel before series lowering")
+                        .kind(),
+                    fill: Brush::Solid(css::BLACK),
                 }),
             });
         }
@@ -917,10 +965,10 @@ impl LayerSpec {
             && self
                 .children
                 .iter()
-                .any(|child| child.mark() != MarkDef::Bar)
+                .any(|child| !matches!(child.mark(), MarkDef::Bar | MarkDef::Text))
         {
             return Err(LoweringError::Unsupported(
-                "bar layering is only supported with other bar marks in the experimental slice",
+                "bar layering is only supported with bar/text marks in the experimental slice",
             ));
         }
 
@@ -1170,6 +1218,7 @@ enum SeriesLayer {
     Line(LineLayer),
     Point(PointLayer),
     Area(AreaLayer),
+    Text(TextLayer),
 }
 
 impl SeriesLayer {
@@ -1184,6 +1233,7 @@ impl SeriesLayer {
             Self::Line(layer) => layer.marks(scene, chart, plot),
             Self::Point(layer) => layer.marks(scene, chart, plot),
             Self::Area(layer) => layer.marks(scene, chart, plot),
+            Self::Text(layer) => layer.marks(scene, chart, plot),
         }
     }
 }
@@ -1341,6 +1391,140 @@ impl AreaLayer {
     }
 }
 
+#[derive(Clone, Debug)]
+struct TextLayer {
+    table: TableId,
+    x: ColumnId,
+    x_kind: FieldKind,
+    y: ColumnId,
+    text: ColumnId,
+    text_kind: FieldKind,
+    fill: Brush,
+}
+
+impl TextLayer {
+    fn marks(
+        &self,
+        scene: &Scene,
+        chart: &ChartSpec,
+        plot: Rect,
+    ) -> Result<Vec<Mark>, LoweringError> {
+        let table = scene
+            .tables
+            .get(&self.table)
+            .ok_or(LoweringError::MissingTable(self.table))?;
+        let row_keys = table.row_keys.clone();
+        let table_id = self.table;
+        let x_col = self.x;
+        let y_col = self.y;
+        let text_col = self.text;
+        let text_kind = self.text_kind;
+        let fill = self.fill.clone();
+        let y_scale = chart
+            .y_scale_continuous(plot)
+            .ok_or(LoweringError::MissingChannel("y"))?;
+
+        Ok(match self.x_kind {
+            FieldKind::Quantitative | FieldKind::Temporal => {
+                let x_scale = chart
+                    .x_scale_continuous(plot)
+                    .ok_or(LoweringError::MissingChannel("x"))?;
+                row_keys
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .map(|(row, row_key)| {
+                        Mark::builder(MarkId::for_row(table_id, row_key))
+                            .text()
+                            .z_index(crate::z_order::SERIES_LABELS)
+                            .x_compute(
+                                [InputRef::TableCol {
+                                    table: table_id,
+                                    col: x_col,
+                                }],
+                                move |ctx, _| {
+                                    x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0))
+                                },
+                            )
+                            .y_compute(
+                                [InputRef::TableCol {
+                                    table: table_id,
+                                    col: y_col,
+                                }],
+                                move |ctx, _| {
+                                    y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0))
+                                        - 4.0
+                                },
+                            )
+                            .text_compute(
+                                [InputRef::TableCol {
+                                    table: table_id,
+                                    col: text_col,
+                                }],
+                                move |ctx, _| {
+                                    format_channel_value(
+                                        ctx.table_f64(table_id, row, text_col).unwrap_or(f64::NAN),
+                                        text_kind,
+                                    )
+                                },
+                            )
+                            .font_size_const(10.0)
+                            .fill_brush_const(fill.clone())
+                            .text_anchor(TextAnchor::Middle)
+                            .text_baseline(TextBaseline::Ideographic)
+                            .build()
+                    })
+                    .collect()
+            }
+            FieldKind::Ordinal | FieldKind::Nominal => {
+                let band = chart
+                    .x_axis()
+                    .ok_or(LoweringError::MissingChannel("x"))?
+                    .scale_band(plot);
+                let band_width = band.band_width();
+                row_keys
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .map(|(row, row_key)| {
+                        Mark::builder(MarkId::for_row(table_id, row_key))
+                            .text()
+                            .z_index(crate::z_order::SERIES_LABELS)
+                            .x_const(band.x(row) + 0.5 * band_width)
+                            .y_compute(
+                                [InputRef::TableCol {
+                                    table: table_id,
+                                    col: y_col,
+                                }],
+                                move |ctx, _| {
+                                    y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0))
+                                        - 4.0
+                                },
+                            )
+                            .text_compute(
+                                [InputRef::TableCol {
+                                    table: table_id,
+                                    col: text_col,
+                                }],
+                                move |ctx, _| {
+                                    format_channel_value(
+                                        ctx.table_f64(table_id, row, text_col).unwrap_or(f64::NAN),
+                                        text_kind,
+                                    )
+                                },
+                            )
+                            .font_size_const(10.0)
+                            .fill_brush_const(fill.clone())
+                            .text_anchor(TextAnchor::Middle)
+                            .text_baseline(TextBaseline::Ideographic)
+                            .build()
+                    })
+                    .collect()
+            }
+        })
+    }
+}
+
 fn build_chart_spec(
     spec: &UnitSpec,
     frame: &TableFrame,
@@ -1463,7 +1647,7 @@ fn build_y_axis(
     let domain = match mark {
         MarkDef::Bar => include_zero(expand_domain(domain)),
         MarkDef::Area if y2_field.is_none() => include_zero(expand_domain(domain)),
-        MarkDef::Area | MarkDef::Line | MarkDef::Point => expand_domain(domain),
+        MarkDef::Area | MarkDef::Line | MarkDef::Point | MarkDef::Text => expand_domain(domain),
     };
     let mut axis = AxisSpec::left(
         spec.id_base.wrapping_add(0x11_000),
@@ -1585,6 +1769,7 @@ fn required_columns(
     y_field: ColumnId,
     y2: Option<&ChannelDef>,
     color: Option<&ChannelDef>,
+    text: Option<&ChannelDef>,
 ) -> Vec<ColumnId> {
     let mut out = vec![x.field(), y_field];
     if let Some(x2) = x2 {
@@ -1595,6 +1780,9 @@ fn required_columns(
     }
     if let Some(color) = color {
         push_unique_col(&mut out, color.field());
+    }
+    if let Some(text) = text {
+        push_unique_col(&mut out, text.field());
     }
     out
 }
@@ -1635,8 +1823,9 @@ fn series_columns(
     y_field: ColumnId,
     y2: Option<&ChannelDef>,
     color: Option<&ChannelDef>,
+    text: Option<&ChannelDef>,
 ) -> Vec<ColumnId> {
-    required_columns(x, x2, y_field, y2, color)
+    required_columns(x, x2, y_field, y2, color, text)
 }
 
 fn expand_domain((min, max): (f64, f64)) -> (f64, f64) {
@@ -1767,7 +1956,8 @@ fn child_layer_id_base(id_base: u64, index: usize) -> u64 {
 }
 
 fn child_layer_table_base(base: TableId, index: usize) -> TableId {
-    TableId(base.0.wrapping_add((index as u32).wrapping_mul(0x100)))
+    let index = u32::try_from(index).unwrap_or(u32::MAX);
+    TableId(base.0.wrapping_add(index.wrapping_mul(0x100)))
 }
 
 fn base_layer_mark_index(children: &[LayerChildSpec]) -> usize {
@@ -2130,6 +2320,37 @@ mod tests {
     }
 
     #[test]
+    fn text_mark_lowering_formats_numeric_labels() {
+        let mut scene = Scene::new();
+        let table_id = TableId(41);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![301, 302, 303];
+        table.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![3.0, 5.0, 4.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xDD80,
+            TableId(410),
+            DataRef::Table(table_id),
+            MarkDef::Text,
+        )
+        .with_x(ChannelDef::ordinal(ColumnId(0)).with_title("category"))
+        .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("value"))
+        .with_text(ChannelDef::quantitative(ColumnId(1)));
+
+        let lowered = spec.lower(&scene).expect("lower text mark");
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let marks = lowered
+            .series_marks(&scene, layout.data)
+            .expect("text marks");
+        assert_eq!(marks.len(), 3);
+        assert!(marks.iter().all(|mark| mark.kind == MarkKind::Text));
+    }
+
+    #[test]
     fn area_color_lowering_creates_series_paths_and_legend() {
         let mut scene = Scene::new();
         let table_id = TableId(50);
@@ -2374,6 +2595,35 @@ mod tests {
             .get(&lowered.derived_tables()[0])
             .expect("filtered child table");
         assert_eq!(filtered.row_keys, vec![601, 602]);
+    }
+
+    #[test]
+    fn bar_text_layering_is_supported() {
+        let mut scene = Scene::new();
+        let table_id = TableId(83);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![700, 701, 702];
+        table.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![3.0, 4.0, 2.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = LayerSpec::new(0xF1B0, TableId(830), DataRef::Table(table_id))
+            .with_x(ChannelDef::ordinal(ColumnId(0)).with_title("category"))
+            .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("value"))
+            .with_mark(MarkDef::Bar)
+            .with_child(
+                LayerChildSpec::new(MarkDef::Text).with_text(ChannelDef::quantitative(ColumnId(1))),
+            );
+
+        let lowered = spec.lower(&scene).expect("lower bar + text layer");
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let marks = lowered
+            .series_marks(&scene, layout.data)
+            .expect("bar + text marks");
+        assert!(marks.iter().any(|mark| mark.kind == MarkKind::Rect));
+        assert!(marks.iter().any(|mark| mark.kind == MarkKind::Text));
     }
 
     #[test]

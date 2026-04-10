@@ -1,0 +1,8 @@
+{
+  "mark": "text",
+  "encoding": {
+    "x": { "field": "x", "type": "ordinal" },
+    "y": { "field": "y", "type": "quantitative" },
+    "text": { "field": "y", "type": "quantitative" }
+  }
+}

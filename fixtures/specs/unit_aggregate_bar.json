@@ -1,0 +1,16 @@
+{
+  "mark": "bar",
+  "title": "JSON Lowered UnitSpec",
+  "width": 220.0,
+  "height": 120.0,
+  "transform": [
+    {
+      "aggregate": [{ "op": "sum", "field": "value", "as": "sum_value" }],
+      "groupby": ["category"]
+    }
+  ],
+  "encoding": {
+    "x": { "field": "category", "type": "ordinal", "title": "category" },
+    "y": { "field": "sum_value", "type": "quantitative", "title": "sum(value)" }
+  }
+}

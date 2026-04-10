@@ -140,6 +140,7 @@ Support:
 - `Line`
 - `Point`
 - `Area`
+- `Text`
 
 ### Channel shape
 
@@ -148,6 +149,8 @@ Support only:
 - `x2`
 - `y`
 - `y2`
+- `color`
+- `text`
 - `color`
 - `text`
 

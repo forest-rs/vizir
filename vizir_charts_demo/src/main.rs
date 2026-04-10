@@ -50,6 +50,7 @@ fn main() {
         aggregate_demo(),
         lowered_spec_demo(),
         lowered_json_spec_demo(),
+        lowered_json_bar_text_demo(),
         lowered_json_layer_demo(),
         lowered_area_spec_demo(),
         lowered_ranged_area_spec_demo(),
@@ -542,25 +543,8 @@ fn lowered_json_spec_demo() -> html::HtmlSection {
     table.data = Some(Box::new(CategoryValues { cat, v }));
     scene.insert_table(table);
 
-    let parsed = parse_unit_spec_json(
-        r#"{
-            "mark": "bar",
-            "title": "JSON Lowered UnitSpec",
-            "width": 220.0,
-            "height": 120.0,
-            "transform": [
-                {
-                    "aggregate": [{ "op": "sum", "field": "value", "as": "sum_value" }],
-                    "groupby": ["category"]
-                }
-            ],
-            "encoding": {
-                "x": { "field": "category", "type": "ordinal", "title": "category" },
-                "y": { "field": "sum_value", "type": "quantitative", "title": "sum(value)" }
-            }
-        }"#,
-    )
-    .expect("parse json unit spec");
+    let parsed = parse_unit_spec_json(include_str!("../../fixtures/specs/unit_aggregate_bar.json"))
+        .expect("parse json unit spec");
 
     let resolver = SliceFieldResolver::new(&[
         SchemaField {
@@ -602,38 +586,8 @@ fn lowered_json_layer_demo() -> html::HtmlSection {
     }));
     scene.insert_table(table);
 
-    let parsed = parse_layer_spec_json(
-        r#"{
-            "title": "JSON Lowered Layer",
-            "width": 220.0,
-            "height": 120.0,
-            "layer": [
-                {
-                    "mark": "area",
-                    "encoding": {
-                        "y": { "field": "area_top", "type": "quantitative", "title": "band" },
-                        "y2": { "field": "line_y", "type": "quantitative" }
-                    }
-                },
-                {
-                    "mark": "line",
-                    "transform": [
-                        {
-                            "filter": { "field": "line_y", "op": ">=", "value": 1.5 },
-                            "columns": ["x", "line_y"]
-                        }
-                    ],
-                    "encoding": {
-                        "y": { "field": "line_y", "type": "quantitative", "title": "line" }
-                    }
-                }
-            ],
-            "encoding": {
-                "x": { "field": "x", "type": "quantitative", "title": "x" }
-            }
-        }"#,
-    )
-    .expect("parse json layer spec");
+    let parsed = parse_layer_spec_json(include_str!("../../fixtures/specs/layer_area_line.json"))
+        .expect("parse json layer spec");
 
     let resolver = SliceFieldResolver::new(&[
         SchemaField {
@@ -667,6 +621,48 @@ fn lowered_json_layer_demo() -> html::HtmlSection {
     html::HtmlSection {
         title: "Lowered JSON Layer",
         description: "A shared-plot area + line overlay built from JSON text, with child-specific transforms and encoding overrides lowered through the layered spec seam.",
+        svg: render_lowered_layer_spec(&mut scene, spec),
+    }
+}
+
+fn lowered_json_bar_text_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(140);
+
+    let cat = vec![0.0, 1.0, 2.0, 3.0];
+    let v = vec![3.0, 5.0, 4.0, 6.0];
+    let mut table = Table::new(source_id);
+    table.row_keys = (0..cat.len() as u64).collect();
+    table.data = Some(Box::new(CategoryValues { cat, v }));
+    scene.insert_table(table);
+
+    let parsed = parse_layer_spec_json(include_str!("../../fixtures/specs/layer_bar_text.json"))
+        .expect("parse json bar + text layer");
+
+    let resolver = SliceFieldResolver::new(&[
+        SchemaField {
+            name: "category",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "value",
+            column: ColumnId(1),
+        },
+    ]);
+    let spec = parsed
+        .adapt(
+            &resolver,
+            AdaptContext {
+                id_base: 0xD0_900,
+                derived_table_base: TableId(141),
+                data: DataRef::Table(source_id),
+            },
+        )
+        .expect("adapt json bar + text layer");
+
+    html::HtmlSection {
+        title: "Lowered JSON Bar + Text",
+        description: "A shared-plot bar + text overlay built from JSON text, proving authored text marks on the same lowered layering seam.",
         svg: render_lowered_layer_spec(&mut scene, spec),
     }
 }

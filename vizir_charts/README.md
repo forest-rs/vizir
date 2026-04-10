@@ -10,7 +10,8 @@ building blocks to create stable-identity marks and feed them into a `vizir_core
 Optional `json` feature:
 - Enables a narrow serde-backed JSON parser that produces `ParsedUnitSpec` and `ParsedLayerSpec`
   values for the experimental authored-spec seam.
-- This is intentionally limited to the currently supported mark/channel/transform slice.
+- This is intentionally limited to the currently supported mark/channel/transform slice, backed by
+  checked-in JSON fixtures under `fixtures/specs/`.
 
 ## Plans
 
