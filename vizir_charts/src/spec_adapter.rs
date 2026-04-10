@@ -541,9 +541,10 @@ impl ParsedUnitSpec {
 }
 
 /// A parsed shared-plot layer spec that still refers to fields by name.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ParsedLayerChildSpec {
     mark: ParsedMarkDef,
+    transforms: Vec<ParsedTransformSpec>,
     encoding: ParsedEncodingSet,
 }
 
@@ -552,8 +553,15 @@ impl ParsedLayerChildSpec {
     pub fn new(mark: ParsedMarkDef) -> Self {
         Self {
             mark,
+            transforms: Vec::new(),
             encoding: ParsedEncodingSet::new(),
         }
+    }
+
+    /// Appends a child-local transform.
+    pub fn with_transform(mut self, transform: ParsedTransformSpec) -> Self {
+        self.transforms.push(transform);
+        self
     }
 
     /// Replaces the child override encoding set.
@@ -738,7 +746,7 @@ impl ParsedLayerSpec {
             layer = layer.with_text(adapt_channel(text, "text", &mut fields)?);
         }
         for child in &self.children {
-            layer = layer.with_child(adapt_layer_child(child, &mut fields)?);
+            layer = layer.with_child(adapt_layer_child(child, &fields)?);
         }
 
         Ok(layer)
@@ -790,26 +798,30 @@ fn adapt_channel(
 
 fn adapt_layer_child(
     child: &ParsedLayerChildSpec,
-    fields: &mut FieldBindings<'_>,
+    base_fields: &FieldBindings<'_>,
 ) -> Result<LayerChildSpec, AdaptError> {
+    let mut fields = base_fields.clone();
     let mut out = LayerChildSpec::new(adapt_mark(child.mark));
+    for transform in &child.transforms {
+        out = out.with_transform(adapt_transform(transform, &mut fields)?);
+    }
     if let Some(x) = &child.encoding.x {
-        out = out.with_x(adapt_channel(x, "layer child x", fields)?);
+        out = out.with_x(adapt_channel(x, "layer child x", &mut fields)?);
     }
     if let Some(x2) = &child.encoding.x2 {
-        out = out.with_x2(adapt_channel(x2, "layer child x2", fields)?);
+        out = out.with_x2(adapt_channel(x2, "layer child x2", &mut fields)?);
     }
     if let Some(y) = &child.encoding.y {
-        out = out.with_y(adapt_channel(y, "layer child y", fields)?);
+        out = out.with_y(adapt_channel(y, "layer child y", &mut fields)?);
     }
     if let Some(y2) = &child.encoding.y2 {
-        out = out.with_y2(adapt_channel(y2, "layer child y2", fields)?);
+        out = out.with_y2(adapt_channel(y2, "layer child y2", &mut fields)?);
     }
     if let Some(color) = &child.encoding.color {
-        out = out.with_color(adapt_channel(color, "layer child color", fields)?);
+        out = out.with_color(adapt_channel(color, "layer child color", &mut fields)?);
     }
     if let Some(text) = &child.encoding.text {
-        out = out.with_text(adapt_channel(text, "layer child text", fields)?);
+        out = out.with_text(adapt_channel(text, "layer child text", &mut fields)?);
     }
     Ok(out)
 }
@@ -894,6 +906,7 @@ fn resolve_columns(
         .collect()
 }
 
+#[derive(Clone)]
 struct FieldBindings<'a> {
     resolver: &'a dyn FieldResolver,
     derived: Vec<(String, ColumnId)>,
@@ -1269,5 +1282,55 @@ mod tests {
             .marks(&scene, &HeuristicTextMeasurer)
             .expect("layer marks");
         assert!(marks.len() >= 2);
+    }
+
+    #[test]
+    fn parsed_layer_child_transforms_adapt_and_execute() {
+        let parsed = ParsedLayerSpec::new()
+            .with_x(ParsedChannelDef::quantitative("x"))
+            .with_y(ParsedChannelDef::quantitative("y"))
+            .with_mark(ParsedMarkDef::Line)
+            .with_child(
+                ParsedLayerChildSpec::new(ParsedMarkDef::Point).with_transform(
+                    ParsedTransformSpec::filter(
+                        ParsedPredicate {
+                            field: String::from("x"),
+                            op: CompareOp::Ge,
+                            value: 1.0,
+                        },
+                        ["x", "y"],
+                    ),
+                ),
+            );
+
+        let mut scene = Scene::new();
+        let table_id = TableId(72);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![30, 31, 32];
+        table.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![4.0, 5.0, 6.0],
+        }));
+        scene.insert_table(table);
+
+        let layer = parsed
+            .adapt(&resolver(), context(table_id))
+            .expect("adapt transformed layer");
+        let lowered = layer
+            .lower_into_scene(&mut scene)
+            .expect("lower transformed layer");
+        assert_eq!(
+            lowered
+                .program()
+                .expect("combined program")
+                .transforms()
+                .len(),
+            1
+        );
+        let filtered = scene
+            .tables
+            .get(&lowered.derived_tables()[0])
+            .expect("filtered child table");
+        assert_eq!(filtered.row_keys, vec![31, 32]);
     }
 }

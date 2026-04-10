@@ -97,8 +97,11 @@ pub fn parse_layer_spec_json(input: &str) -> Result<ParsedLayerSpec, JsonSpecErr
         spec = spec.with_transform(parse_transform(transform)?);
     }
     for layer in raw.layer {
-        let child = ParsedLayerChildSpec::new(parse_mark(layer.mark)?)
+        let mut child = ParsedLayerChildSpec::new(parse_mark(layer.mark)?)
             .with_encoding(parse_encoding_set(layer.encoding.unwrap_or_default())?);
+        for transform in layer.transform {
+            child = child.with_transform(parse_transform(transform)?);
+        }
         spec = spec.with_child(child);
     }
 
@@ -135,6 +138,8 @@ struct JsonLayerSpec {
 #[serde(deny_unknown_fields)]
 struct JsonLayerEntry {
     mark: JsonMark,
+    #[serde(default)]
+    transform: Vec<Value>,
     encoding: Option<JsonEncoding>,
 }
 
@@ -634,6 +639,12 @@ mod tests {
                     },
                     {
                         "mark": "line",
+                        "transform": [
+                            {
+                                "filter": { "field": "y2", "op": ">=", "value": 2.0 },
+                                "columns": ["x", "y2"]
+                            }
+                        ],
                         "encoding": {
                             "y": { "field": "y2", "type": "quantitative" }
                         }

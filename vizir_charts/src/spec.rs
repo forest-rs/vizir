@@ -726,9 +726,10 @@ impl UnitSpec {
 ///
 /// A child always contributes exactly one mark kind and may override selected channels from the
 /// parent [`LayerSpec`].
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LayerChildSpec {
     mark: MarkDef,
+    transforms: Vec<TransformSpec>,
     encoding: EncodingSet,
 }
 
@@ -737,8 +738,15 @@ impl LayerChildSpec {
     pub fn new(mark: MarkDef) -> Self {
         Self {
             mark,
+            transforms: Vec::new(),
             encoding: EncodingSet::new(),
         }
+    }
+
+    /// Appends a child-local transform.
+    pub fn with_transform(mut self, transform: TransformSpec) -> Self {
+        self.transforms.push(transform);
+        self
     }
 
     /// Replaces the child override encoding set.
@@ -790,9 +798,9 @@ impl LayerChildSpec {
 
 /// A narrow shared-plot layered chart.
 ///
-/// Every child mark shares the same data source, transforms, encodings, and guides. This is an
-/// intentionally small composition slice for common overlays such as line + point, while allowing
-/// each child to override selected channels.
+/// Every child mark shares the same data source and chart shell. Shared transforms run for every
+/// child, and each child may append its own transform chain and selected channel overrides. This
+/// is an intentionally small composition slice for common overlays such as line + point.
 #[derive(Clone, Debug)]
 pub struct LayerSpec {
     id_base: u64,
@@ -921,6 +929,8 @@ impl LayerSpec {
         let base_lowered = base_unit.lower(scene)?;
 
         let mut series_layers = base_lowered.series_layers.clone();
+        let mut derived_tables = base_lowered.derived_tables.clone();
+        let mut combined_program = base_lowered.program.clone();
         for index in 0..self.children.len() {
             if index == base_index {
                 continue;
@@ -928,13 +938,15 @@ impl LayerSpec {
             let child = self.layer_child_unit(index);
             let lowered = child.lower(scene)?;
             series_layers.extend(lowered.series_layers);
+            extend_unique_tables(&mut derived_tables, &lowered.derived_tables);
+            merge_programs(&mut combined_program, lowered.program);
         }
 
         Ok(LoweredLayer {
             input_table: base_lowered.input_table,
             output_table: base_lowered.output_table,
-            derived_tables: base_lowered.derived_tables,
-            program: base_lowered.program,
+            derived_tables,
+            program: combined_program,
             chart: base_lowered.chart,
             series_layers,
         })
@@ -951,9 +963,9 @@ impl LayerSpec {
         let child = &self.children[index];
         UnitSpec {
             id_base: child_layer_id_base(self.id_base, index),
-            derived_table_base: self.derived_table_base,
+            derived_table_base: child_layer_table_base(self.derived_table_base, index),
             data: self.data,
-            transforms: self.transforms.clone(),
+            transforms: layer_child_transforms(&self.transforms, &child.transforms),
             mark: child.mark(),
             encoding: merge_layer_encoding(&self.encoding, &child.encoding, child.mark()),
             width: self.width,
@@ -1743,8 +1755,19 @@ fn merge_layer_encoding(
     out
 }
 
+fn layer_child_transforms(shared: &[TransformSpec], child: &[TransformSpec]) -> Vec<TransformSpec> {
+    let mut out = Vec::with_capacity(shared.len() + child.len());
+    out.extend(shared.iter().cloned());
+    out.extend(child.iter().cloned());
+    out
+}
+
 fn child_layer_id_base(id_base: u64, index: usize) -> u64 {
     id_base.wrapping_add((index as u64).wrapping_mul(0x100_000))
+}
+
+fn child_layer_table_base(base: TableId, index: usize) -> TableId {
+    TableId(base.0.wrapping_add((index as u32).wrapping_mul(0x100)))
 }
 
 fn base_layer_mark_index(children: &[LayerChildSpec]) -> usize {
@@ -1761,6 +1784,24 @@ fn base_layer_mark_index(children: &[LayerChildSpec]) -> usize {
         return index;
     }
     0
+}
+
+fn extend_unique_tables(out: &mut Vec<TableId>, tables: &[TableId]) {
+    for table in tables {
+        if out.iter().all(|existing| *existing != *table) {
+            out.push(*table);
+        }
+    }
+}
+
+fn merge_programs(out: &mut Option<Program>, program: Option<Program>) {
+    let Some(program) = program else {
+        return;
+    };
+    let dst = out.get_or_insert_with(Program::new);
+    for transform in program.transforms().iter().cloned() {
+        dst.push(transform);
+    }
 }
 
 fn next_derived_col(spec: &UnitSpec) -> u32 {
@@ -2286,6 +2327,53 @@ mod tests {
                 .iter()
                 .all(|mark| matches!(mark.encodings, vizir_core::MarkEncodings::Path(_)))
         );
+    }
+
+    #[test]
+    fn layer_child_transforms_merge_into_combined_program() {
+        let mut scene = Scene::new();
+        let table_id = TableId(82);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![600, 601, 602];
+        table.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![3.0, 4.0, 5.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = LayerSpec::new(0xF1A0, TableId(820), DataRef::Table(table_id))
+            .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+            .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("y"))
+            .with_mark(MarkDef::Line)
+            .with_child(
+                LayerChildSpec::new(MarkDef::Point).with_transform(TransformSpec::filter(
+                    Predicate {
+                        col: ColumnId(0),
+                        op: vizir_transforms::CompareOp::Ge,
+                        value: 1.0,
+                    },
+                    vec![ColumnId(0), ColumnId(1)],
+                )),
+            );
+
+        let lowered = spec
+            .lower_into_scene(&mut scene)
+            .expect("lower transformed layer");
+        assert_eq!(
+            lowered
+                .program()
+                .expect("combined program")
+                .transforms()
+                .len(),
+            1
+        );
+        assert_eq!(lowered.derived_tables().len(), 1);
+
+        let filtered = scene
+            .tables
+            .get(&lowered.derived_tables()[0])
+            .expect("filtered child table");
+        assert_eq!(filtered.row_keys, vec![601, 602]);
     }
 
     #[test]

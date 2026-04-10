@@ -617,6 +617,12 @@ fn lowered_json_layer_demo() -> html::HtmlSection {
                 },
                 {
                     "mark": "line",
+                    "transform": [
+                        {
+                            "filter": { "field": "line_y", "op": ">=", "value": 1.5 },
+                            "columns": ["x", "line_y"]
+                        }
+                    ],
                     "encoding": {
                         "y": { "field": "line_y", "type": "quantitative", "title": "line" }
                     }
@@ -660,7 +666,7 @@ fn lowered_json_layer_demo() -> html::HtmlSection {
 
     html::HtmlSection {
         title: "Lowered JSON Layer",
-        description: "A shared-plot area + line overlay built from JSON text, with child-specific encoding overrides lowered through the layered spec seam.",
+        description: "A shared-plot area + line overlay built from JSON text, with child-specific transforms and encoding overrides lowered through the layered spec seam.",
         svg: render_lowered_layer_spec(&mut scene, spec),
     }
 }
