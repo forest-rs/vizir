@@ -48,6 +48,8 @@ fn main() {
         transforms_demo(),
         aggregate_demo(),
         lowered_spec_demo(),
+        lowered_area_spec_demo(),
+        lowered_ranged_area_spec_demo(),
         histogram_demo(),
         stack_demo(),
         stacked_area_demo(),
@@ -76,6 +78,22 @@ fn render_chart(
     svg_scene.set_view_box(layout.view);
     svg_scene.apply_diffs(&diffs);
     (layout, svg_scene.to_svg_string())
+}
+
+fn render_lowered_unit_spec(scene: &mut Scene, spec: UnitSpec) -> String {
+    let measurer = HeuristicTextMeasurer;
+    let lowered = spec
+        .lower_into_scene(scene)
+        .expect("lower and apply authored unit spec");
+    let (layout, marks) = lowered
+        .marks(scene, &measurer)
+        .expect("build lowered authored unit marks");
+    let diffs = scene.tick(marks);
+
+    let mut svg_scene = svg::SvgScene::default();
+    svg_scene.set_view_box(layout.view);
+    svg_scene.apply_diffs(&diffs);
+    svg_scene.to_svg_string()
 }
 
 fn log_time_axes_demo() -> html::HtmlSection {
@@ -472,7 +490,6 @@ fn lowered_spec_demo() -> html::HtmlSection {
     table.data = Some(Box::new(CategoryValues { cat, v }));
     scene.insert_table(table);
 
-    let measurer = HeuristicTextMeasurer;
     let spec = UnitSpec::new(
         0xD0_000,
         TableId(131),
@@ -488,20 +505,133 @@ fn lowered_spec_demo() -> html::HtmlSection {
             .with_title("sum(value)"),
     );
 
-    let lowered = spec
-        .lower_into_scene(&mut scene)
-        .expect("lower and apply UnitSpec");
-    let (layout, marks) = lowered.marks(&scene, &measurer).expect("lowered marks");
-    let diffs = scene.tick(marks);
-
-    let mut svg_scene = svg::SvgScene::default();
-    svg_scene.set_view_box(layout.view);
-    svg_scene.apply_diffs(&diffs);
-
     html::HtmlSection {
         title: "Lowered UnitSpec",
         description: "An aggregate bar chart built through `vizir_charts::spec` and lowered into transforms, guides, and series marks.",
-        svg: svg_scene.to_svg_string(),
+        svg: render_lowered_unit_spec(&mut scene, spec),
+    }
+}
+
+#[derive(Debug)]
+struct SeriesValues {
+    x: Vec<f64>,
+    y: Vec<f64>,
+    series: Vec<f64>,
+}
+
+impl TableData for SeriesValues {
+    fn row_count(&self) -> usize {
+        self.x.len().min(self.y.len()).min(self.series.len())
+    }
+
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        match col {
+            ColumnId(0) => self.x.get(row).copied(),
+            ColumnId(1) => self.y.get(row).copied(),
+            ColumnId(2) => self.series.get(row).copied(),
+            _ => None,
+        }
+    }
+}
+
+fn lowered_area_spec_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(132);
+    let x_col = ColumnId(0);
+    let y_col = ColumnId(1);
+    let series_col = ColumnId(2);
+
+    let mut table = Table::new(source_id);
+    table.row_keys = (0..8_u64).collect();
+    table.data = Some(Box::new(SeriesValues {
+        x: vec![0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0],
+        y: vec![1.0, 2.5, 2.0, 3.0, 0.5, 1.0, 1.8, 2.2],
+        series: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+    }));
+    scene.insert_table(table);
+
+    let spec = UnitSpec::new(
+        0xD1_000,
+        TableId(133),
+        DataRef::Table(source_id),
+        MarkDef::Area,
+    )
+    .with_title("Lowered Area UnitSpec")
+    .with_size(220.0, 120.0)
+    .with_x(ChannelDef::quantitative(x_col).with_title("x"))
+    .with_y(ChannelDef::quantitative(y_col).with_title("value"))
+    .with_color(ChannelDef::nominal(series_col).with_title("series"));
+
+    html::HtmlSection {
+        title: "Lowered Area UnitSpec",
+        description: "A multi-series area chart lowered from authored `x`/`y`/`color` channels through the same spec seam.",
+        svg: render_lowered_unit_spec(&mut scene, spec),
+    }
+}
+
+#[derive(Debug)]
+struct RibbonValues {
+    x: Vec<f64>,
+    y: Vec<f64>,
+    x2: Vec<f64>,
+    y2: Vec<f64>,
+}
+
+impl TableData for RibbonValues {
+    fn row_count(&self) -> usize {
+        self.x
+            .len()
+            .min(self.y.len())
+            .min(self.x2.len())
+            .min(self.y2.len())
+    }
+
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        match col {
+            ColumnId(0) => self.x.get(row).copied(),
+            ColumnId(1) => self.y.get(row).copied(),
+            ColumnId(2) => self.x2.get(row).copied(),
+            ColumnId(3) => self.y2.get(row).copied(),
+            _ => None,
+        }
+    }
+}
+
+fn lowered_ranged_area_spec_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(134);
+    let x_col = ColumnId(0);
+    let y_col = ColumnId(1);
+    let x2_col = ColumnId(2);
+    let y2_col = ColumnId(3);
+
+    let mut table = Table::new(source_id);
+    table.row_keys = (0..4_u64).collect();
+    table.data = Some(Box::new(RibbonValues {
+        x: vec![1.0, 2.0, 3.0, 4.0],
+        y: vec![5.0, 5.8, 5.4, 6.0],
+        x2: vec![0.0, 1.0, 2.0, 3.0],
+        y2: vec![2.0, 2.3, 2.1, 2.6],
+    }));
+    scene.insert_table(table);
+
+    let spec = UnitSpec::new(
+        0xD2_000,
+        TableId(135),
+        DataRef::Table(source_id),
+        MarkDef::Area,
+    )
+    .with_title("Lowered Ranged Area")
+    .with_size(220.0, 120.0)
+    .with_x(ChannelDef::quantitative(x_col).with_title("x"))
+    .with_y(ChannelDef::quantitative(y_col).with_title("top"))
+    .with_x2(ChannelDef::quantitative(x2_col))
+    .with_y2(ChannelDef::quantitative(y2_col));
+
+    html::HtmlSection {
+        title: "Lowered Ranged Area",
+        description: "A ribbon-like area lowered from authored `x`/`y` plus `x2`/`y2`, using the new paired-edge range support.",
+        svg: render_lowered_unit_spec(&mut scene, spec),
     }
 }
 
