@@ -52,6 +52,7 @@ fn main() {
         lowered_json_spec_demo(),
         lowered_json_bar_text_demo(),
         lowered_json_point_shape_size_demo(),
+        lowered_json_point_opacity_demo(),
         lowered_json_layer_demo(),
         lowered_area_spec_demo(),
         lowered_ranged_area_spec_demo(),
@@ -722,6 +723,53 @@ fn lowered_json_point_shape_size_demo() -> html::HtmlSection {
     }
 }
 
+fn lowered_json_point_opacity_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(144);
+    let mut table = Table::new(source_id);
+    table.row_keys = vec![0, 1, 2, 3];
+    table.data = Some(Box::new(PointOpacityValues {
+        x: vec![0.0, 1.0, 2.0, 3.0],
+        y: vec![1.0, 2.0, 1.5, 3.0],
+        opacity: vec![0.0, 2.5, 5.0, 10.0],
+    }));
+    scene.insert_table(table);
+
+    let parsed = parse_unit_spec_json(include_str!("../../fixtures/specs/unit_point_opacity.json"))
+        .expect("parse json point opacity spec");
+
+    let resolver = SliceFieldResolver::new(&[
+        SchemaField {
+            name: "x",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "y",
+            column: ColumnId(1),
+        },
+        SchemaField {
+            name: "opacity",
+            column: ColumnId(2),
+        },
+    ]);
+    let spec = parsed
+        .adapt(
+            &resolver,
+            AdaptContext {
+                id_base: 0xD0_C00,
+                derived_table_base: TableId(145),
+                data: DataRef::Table(source_id),
+            },
+        )
+        .expect("adapt json point opacity spec");
+
+    html::HtmlSection {
+        title: "Lowered JSON Point Opacity",
+        description: "A point chart built from JSON text, proving quantitative `opacity` lowering through the authored seam.",
+        svg: render_lowered_unit_spec(&mut scene, spec),
+    }
+}
+
 #[derive(Debug)]
 struct LayerOverlayValues {
     x: Vec<f64>,
@@ -735,6 +783,13 @@ struct PointShapeSizeValues {
     y: Vec<f64>,
     magnitude: Vec<f64>,
     series: Vec<f64>,
+}
+
+#[derive(Debug)]
+struct PointOpacityValues {
+    x: Vec<f64>,
+    y: Vec<f64>,
+    opacity: Vec<f64>,
 }
 
 impl TableData for PointShapeSizeValues {
@@ -752,6 +807,21 @@ impl TableData for PointShapeSizeValues {
             ColumnId(1) => self.y.get(row).copied(),
             ColumnId(2) => self.magnitude.get(row).copied(),
             ColumnId(3) => self.series.get(row).copied(),
+            _ => None,
+        }
+    }
+}
+
+impl TableData for PointOpacityValues {
+    fn row_count(&self) -> usize {
+        self.x.len().min(self.y.len()).min(self.opacity.len())
+    }
+
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        match col {
+            ColumnId(0) => self.x.get(row).copied(),
+            ColumnId(1) => self.y.get(row).copied(),
+            ColumnId(2) => self.opacity.get(row).copied(),
             _ => None,
         }
     }

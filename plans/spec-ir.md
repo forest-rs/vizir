@@ -152,6 +152,9 @@ Support only:
 - `color`
 - `size`
 - `shape`
+- `opacity`
+- `order`
+- `detail`
 - `text`
 
 Layering rule:

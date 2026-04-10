@@ -1,0 +1,9 @@
+{
+  "title": "Point Opacity",
+  "mark": "point",
+  "encoding": {
+    "x": { "field": "x", "type": "quantitative" },
+    "y": { "field": "y", "type": "quantitative" },
+    "opacity": { "field": "opacity", "type": "quantitative" }
+  }
+}

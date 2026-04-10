@@ -28,8 +28,8 @@ Planned slices:
    - Make fences like `color + detail`, aggregated `order`, and base-child domain ownership
      explicit in tests and docs.
 2. Next structural channel/composition decision
-   - Either broaden structural channels (`opacity`, `detail`-adjacent grouping rules) or take the
-     next composition step toward nested child units.
+   - Either broaden styling/grouping channels beyond `opacity` or take the next composition step
+     toward nested child units.
    - Do not blur the current shared-domain fence accidentally.
 3. Fixture-driven expansion
    - Add new checked-in JSON fixtures only for slices that are fully tested and documented.

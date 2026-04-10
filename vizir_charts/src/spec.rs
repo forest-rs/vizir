@@ -11,7 +11,7 @@
 //! - one input table already present in a [`vizir_core::Scene`],
 //! - a small transform subset,
 //! - `bar`, `line`, `point`, `area`, and `text` marks,
-//! - `x`, `x2`, `y`, `y2`, `color`, `size`, `shape`, `order`, `detail`, and `text` channels,
+//! - `x`, `x2`, `y`, `y2`, `color`, `size`, `shape`, `opacity`, `order`, `detail`, and `text` channels,
 //! - optional chart titles.
 //!
 //! It is not a JSON parser and not a full Vega/Vega-Lite implementation.
@@ -169,6 +169,7 @@ pub struct EncodingSet {
     color: Option<ChannelDef>,
     size: Option<ChannelDef>,
     shape: Option<ChannelDef>,
+    opacity: Option<ChannelDef>,
     order: Option<ChannelDef>,
     detail: Option<ChannelDef>,
     text: Option<ChannelDef>,
@@ -222,6 +223,12 @@ impl EncodingSet {
         self
     }
 
+    /// Sets the opacity channel.
+    pub fn with_opacity(mut self, opacity: ChannelDef) -> Self {
+        self.opacity = Some(opacity);
+        self
+    }
+
     /// Sets the order channel.
     pub fn with_order(mut self, order: ChannelDef) -> Self {
         self.order = Some(order);
@@ -266,6 +273,10 @@ impl EncodingSet {
 
     fn shape(&self) -> Option<&ChannelDef> {
         self.shape.as_ref()
+    }
+
+    fn opacity(&self) -> Option<&ChannelDef> {
+        self.opacity.as_ref()
     }
 
     fn order(&self) -> Option<&ChannelDef> {
@@ -480,6 +491,12 @@ impl UnitSpec {
         self
     }
 
+    /// Sets the opacity channel.
+    pub fn with_opacity(mut self, opacity: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_opacity(opacity);
+        self
+    }
+
     /// Sets the order channel.
     pub fn with_order(mut self, order: ChannelDef) -> Self {
         self.encoding = self.encoding.with_order(order);
@@ -522,6 +539,7 @@ impl UnitSpec {
         let color = self.encoding.color();
         let size = self.encoding.size();
         let shape = self.encoding.shape();
+        let opacity = self.encoding.opacity();
         let order = self.encoding.order();
         let detail = self.encoding.detail();
         let text = self.encoding.text();
@@ -589,6 +607,13 @@ impl UnitSpec {
                 "aggregate on the shape channel is not supported in the experimental lowering slice",
             ));
         }
+        if let Some(opacity) = opacity
+            && opacity.aggregate().is_some()
+        {
+            return Err(LoweringError::Unsupported(
+                "aggregate on the opacity channel is not supported in the experimental lowering slice",
+            ));
+        }
         if let Some(order) = order
             && order.aggregate().is_some()
         {
@@ -640,6 +665,18 @@ impl UnitSpec {
         {
             return Err(LoweringError::Unsupported(
                 "point shape does not support temporal channels in the experimental lowering slice",
+            ));
+        }
+        if let Some(opacity) = opacity
+            && opacity.kind() != FieldKind::Quantitative
+        {
+            return Err(LoweringError::Unsupported(
+                "opacity currently requires a quantitative channel",
+            ));
+        }
+        if opacity.is_some() && matches!(self.mark, MarkDef::Line | MarkDef::Area) {
+            return Err(LoweringError::Unsupported(
+                "opacity is currently only supported for bar, point, and text marks",
             ));
         }
         if let Some(detail) = detail
@@ -755,6 +792,7 @@ impl UnitSpec {
                 color,
                 size,
                 shape,
+                opacity,
                 order,
                 detail,
                 text,
@@ -763,6 +801,11 @@ impl UnitSpec {
 
         let point_size_domain = size
             .map(|size| infer_frame_domain_pair(&preview_frame, size.field(), None, "size"))
+            .transpose()?;
+        let opacity_domain = opacity
+            .map(|opacity| {
+                infer_frame_domain_pair(&preview_frame, opacity.field(), None, "opacity")
+            })
             .transpose()?;
         let point_shape_map = shape
             .map(|shape| build_shape_map(&preview_frame, shape.field()))
@@ -809,6 +852,7 @@ impl UnitSpec {
                         Some(color),
                         size,
                         shape,
+                        opacity,
                         order,
                         None,
                         text,
@@ -828,6 +872,7 @@ impl UnitSpec {
                             None,
                             size,
                             shape,
+                            opacity,
                             order,
                             None,
                             text,
@@ -860,6 +905,8 @@ impl UnitSpec {
                         default_size: 6.0,
                         size: size.map(ChannelDef::field),
                         size_domain: point_size_domain,
+                        opacity: opacity.map(ChannelDef::field),
+                        opacity_domain,
                         fill,
                     }),
                     MarkDef::Area => SeriesLayer::Area(AreaLayer {
@@ -885,6 +932,8 @@ impl UnitSpec {
                             .expect("text mark validates text channel before color lowering")
                             .kind(),
                         fill,
+                        opacity: opacity.map(ChannelDef::field),
+                        opacity_domain,
                     }),
                 });
             }
@@ -914,6 +963,7 @@ impl UnitSpec {
                         None,
                         size,
                         shape,
+                        opacity,
                         order,
                         Some(detail),
                         text,
@@ -932,6 +982,7 @@ impl UnitSpec {
                         None,
                         size,
                         shape,
+                        opacity,
                         order,
                         None,
                         text,
@@ -978,6 +1029,7 @@ impl UnitSpec {
                         None,
                         size,
                         shape,
+                        opacity,
                         order,
                         None,
                         text,
@@ -993,6 +1045,8 @@ impl UnitSpec {
                     y: lowered_y_field,
                     baseline: 0.0,
                     fill: Brush::Solid(css::CORNFLOWER_BLUE),
+                    opacity: opacity.map(ChannelDef::field),
+                    opacity_domain,
                 }),
                 MarkDef::Line => SeriesLayer::Line(LineLayer {
                     id: MarkId::from_raw(self.id_base.wrapping_add(0x1_000)),
@@ -1012,6 +1066,8 @@ impl UnitSpec {
                     default_size: 6.0,
                     size: size.map(ChannelDef::field),
                     size_domain: point_size_domain,
+                    opacity: opacity.map(ChannelDef::field),
+                    opacity_domain,
                     fill: Brush::Solid(css::TOMATO),
                 }),
                 MarkDef::Area => SeriesLayer::Area(AreaLayer {
@@ -1037,6 +1093,8 @@ impl UnitSpec {
                         .expect("text mark validates text channel before series lowering")
                         .kind(),
                     fill: Brush::Solid(css::BLACK),
+                    opacity: opacity.map(ChannelDef::field),
+                    opacity_domain,
                 }),
             });
         }
@@ -1142,6 +1200,12 @@ impl LayerChildSpec {
     /// Sets the child shape override.
     pub fn with_shape(mut self, shape: ChannelDef) -> Self {
         self.encoding = self.encoding.with_shape(shape);
+        self
+    }
+
+    /// Sets the opacity channel.
+    pub fn with_opacity(mut self, opacity: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_opacity(opacity);
         self
     }
 
@@ -1260,6 +1324,12 @@ impl LayerSpec {
     /// Sets the shape channel.
     pub fn with_shape(mut self, shape: ChannelDef) -> Self {
         self.encoding = self.encoding.with_shape(shape);
+        self
+    }
+
+    /// Sets the opacity channel.
+    pub fn with_opacity(mut self, opacity: ChannelDef) -> Self {
+        self.encoding = self.encoding.with_opacity(opacity);
         self
     }
 
@@ -1605,6 +1675,8 @@ struct BarLayer {
     y: ColumnId,
     baseline: f64,
     fill: Brush,
+    opacity: Option<ColumnId>,
+    opacity_domain: Option<(f64, f64)>,
 }
 
 impl BarLayer {
@@ -1624,6 +1696,8 @@ impl BarLayer {
         let y_col = self.y;
         let baseline = self.baseline;
         let fill = self.fill.clone();
+        let opacity_col = self.opacity;
+        let opacity_domain = self.opacity_domain;
         let band = chart
             .x_axis()
             .ok_or(LoweringError::MissingChannel("x"))?
@@ -1637,7 +1711,7 @@ impl BarLayer {
             .enumerate()
             .map(|(row, row_key)| {
                 let y0 = y_scale.map(baseline);
-                Mark::builder(layer_row_mark_id(id_base, row_key))
+                let mut mark = Mark::builder(layer_row_mark_id(id_base, row_key))
                     .rect()
                     .z_index(crate::z_order::SERIES_FILL)
                     .x_const(band.x(row))
@@ -1661,9 +1735,29 @@ impl BarLayer {
                             let v = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
                             (y_scale.map(v) - y0).abs()
                         },
+                    );
+                mark = if let Some(opacity_col) = opacity_col {
+                    let fill = fill.clone();
+                    mark.fill_compute(
+                        [InputRef::TableCol {
+                            table: table_id,
+                            col: opacity_col,
+                        }],
+                        move |ctx, _| {
+                            brush_with_opacity(
+                                &fill,
+                                opacity_for_value(
+                                    ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
+                                    opacity_domain,
+                                    1.0,
+                                ),
+                            )
+                        },
                     )
-                    .fill_brush_const(fill.clone())
-                    .build()
+                } else {
+                    mark.fill_brush_const(fill.clone())
+                };
+                mark.build()
             })
             .collect())
     }
@@ -1711,6 +1805,8 @@ struct PointLayer {
     default_size: f64,
     size: Option<ColumnId>,
     size_domain: Option<(f64, f64)>,
+    opacity: Option<ColumnId>,
+    opacity_domain: Option<(f64, f64)>,
     fill: Brush,
 }
 
@@ -1733,6 +1829,8 @@ impl PointLayer {
         let default_size = self.default_size;
         let size_col = self.size;
         let size_domain = self.size_domain;
+        let opacity_col = self.opacity;
+        let opacity_domain = self.opacity_domain;
         let default_symbol = self.default_symbol;
         let shape_col = self.shape;
         let shape_map = self.shape_map.clone();
@@ -1758,7 +1856,7 @@ impl PointLayer {
                     .unwrap_or(default_symbol);
 
                 if symbol == Symbol::Square {
-                    Mark::builder(layer_row_mark_id(id_base, row_key))
+                    let mut mark = Mark::builder(layer_row_mark_id(id_base, row_key))
                         .rect()
                         .z_index(crate::z_order::SERIES_POINTS)
                         .x_compute(
@@ -1782,11 +1880,31 @@ impl PointLayer {
                             },
                         )
                         .w_const(size)
-                        .h_const(size)
-                        .fill_brush_const(fill.clone())
-                        .build()
+                        .h_const(size);
+                    mark = if let Some(opacity_col) = opacity_col {
+                        let fill = fill.clone();
+                        mark.fill_compute(
+                            [InputRef::TableCol {
+                                table: table_id,
+                                col: opacity_col,
+                            }],
+                            move |ctx, _| {
+                                brush_with_opacity(
+                                    &fill,
+                                    opacity_for_value(
+                                        ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
+                                        opacity_domain,
+                                        1.0,
+                                    ),
+                                )
+                            },
+                        )
+                    } else {
+                        mark.fill_brush_const(fill.clone())
+                    };
+                    mark.build()
                 } else {
-                    Mark::builder(layer_row_mark_id(id_base, row_key))
+                    let mut mark = Mark::builder(layer_row_mark_id(id_base, row_key))
                         .path()
                         .z_index(crate::z_order::SERIES_POINTS)
                         .path_compute(
@@ -1808,9 +1926,29 @@ impl PointLayer {
                                 symbol.path(x, y, size)
                             },
                         )
-                        .fill_brush_const(fill.clone())
-                        .stroke_width_const(0.0)
-                        .build()
+                        .stroke_width_const(0.0);
+                    mark = if let Some(opacity_col) = opacity_col {
+                        let fill = fill.clone();
+                        mark.fill_compute(
+                            [InputRef::TableCol {
+                                table: table_id,
+                                col: opacity_col,
+                            }],
+                            move |ctx, _| {
+                                brush_with_opacity(
+                                    &fill,
+                                    opacity_for_value(
+                                        ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
+                                        opacity_domain,
+                                        1.0,
+                                    ),
+                                )
+                            },
+                        )
+                    } else {
+                        mark.fill_brush_const(fill.clone())
+                    };
+                    mark.build()
                 }
             })
             .collect())
@@ -1878,6 +2016,8 @@ struct TextLayer {
     text: ColumnId,
     text_kind: FieldKind,
     fill: Brush,
+    opacity: Option<ColumnId>,
+    opacity_domain: Option<(f64, f64)>,
 }
 
 impl TextLayer {
@@ -1899,6 +2039,8 @@ impl TextLayer {
         let text_col = self.text;
         let text_kind = self.text_kind;
         let fill = self.fill.clone();
+        let opacity_col = self.opacity;
+        let opacity_domain = self.opacity_domain;
         let y_scale = chart
             .y_scale_continuous(plot)
             .ok_or(LoweringError::MissingChannel("y"))?;
@@ -1913,7 +2055,7 @@ impl TextLayer {
                     .copied()
                     .enumerate()
                     .map(|(row, row_key)| {
-                        Mark::builder(layer_row_mark_id(id_base, row_key))
+                        let mut mark = Mark::builder(layer_row_mark_id(id_base, row_key))
                             .text()
                             .z_index(crate::z_order::SERIES_LABELS)
                             .x_compute(
@@ -1948,10 +2090,31 @@ impl TextLayer {
                                 },
                             )
                             .font_size_const(10.0)
-                            .fill_brush_const(fill.clone())
                             .text_anchor(TextAnchor::Middle)
-                            .text_baseline(TextBaseline::Ideographic)
-                            .build()
+                            .text_baseline(TextBaseline::Ideographic);
+                        mark = if let Some(opacity_col) = opacity_col {
+                            let fill = fill.clone();
+                            mark.fill_compute(
+                                [InputRef::TableCol {
+                                    table: table_id,
+                                    col: opacity_col,
+                                }],
+                                move |ctx, _| {
+                                    brush_with_opacity(
+                                        &fill,
+                                        opacity_for_value(
+                                            ctx.table_f64(table_id, row, opacity_col)
+                                                .unwrap_or(1.0),
+                                            opacity_domain,
+                                            1.0,
+                                        ),
+                                    )
+                                },
+                            )
+                        } else {
+                            mark.fill_brush_const(fill.clone())
+                        };
+                        mark.build()
                     })
                     .collect()
             }
@@ -1966,7 +2129,7 @@ impl TextLayer {
                     .copied()
                     .enumerate()
                     .map(|(row, row_key)| {
-                        Mark::builder(layer_row_mark_id(id_base, row_key))
+                        let mut mark = Mark::builder(layer_row_mark_id(id_base, row_key))
                             .text()
                             .z_index(crate::z_order::SERIES_LABELS)
                             .x_const(band.x(row) + 0.5 * band_width)
@@ -1993,10 +2156,31 @@ impl TextLayer {
                                 },
                             )
                             .font_size_const(10.0)
-                            .fill_brush_const(fill.clone())
                             .text_anchor(TextAnchor::Middle)
-                            .text_baseline(TextBaseline::Ideographic)
-                            .build()
+                            .text_baseline(TextBaseline::Ideographic);
+                        mark = if let Some(opacity_col) = opacity_col {
+                            let fill = fill.clone();
+                            mark.fill_compute(
+                                [InputRef::TableCol {
+                                    table: table_id,
+                                    col: opacity_col,
+                                }],
+                                move |ctx, _| {
+                                    brush_with_opacity(
+                                        &fill,
+                                        opacity_for_value(
+                                            ctx.table_f64(table_id, row, opacity_col)
+                                                .unwrap_or(1.0),
+                                            opacity_domain,
+                                            1.0,
+                                        ),
+                                    )
+                                },
+                            )
+                        } else {
+                            mark.fill_brush_const(fill.clone())
+                        };
+                        mark.build()
                     })
                     .collect()
             }
@@ -2250,6 +2434,7 @@ fn required_columns(
     color: Option<&ChannelDef>,
     size: Option<&ChannelDef>,
     shape: Option<&ChannelDef>,
+    opacity: Option<&ChannelDef>,
     order: Option<&ChannelDef>,
     detail: Option<&ChannelDef>,
     text: Option<&ChannelDef>,
@@ -2269,6 +2454,9 @@ fn required_columns(
     }
     if let Some(shape) = shape {
         push_unique_col(&mut out, shape.field());
+    }
+    if let Some(opacity) = opacity {
+        push_unique_col(&mut out, opacity.field());
     }
     if let Some(order) = order {
         push_unique_col(&mut out, order.field());
@@ -2320,11 +2508,14 @@ fn series_columns(
     color: Option<&ChannelDef>,
     size: Option<&ChannelDef>,
     shape: Option<&ChannelDef>,
+    opacity: Option<&ChannelDef>,
     order: Option<&ChannelDef>,
     detail: Option<&ChannelDef>,
     text: Option<&ChannelDef>,
 ) -> Vec<ColumnId> {
-    required_columns(x, x2, y_field, y2, color, size, shape, order, detail, text)
+    required_columns(
+        x, x2, y_field, y2, color, size, shape, opacity, order, detail, text,
+    )
 }
 
 fn expand_domain((min, max): (f64, f64)) -> (f64, f64) {
@@ -2448,6 +2639,33 @@ fn point_size_for_value(value: f64, domain: Option<(f64, f64)>, default: f64) ->
     4.0 + t * 8.0
 }
 
+fn opacity_for_value(value: f64, domain: Option<(f64, f64)>, default: f64) -> f64 {
+    let Some((min, max)) = domain else {
+        return default;
+    };
+    if !value.is_finite() {
+        return default;
+    }
+    let (min, max) = expand_domain((min, max));
+    if min >= max {
+        return default;
+    }
+    let t = ((value - min) / (max - min)).clamp(0.0, 1.0);
+    0.2 + t * 0.8
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "peniko alpha is f32 and opacity is clamped to the [0, 1] range first"
+)]
+fn brush_with_opacity(brush: &Brush, opacity: f64) -> Brush {
+    let opacity = opacity.clamp(0.0, 1.0);
+    match brush {
+        Brush::Solid(color) => Brush::Solid(color.with_alpha(opacity as f32)),
+        _ => brush.clone(),
+    }
+}
+
 fn dedup_cols(mut cols: Vec<ColumnId>) -> Vec<ColumnId> {
     let mut out = Vec::with_capacity(cols.len());
     for col in cols.drain(..) {
@@ -2475,6 +2693,7 @@ fn merge_layer_encoding(
         color: overrides.color.clone().or_else(|| shared.color.clone()),
         size: overrides.size.clone().or_else(|| shared.size.clone()),
         shape: overrides.shape.clone().or_else(|| shared.shape.clone()),
+        opacity: overrides.opacity.clone().or_else(|| shared.opacity.clone()),
         order: overrides.order.clone().or_else(|| shared.order.clone()),
         detail: overrides.detail.clone().or_else(|| shared.detail.clone()),
         text: overrides.text.clone().or_else(|| shared.text.clone()),
@@ -2593,6 +2812,9 @@ fn next_derived_col(spec: &UnitSpec) -> u32 {
     }
     if let Some(shape) = spec.encoding.shape() {
         max_col = max_col.max(shape.field().0);
+    }
+    if let Some(opacity) = spec.encoding.opacity() {
+        max_col = max_col.max(opacity.field().0);
     }
     if let Some(order) = spec.encoding.order() {
         max_col = max_col.max(order.field().0);
@@ -2833,6 +3055,13 @@ mod tests {
     }
 
     #[test]
+    fn opacity_mapping_uses_visual_alpha_range() {
+        assert_eq!(opacity_for_value(f64::NAN, Some((1.0, 5.0)), 1.0), 1.0);
+        assert!((opacity_for_value(1.0, Some((1.0, 5.0)), 1.0) - 0.2).abs() < 1e-9);
+        assert!((opacity_for_value(5.0, Some((1.0, 5.0)), 1.0) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn point_shape_size_lowering_emits_mixed_symbols() {
         let mut scene = Scene::new();
         let table_id = TableId(21);
@@ -2865,6 +3094,47 @@ mod tests {
         assert_eq!(marks.len(), 4);
         assert!(marks.iter().any(|mark| mark.kind == MarkKind::Rect));
         assert!(marks.iter().any(|mark| mark.kind == MarkKind::Path));
+    }
+
+    #[test]
+    fn point_opacity_lowering_applies_alpha_to_fills() {
+        let mut scene = Scene::new();
+        let table_id = TableId(22);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![24, 25];
+        table.data = Some(Box::new(ThreeCols {
+            a: vec![0.0, 1.0],
+            b: vec![1.0, 2.0],
+            c: vec![0.0, 10.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xBC80,
+            TableId(220),
+            DataRef::Table(table_id),
+            MarkDef::Point,
+        )
+        .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+        .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("y"))
+        .with_opacity(ChannelDef::quantitative(ColumnId(2)).with_title("opacity"));
+
+        let lowered = spec.lower(&scene).expect("lower opacity points");
+        let (_layout, diffs) = lowered
+            .tick(&mut scene, &HeuristicTextMeasurer)
+            .expect("tick points");
+        let fills = diffs
+            .into_iter()
+            .filter_map(|diff| match diff {
+                MarkDiff::Enter { new, .. } => match *new {
+                    vizir_core::MarkPayload::Path(channels) => Some(channels.fill),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(fills.contains(&Brush::Solid(css::TOMATO.with_alpha(0.2))));
+        assert!(fills.contains(&Brush::Solid(css::TOMATO.with_alpha(1.0))));
     }
 
     #[test]
@@ -2915,6 +3185,37 @@ mod tests {
                 .iter()
                 .any(|mark| matches!(mark.encodings, vizir_core::MarkEncodings::Path(_)))
         );
+    }
+
+    #[test]
+    fn line_lowering_rejects_opacity_channel() {
+        let mut scene = Scene::new();
+        let table_id = TableId(31);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![13, 14];
+        table.data = Some(Box::new(ThreeCols {
+            a: vec![0.0, 1.0],
+            b: vec![2.0, 3.0],
+            c: vec![0.3, 0.8],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xCC80,
+            TableId(310),
+            DataRef::Table(table_id),
+            MarkDef::Line,
+        )
+        .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+        .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("y"))
+        .with_opacity(ChannelDef::quantitative(ColumnId(2)).with_title("opacity"));
+
+        let err = spec.lower(&scene).expect_err("line opacity should fail");
+        assert!(matches!(
+            err,
+            LoweringError::Unsupported(message)
+                if message.contains("opacity")
+        ));
     }
 
     #[test]

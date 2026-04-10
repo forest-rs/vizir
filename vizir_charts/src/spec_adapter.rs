@@ -195,6 +195,7 @@ pub struct ParsedEncodingSet {
     color: Option<ParsedChannelDef>,
     size: Option<ParsedChannelDef>,
     shape: Option<ParsedChannelDef>,
+    opacity: Option<ParsedChannelDef>,
     order: Option<ParsedChannelDef>,
     detail: Option<ParsedChannelDef>,
     text: Option<ParsedChannelDef>,
@@ -245,6 +246,12 @@ impl ParsedEncodingSet {
     /// Sets the shape channel.
     pub fn with_shape(mut self, shape: ParsedChannelDef) -> Self {
         self.shape = Some(shape);
+        self
+    }
+
+    /// Sets the opacity channel.
+    pub fn with_opacity(mut self, opacity: ParsedChannelDef) -> Self {
+        self.opacity = Some(opacity);
         self
     }
 
@@ -524,6 +531,12 @@ impl ParsedUnitSpec {
         self
     }
 
+    /// Sets the opacity channel.
+    pub fn with_opacity(mut self, opacity: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_opacity(opacity);
+        self
+    }
+
     /// Sets the order channel.
     pub fn with_order(mut self, order: ParsedChannelDef) -> Self {
         self.encoding = self.encoding.with_order(order);
@@ -591,6 +604,9 @@ impl ParsedUnitSpec {
         }
         if let Some(shape) = &self.encoding.shape {
             unit = unit.with_shape(adapt_channel(shape, "shape", &mut fields)?);
+        }
+        if let Some(opacity) = &self.encoding.opacity {
+            unit = unit.with_opacity(adapt_channel(opacity, "opacity", &mut fields)?);
         }
         if let Some(order) = &self.encoding.order {
             unit = unit.with_order(adapt_channel(order, "order", &mut fields)?);
@@ -675,6 +691,12 @@ impl ParsedLayerChildSpec {
     /// Sets the child shape override.
     pub fn with_shape(mut self, shape: ParsedChannelDef) -> Self {
         self.encoding = self.encoding.with_shape(shape);
+        self
+    }
+
+    /// Sets the child opacity override.
+    pub fn with_opacity(mut self, opacity: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_opacity(opacity);
         self
     }
 
@@ -776,6 +798,12 @@ impl ParsedLayerSpec {
         self
     }
 
+    /// Sets the opacity channel.
+    pub fn with_opacity(mut self, opacity: ParsedChannelDef) -> Self {
+        self.encoding = self.encoding.with_opacity(opacity);
+        self
+    }
+
     /// Sets the order channel.
     pub fn with_order(mut self, order: ParsedChannelDef) -> Self {
         self.encoding = self.encoding.with_order(order);
@@ -849,6 +877,9 @@ impl ParsedLayerSpec {
         }
         if let Some(shape) = &self.encoding.shape {
             layer = layer.with_shape(adapt_channel(shape, "shape", &mut fields)?);
+        }
+        if let Some(opacity) = &self.encoding.opacity {
+            layer = layer.with_opacity(adapt_channel(opacity, "opacity", &mut fields)?);
         }
         if let Some(order) = &self.encoding.order {
             layer = layer.with_order(adapt_channel(order, "order", &mut fields)?);
@@ -940,6 +971,9 @@ fn adapt_layer_child(
     }
     if let Some(shape) = &child.encoding.shape {
         out = out.with_shape(adapt_channel(shape, "layer child shape", &mut fields)?);
+    }
+    if let Some(opacity) = &child.encoding.opacity {
+        out = out.with_opacity(adapt_channel(opacity, "layer child opacity", &mut fields)?);
     }
     if let Some(order) = &child.encoding.order {
         out = out.with_order(adapt_channel(order, "layer child order", &mut fields)?);
@@ -1379,6 +1413,47 @@ mod tests {
                 .iter()
                 .any(|mark| mark.kind == vizir_core::MarkKind::Path)
         );
+    }
+
+    #[test]
+    fn parsed_point_opacity_adapts_and_lowers() {
+        let parsed = ParsedUnitSpec::new(ParsedMarkDef::Point)
+            .with_x(ParsedChannelDef::quantitative("x"))
+            .with_y(ParsedChannelDef::quantitative("y"))
+            .with_opacity(ParsedChannelDef::quantitative("opacity"));
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "y",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "opacity",
+                column: ColumnId(2),
+            },
+        ]);
+
+        let mut scene = Scene::new();
+        let table_id = TableId(39);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![90, 91];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0],
+            b: vec![1.0, 2.0],
+            c: vec![0.0, 10.0],
+            d: vec![0.0, 0.0],
+        }));
+        scene.insert_table(table);
+
+        let unit = parsed
+            .adapt(&resolver, context(table_id))
+            .expect("adapt point opacity");
+        let lowered = unit.lower(&scene).expect("lower point opacity");
+        assert_eq!(lowered.output_table(), table_id);
     }
 
     #[test]

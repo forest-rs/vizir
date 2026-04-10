@@ -153,6 +153,7 @@ struct JsonEncoding {
     color: Option<JsonChannel>,
     size: Option<JsonChannel>,
     shape: Option<JsonChannel>,
+    opacity: Option<JsonChannel>,
     order: Option<JsonChannel>,
     detail: Option<JsonChannel>,
     text: Option<JsonChannel>,
@@ -312,6 +313,9 @@ fn parse_encoding_set(encoding: JsonEncoding) -> Result<ParsedEncodingSet, JsonS
     }
     if let Some(shape) = encoding.shape {
         out = out.with_shape(parse_channel(shape)?);
+    }
+    if let Some(opacity) = encoding.opacity {
+        out = out.with_opacity(parse_channel(opacity)?);
     }
     if let Some(order) = encoding.order {
         out = out.with_order(parse_channel(order)?);
@@ -703,6 +707,38 @@ mod tests {
                 },
             )
             .expect("adapt parsed point shape/size spec");
+    }
+
+    #[test]
+    fn parses_point_opacity_fixture() {
+        let spec =
+            parse_unit_spec_json(include_str!("../../fixtures/specs/unit_point_opacity.json"))
+                .expect("parse point opacity spec");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "y",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "opacity",
+                column: ColumnId(2),
+            },
+        ]);
+        let _unit = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xC1_140,
+                    derived_table_base: TableId(305),
+                    data: DataRef::Table(TableId(7)),
+                },
+            )
+            .expect("adapt parsed point opacity spec");
     }
 
     #[test]

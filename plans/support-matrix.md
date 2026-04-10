@@ -48,10 +48,11 @@ Status meanings:
 | `color` | partial | Categorical split only; legend generation supported |
 | `size` | partial | Point-only; quantitative values map into a fixed visual size range |
 | `shape` | partial | Point-only; distinct values map into a fixed symbol palette |
+| `opacity` | partial | Bar/point/text only; quantitative values map into a fixed alpha range |
 | `text` | partial | Supported for `text` marks; text-as-annotation on other marks is not lowered yet |
 | `order` | partial | Line/area only; sorts within each rendered series; not yet supported with aggregated `y` |
 | `detail` | partial | Line/area only; categorical split without legend or color encoding |
-| `tooltip`, `opacity`, `row`, `column`, etc. | missing | Not modeled in authored seam |
+| `tooltip`, `row`, `column`, etc. | missing | Not modeled in authored seam |
 
 ### Transforms
 
@@ -82,8 +83,9 @@ Status meanings:
   overrides are supported, and later children can inherit positional/grouping defaults from the
   base child, but the base child still owns the shared x/y domains. Per-child nested unit specs
   and independent domain resolution are not modeled yet.
-- `aggregate` on `x`, `x2`, `color`, `y2`, `order`, `detail`, and `text` is rejected.
+- `aggregate` on `x`, `x2`, `color`, `y2`, `opacity`, `order`, `detail`, and `text` is rejected.
 - `x2`/`y2` are currently only supported on `area`.
+- `opacity` currently requires a quantitative channel and is only supported on `bar`, `point`, and `text`.
 - `order` and `detail` are currently line/area-only, `detail` must be categorical, and
   `color + detail` is rejected.
 - `text` currently formats numeric columns only; string-backed table data is not in the runtime yet.
