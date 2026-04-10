@@ -9,7 +9,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use peniko::Brush;
-use vizir_core::{ColId, InputRef, Mark, MarkId, TableId};
+use vizir_core::{ColumnId, InputRef, Mark, MarkId, TableId};
 
 #[cfg(not(feature = "std"))]
 use crate::float::FloatExt;
@@ -25,13 +25,13 @@ pub struct StackedBarMarkSpec {
     /// Source table id.
     pub table: TableId,
     /// Column containing the category value (used to place bars along x).
-    pub category: ColId,
+    pub category: ColumnId,
     /// Optional series column (used for per-series fills).
-    pub series: Option<ColId>,
+    pub series: Option<ColumnId>,
     /// Column containing the stack start value.
-    pub y0: ColId,
+    pub y0: ColumnId,
     /// Column containing the stack end value.
-    pub y1: ColId,
+    pub y1: ColumnId,
     /// Band scale used for bar positions along x.
     pub band: ScaleBand,
     /// Linear scale used for bar positions along y.
@@ -74,9 +74,9 @@ impl StackedBarMarkSpec {
     /// Creates a stacked bar mark spec with a default fill (`Brush::default()`).
     pub fn new(
         table: TableId,
-        category: ColId,
-        y0: ColId,
-        y1: ColId,
+        category: ColumnId,
+        y0: ColumnId,
+        y1: ColumnId,
         band: ScaleBand,
         y_scale: ScaleContinuous,
     ) -> Self {
@@ -113,7 +113,7 @@ impl StackedBarMarkSpec {
     /// Uses a per-series fill palette.
     ///
     /// Series values are treated as `0..n` indices after rounding/clamping.
-    pub fn with_series_fills(mut self, series: ColId, fills: Vec<Brush>) -> Self {
+    pub fn with_series_fills(mut self, series: ColumnId, fills: Vec<Brush>) -> Self {
         self.series = Some(series);
         self.series_fills = Some(fills);
         self

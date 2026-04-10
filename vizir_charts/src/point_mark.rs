@@ -8,7 +8,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use peniko::Brush;
-use vizir_core::{ColId, InputRef, Mark, MarkId, TableId};
+use vizir_core::{ColumnId, InputRef, Mark, MarkId, TableId};
 
 use crate::scale::ScaleContinuous;
 use crate::symbol::Symbol;
@@ -22,9 +22,9 @@ pub struct PointMarkSpec {
     /// Source table id.
     pub table: TableId,
     /// Column for x values.
-    pub x: ColId,
+    pub x: ColumnId,
     /// Column for y values.
-    pub y: ColId,
+    pub y: ColumnId,
     /// X scale mapping data x into scene x.
     pub x_scale: ScaleContinuous,
     /// Y scale mapping data y into scene y.
@@ -43,8 +43,8 @@ impl PointMarkSpec {
     /// Creates a point mark spec with a size of 6 and a default fill (`Brush::default()`).
     pub fn new(
         table: TableId,
-        x: ColId,
-        y: ColId,
+        x: ColumnId,
+        y: ColumnId,
         x_scale: ScaleContinuous,
         y_scale: ScaleContinuous,
     ) -> Self {

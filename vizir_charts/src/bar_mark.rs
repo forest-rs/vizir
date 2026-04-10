@@ -8,7 +8,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use peniko::Brush;
-use vizir_core::{ColId, InputRef, Mark, MarkId, TableId};
+use vizir_core::{ColumnId, InputRef, Mark, MarkId, TableId};
 
 use crate::scale::{ScaleBand, ScaleContinuous};
 
@@ -21,7 +21,7 @@ pub struct BarMarkSpec {
     /// Source table id.
     pub table: TableId,
     /// Column for bar values.
-    pub y: ColId,
+    pub y: ColumnId,
     /// Band scale used for bar positions along x.
     pub band: ScaleBand,
     /// Linear scale used for bar positions along y.
@@ -36,7 +36,7 @@ pub struct BarMarkSpec {
 
 impl BarMarkSpec {
     /// Creates a bar mark spec with `baseline = 0` and a default fill (`Brush::default()`).
-    pub fn new(table: TableId, y: ColId, band: ScaleBand, y_scale: ScaleContinuous) -> Self {
+    pub fn new(table: TableId, y: ColumnId, band: ScaleBand, y_scale: ScaleContinuous) -> Self {
         Self {
             table,
             y,

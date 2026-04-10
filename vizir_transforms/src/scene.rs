@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 
 use hashbrown::hash_map::Entry;
 use hashbrown::{HashMap, HashSet};
-use vizir_core::{ColId, Scene, Table, TableId};
+use vizir_core::{ColumnId, Scene, Table, TableId};
 
 use crate::Program;
 use crate::program::{ExecutionError, ProgramOutput};
@@ -54,7 +54,7 @@ impl Program {
             if table.data.is_none() {
                 return Err(SceneExecutionError::MissingData(table_id));
             }
-            let mut columns: Vec<ColId> = cols.into_iter().collect();
+            let mut columns: Vec<ColumnId> = cols.into_iter().collect();
             columns.sort_by_key(|c| c.0);
             let frame = TableFrame::from_table(table, columns).map_err(|err| {
                 SceneExecutionError::FrameError {
@@ -82,8 +82,8 @@ impl Program {
     }
 }
 
-fn required_input_columns(transforms: &[Transform]) -> HashMap<TableId, HashSet<ColId>> {
-    let mut out: HashMap<TableId, HashSet<ColId>> = HashMap::new();
+fn required_input_columns(transforms: &[Transform]) -> HashMap<TableId, HashSet<ColumnId>> {
+    let mut out: HashMap<TableId, HashSet<ColumnId>> = HashMap::new();
     let mut produced: HashSet<TableId> = HashSet::new();
 
     for t in transforms {
@@ -219,7 +219,7 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
-    use vizir_core::{ColId, Scene, Table, TableData, TableId};
+    use vizir_core::{ColumnId, Scene, Table, TableData, TableId};
 
     use super::*;
     use crate::transform::Transform;
@@ -235,10 +235,10 @@ mod tests {
             self.a.len().min(self.b.len())
         }
 
-        fn f64(&self, row: usize, col: ColId) -> Option<f64> {
+        fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
             match col {
-                ColId(0) => self.a.get(row).copied(),
-                ColId(1) => self.b.get(row).copied(),
+                ColumnId(0) => self.a.get(row).copied(),
+                ColumnId(1) => self.b.get(row).copied(),
                 _ => None,
             }
         }
@@ -262,7 +262,7 @@ mod tests {
         p.push(Transform::Project {
             input: source_id,
             output: out_id,
-            columns: vec![ColId(0)],
+            columns: vec![ColumnId(0)],
         });
 
         // First run: insert the output table.

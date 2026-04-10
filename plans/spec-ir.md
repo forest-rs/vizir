@@ -186,7 +186,7 @@ pub struct EncodingSet {
 }
 
 pub struct ChannelDef {
-    pub field: ColId,
+    pub field: ColumnId,
     pub kind: FieldKind,
     pub aggregate: Option<AggregateOp>,
     pub title: Option<String>,

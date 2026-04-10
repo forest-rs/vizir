@@ -9,7 +9,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use hashbrown::HashMap;
-use vizir_core::{ColId, TableId};
+use vizir_core::{ColumnId, TableId};
 
 use crate::table::TableFrame;
 use crate::transform::{AggregateOp, SortOrder, StackOffset, Transform};
@@ -24,7 +24,7 @@ pub enum ExecutionError {
         /// The table that was missing a required column.
         table: TableId,
         /// The missing column id.
-        col: ColId,
+        col: ColumnId,
     },
     /// A transform is invalid (e.g. empty column set).
     InvalidTransform,
@@ -759,7 +759,7 @@ fn get_frame<'a>(
 fn require_columns(
     table: TableId,
     frame: &TableFrame,
-    cols: &[ColId],
+    cols: &[ColumnId],
 ) -> Result<(), ExecutionError> {
     for &c in cols {
         if frame.column_index(c).is_none() {
@@ -802,7 +802,7 @@ mod tests {
     fn frame() -> TableFrame {
         TableFrame {
             row_keys: vec![10, 11, 12, 13],
-            columns: vec![ColId(0), ColId(1)],
+            columns: vec![ColumnId(0), ColumnId(1)],
             data: vec![vec![1.0, 2.0, 3.0, 4.0], vec![10.0, 9.0, 8.0, 7.0]],
         }
     }
@@ -814,11 +814,11 @@ mod tests {
             input: TableId(1),
             output: TableId(2),
             predicate: Predicate {
-                col: ColId(0),
+                col: ColumnId(0),
                 op: CompareOp::Ge,
                 value: 3.0,
             },
-            columns: vec![ColId(0), ColId(1)],
+            columns: vec![ColumnId(0), ColumnId(1)],
         });
         let inputs: HashMap<_, _> = [(TableId(1), frame())].into_iter().collect();
         let out = p.execute(&inputs).unwrap();
@@ -833,12 +833,12 @@ mod tests {
         p.push(Transform::Project {
             input: TableId(1),
             output: TableId(2),
-            columns: vec![ColId(1)],
+            columns: vec![ColumnId(1)],
         });
         let inputs: HashMap<_, _> = [(TableId(1), frame())].into_iter().collect();
         let out = p.execute(&inputs).unwrap();
         let t = out.tables.get(&TableId(2)).unwrap();
-        assert_eq!(t.columns, vec![ColId(1)]);
+        assert_eq!(t.columns, vec![ColumnId(1)]);
         assert_eq!(t.data.len(), 1);
         assert_eq!(t.data[0], vec![10.0, 9.0, 8.0, 7.0]);
     }
@@ -849,9 +849,9 @@ mod tests {
         p.push(Transform::Sort {
             input: TableId(1),
             output: TableId(2),
-            by: ColId(1),
+            by: ColumnId(1),
             order: SortOrder::Asc,
-            columns: vec![ColId(0), ColId(1)],
+            columns: vec![ColumnId(0), ColumnId(1)],
         });
         let inputs: HashMap<_, _> = [(TableId(1), frame())].into_iter().collect();
         let out = p.execute(&inputs).unwrap();
@@ -867,11 +867,11 @@ mod tests {
         p.push(Transform::Aggregate {
             input: TableId(1),
             output: TableId(2),
-            group_by: vec![ColId(0)],
+            group_by: vec![ColumnId(0)],
             fields: vec![AggregateField {
                 op: AggregateOp::Sum,
-                input: ColId(1),
-                output: ColId(2),
+                input: ColumnId(1),
+                output: ColumnId(2),
             }],
         });
 
@@ -879,7 +879,7 @@ mod tests {
             TableId(1),
             TableFrame {
                 row_keys: vec![1, 2, 3, 4, 5],
-                columns: vec![ColId(0), ColId(1)],
+                columns: vec![ColumnId(0), ColumnId(1)],
                 data: vec![
                     vec![0.0, 0.0, 1.0, 1.0, 1.0], // group key
                     vec![1.0, 2.0, 3.0, 4.0, 5.0], // values
@@ -891,7 +891,7 @@ mod tests {
 
         let out = p.execute(&inputs).unwrap();
         let t = out.tables.get(&TableId(2)).unwrap();
-        assert_eq!(t.columns, vec![ColId(0), ColId(2)]);
+        assert_eq!(t.columns, vec![ColumnId(0), ColumnId(2)]);
         assert_eq!(t.data.len(), 2);
         assert_eq!(t.data[0], vec![0.0, 1.0]);
         assert_eq!(t.data[1], vec![3.0, 12.0]);
@@ -903,17 +903,17 @@ mod tests {
         p.push(Transform::Bin {
             input: TableId(1),
             output: TableId(2),
-            input_col: ColId(0),
-            output_start: ColId(2),
+            input_col: ColumnId(0),
+            output_start: ColumnId(2),
             step: 2.0,
-            columns: vec![ColId(0)],
+            columns: vec![ColumnId(0)],
         });
 
         let inputs: HashMap<_, _> = [(
             TableId(1),
             TableFrame {
                 row_keys: vec![1, 2, 3, 4],
-                columns: vec![ColId(0)],
+                columns: vec![ColumnId(0)],
                 data: vec![vec![3.7, 6.2, 5.9, 8.0]],
             },
         )]
@@ -922,7 +922,7 @@ mod tests {
 
         let out = p.execute(&inputs).unwrap();
         let t = out.tables.get(&TableId(2)).unwrap();
-        assert_eq!(t.columns, vec![ColId(0), ColId(2)]);
+        assert_eq!(t.columns, vec![ColumnId(0), ColumnId(2)]);
         assert_eq!(t.data[0], vec![3.7, 6.2, 5.9, 8.0]);
         assert_eq!(t.data[1], vec![2.0, 6.0, 4.0, 8.0]);
         assert_eq!(t.row_keys, vec![1, 2, 3, 4]);
@@ -934,21 +934,21 @@ mod tests {
         p.push(Transform::Stack {
             input: TableId(1),
             output: TableId(2),
-            group_by: vec![ColId(0)],
+            group_by: vec![ColumnId(0)],
             offset: StackOffset::Zero,
             sort_by: None,
             sort_order: SortOrder::Asc,
-            field: ColId(2),
-            output_start: ColId(3),
-            output_end: ColId(4),
-            columns: vec![ColId(0), ColId(1), ColId(2)],
+            field: ColumnId(2),
+            output_start: ColumnId(3),
+            output_end: ColumnId(4),
+            columns: vec![ColumnId(0), ColumnId(1), ColumnId(2)],
         });
 
         let inputs: HashMap<_, _> = [(
             TableId(1),
             TableFrame {
                 row_keys: vec![10, 11, 12, 13, 14],
-                columns: vec![ColId(0), ColId(1), ColId(2)],
+                columns: vec![ColumnId(0), ColumnId(1), ColumnId(2)],
                 data: vec![
                     vec![0.0, 0.0, 0.0, 1.0, 1.0],  // group key
                     vec![0.0, 1.0, 2.0, 0.0, 1.0],  // "series" id (not used by stack)
@@ -963,7 +963,13 @@ mod tests {
         let t = out.tables.get(&TableId(2)).unwrap();
         assert_eq!(
             t.columns,
-            vec![ColId(0), ColId(1), ColId(2), ColId(3), ColId(4)]
+            vec![
+                ColumnId(0),
+                ColumnId(1),
+                ColumnId(2),
+                ColumnId(3),
+                ColumnId(4)
+            ]
         );
 
         // Group 0.0:
@@ -998,17 +1004,17 @@ mod tests {
             offset: StackOffset::Zero,
             sort_by: None,
             sort_order: SortOrder::Asc,
-            field: ColId(0),
-            output_start: ColId(1),
-            output_end: ColId(2),
-            columns: vec![ColId(0)],
+            field: ColumnId(0),
+            output_start: ColumnId(1),
+            output_end: ColumnId(2),
+            columns: vec![ColumnId(0)],
         });
 
         let inputs: HashMap<_, _> = [(
             TableId(1),
             TableFrame {
                 row_keys: vec![1, 2, 3],
-                columns: vec![ColId(0)],
+                columns: vec![ColumnId(0)],
                 data: vec![vec![1.0, 2.0, 3.0]],
             },
         )]
@@ -1027,21 +1033,21 @@ mod tests {
         p.push(Transform::Stack {
             input: TableId(1),
             output: TableId(2),
-            group_by: vec![ColId(0)],
+            group_by: vec![ColumnId(0)],
             offset: StackOffset::Zero,
             sort_by: None,
             sort_order: SortOrder::Asc,
-            field: ColId(1),
-            output_start: ColId(2),
-            output_end: ColId(3),
-            columns: vec![ColId(0), ColId(1)],
+            field: ColumnId(1),
+            output_start: ColumnId(2),
+            output_end: ColumnId(3),
+            columns: vec![ColumnId(0), ColumnId(1)],
         });
 
         let inputs: HashMap<_, _> = [(
             TableId(1),
             TableFrame {
                 row_keys: vec![1, 2, 3],
-                columns: vec![ColId(0), ColId(1)],
+                columns: vec![ColumnId(0), ColumnId(1)],
                 data: vec![vec![0.0, 0.0, 0.0], vec![1.0, f64::NAN, 2.0]],
             },
         )]
@@ -1066,28 +1072,28 @@ mod tests {
         p.push(Transform::Sort {
             input: TableId(1),
             output: TableId(2),
-            by: ColId(1),
+            by: ColumnId(1),
             order: SortOrder::Asc,
-            columns: vec![ColId(0), ColId(1), ColId(2)],
+            columns: vec![ColumnId(0), ColumnId(1), ColumnId(2)],
         });
         p.push(Transform::Stack {
             input: TableId(2),
             output: TableId(3),
-            group_by: vec![ColId(0)],
+            group_by: vec![ColumnId(0)],
             offset: StackOffset::Zero,
             sort_by: None,
             sort_order: SortOrder::Asc,
-            field: ColId(2),
-            output_start: ColId(3),
-            output_end: ColId(4),
-            columns: vec![ColId(0), ColId(1), ColId(2)],
+            field: ColumnId(2),
+            output_start: ColumnId(3),
+            output_end: ColumnId(4),
+            columns: vec![ColumnId(0), ColumnId(1), ColumnId(2)],
         });
 
         let inputs: HashMap<_, _> = [(
             TableId(1),
             TableFrame {
                 row_keys: vec![10, 11, 12],
-                columns: vec![ColId(0), ColId(1), ColId(2)],
+                columns: vec![ColumnId(0), ColumnId(1), ColumnId(2)],
                 data: vec![
                     vec![0.0, 0.0, 0.0],    // group key
                     vec![2.0, 1.0, 3.0],    // sort key
@@ -1114,21 +1120,21 @@ mod tests {
         p.push(Transform::Stack {
             input: TableId(1),
             output: TableId(2),
-            group_by: vec![ColId(0)],
+            group_by: vec![ColumnId(0)],
             offset: StackOffset::Zero,
-            sort_by: Some(ColId(1)),
+            sort_by: Some(ColumnId(1)),
             sort_order: SortOrder::Asc,
-            field: ColId(2),
-            output_start: ColId(3),
-            output_end: ColId(4),
-            columns: vec![ColId(0), ColId(1), ColId(2)],
+            field: ColumnId(2),
+            output_start: ColumnId(3),
+            output_end: ColumnId(4),
+            columns: vec![ColumnId(0), ColumnId(1), ColumnId(2)],
         });
 
         let inputs: HashMap<_, _> = [(
             TableId(1),
             TableFrame {
                 row_keys: vec![10, 11, 12],
-                columns: vec![ColId(0), ColId(1), ColId(2)],
+                columns: vec![ColumnId(0), ColumnId(1), ColumnId(2)],
                 data: vec![
                     vec![0.0, 0.0, 0.0],    // group key
                     vec![2.0, 1.0, 3.0],    // sort key
@@ -1156,21 +1162,21 @@ mod tests {
         p.push(Transform::Stack {
             input: TableId(1),
             output: TableId(2),
-            group_by: vec![ColId(0)],
+            group_by: vec![ColumnId(0)],
             offset: StackOffset::Normalize,
-            sort_by: Some(ColId(1)),
+            sort_by: Some(ColumnId(1)),
             sort_order: SortOrder::Asc,
-            field: ColId(2),
-            output_start: ColId(3),
-            output_end: ColId(4),
-            columns: vec![ColId(0), ColId(1), ColId(2)],
+            field: ColumnId(2),
+            output_start: ColumnId(3),
+            output_end: ColumnId(4),
+            columns: vec![ColumnId(0), ColumnId(1), ColumnId(2)],
         });
 
         let inputs: HashMap<_, _> = [(
             TableId(1),
             TableFrame {
                 row_keys: vec![10, 11],
-                columns: vec![ColId(0), ColId(1), ColId(2)],
+                columns: vec![ColumnId(0), ColumnId(1), ColumnId(2)],
                 data: vec![
                     vec![0.0, 0.0], // group key
                     vec![0.0, 1.0], // sort key
@@ -1193,14 +1199,14 @@ mod tests {
         p.push(Transform::Stack {
             input: TableId(1),
             output: TableId(2),
-            group_by: vec![ColId(0)],
+            group_by: vec![ColumnId(0)],
             offset: StackOffset::Center,
-            sort_by: Some(ColId(1)),
+            sort_by: Some(ColumnId(1)),
             sort_order: SortOrder::Asc,
-            field: ColId(2),
-            output_start: ColId(3),
-            output_end: ColId(4),
-            columns: vec![ColId(0), ColId(1), ColId(2)],
+            field: ColumnId(2),
+            output_start: ColumnId(3),
+            output_end: ColumnId(4),
+            columns: vec![ColumnId(0), ColumnId(1), ColumnId(2)],
         });
 
         // Two groups: sum(abs)=4 and sum(abs)=2. Global max=4.
@@ -1208,7 +1214,7 @@ mod tests {
             TableId(1),
             TableFrame {
                 row_keys: vec![10, 11, 12, 13],
-                columns: vec![ColId(0), ColId(1), ColId(2)],
+                columns: vec![ColumnId(0), ColumnId(1), ColumnId(2)],
                 data: vec![
                     vec![0.0, 0.0, 1.0, 1.0], // group key
                     vec![0.0, 1.0, 0.0, 1.0], // sort key
@@ -1241,14 +1247,14 @@ mod tests {
         p.push(Transform::Stack {
             input: TableId(1),
             output: TableId(2),
-            group_by: vec![ColId(0)], // x
+            group_by: vec![ColumnId(0)], // x
             offset: StackOffset::Wiggle,
-            sort_by: Some(ColId(1)), // series
+            sort_by: Some(ColumnId(1)), // series
             sort_order: SortOrder::Asc,
-            field: ColId(2), // y
-            output_start: ColId(3),
-            output_end: ColId(4),
-            columns: vec![ColId(0), ColId(1), ColId(2)],
+            field: ColumnId(2), // y
+            output_start: ColumnId(3),
+            output_end: ColumnId(4),
+            columns: vec![ColumnId(0), ColumnId(1), ColumnId(2)],
         });
 
         // 2 series across 3 x slices.
@@ -1260,7 +1266,7 @@ mod tests {
             TableId(1),
             TableFrame {
                 row_keys: vec![10, 11, 12, 13, 14, 15],
-                columns: vec![ColId(0), ColId(1), ColId(2)],
+                columns: vec![ColumnId(0), ColumnId(1), ColumnId(2)],
                 data: vec![
                     vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0], // x
                     vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0], // series

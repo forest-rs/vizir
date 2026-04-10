@@ -13,7 +13,7 @@ use alloc::vec::Vec;
 #[cfg(not(feature = "std"))]
 use crate::float::FloatExt;
 
-use vizir_core::{ColId, TableData};
+use vizir_core::{ColumnId, TableData};
 
 use crate::time;
 
@@ -605,7 +605,7 @@ impl ScaleTimeSpec {
 /// Infer a `(min, max)` domain for a numeric column.
 ///
 /// Non-finite values are ignored. Returns `None` if no finite values are present.
-pub fn infer_domain_f64(data: &dyn TableData, col: ColId) -> Option<(f64, f64)> {
+pub fn infer_domain_f64(data: &dyn TableData, col: ColumnId) -> Option<(f64, f64)> {
     let mut min = f64::INFINITY;
     let mut max = f64::NEG_INFINITY;
     let n = data.row_count();

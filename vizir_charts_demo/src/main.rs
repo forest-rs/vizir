@@ -16,7 +16,7 @@ use vizir_charts::{
     StackedAreaMarkSpec, StackedBarChartSpec, StrokeStyle, Symbol, TextMarkSpec, TitleSpec,
     UnitSpec,
 };
-use vizir_core::{ColId, Mark, Scene, Table, TableData, TableId};
+use vizir_core::{ColumnId, Mark, Scene, Table, TableData, TableId};
 use vizir_transforms::{
     AggregateField, AggregateOp, CompareOp, Predicate, Program, StackOffset, Transform,
 };
@@ -31,9 +31,9 @@ impl TableData for BarValues {
         self.y.len()
     }
 
-    fn f64(&self, row: usize, col: ColId) -> Option<f64> {
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
-            ColId(0) => self.y.get(row).copied(),
+            ColumnId(0) => self.y.get(row).copied(),
             _ => None,
         }
     }
@@ -85,8 +85,8 @@ fn log_time_axes_demo() -> html::HtmlSection {
     // - a line/point series sharing those scale instances
     let mut scene = Scene::new();
     let table_id = TableId(90);
-    let x_col = ColId(0);
-    let y_col = ColId(1);
+    let x_col = ColumnId(0);
+    let y_col = ColumnId(1);
 
     let measurer = HeuristicTextMeasurer;
     let plot_size = Size {
@@ -191,8 +191,8 @@ fn transforms_demo() -> html::HtmlSection {
     let filtered_id = TableId(21);
     let sorted_id = TableId(22);
 
-    let x_col = ColId(0);
-    let y_col = ColId(1);
+    let x_col = ColumnId(0);
+    let y_col = ColumnId(1);
 
     // Input table.
     let x = vec![0.0, 2.0, 5.0, 7.0, 9.0, 10.0];
@@ -321,10 +321,10 @@ impl TableData for CategoryValues {
         self.cat.len().min(self.v.len())
     }
 
-    fn f64(&self, row: usize, col: ColId) -> Option<f64> {
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
-            ColId(0) => self.cat.get(row).copied(),
-            ColId(1) => self.v.get(row).copied(),
+            ColumnId(0) => self.cat.get(row).copied(),
+            ColumnId(1) => self.v.get(row).copied(),
             _ => None,
         }
     }
@@ -338,9 +338,9 @@ fn aggregate_demo() -> html::HtmlSection {
     let mut scene = Scene::new();
     let source_id = TableId(30);
     let agg_id = TableId(31);
-    let cat_col = ColId(0);
-    let val_col = ColId(1);
-    let sum_col = ColId(2);
+    let cat_col = ColumnId(0);
+    let val_col = ColumnId(1);
+    let sum_col = ColumnId(2);
 
     let cat = vec![0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 3.0];
     let v = vec![1.0, 2.0, 3.0, 4.0, 5.0, 2.0, 1.0, 6.0];
@@ -462,8 +462,8 @@ fn lowered_spec_demo() -> html::HtmlSection {
     // The same shape as `aggregate_demo`, but lowered from an authored unit spec.
     let mut scene = Scene::new();
     let source_id = TableId(130);
-    let cat_col = ColId(0);
-    let val_col = ColId(1);
+    let cat_col = ColumnId(0);
+    let val_col = ColumnId(1);
 
     let cat = vec![0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 3.0];
     let v = vec![1.0, 2.0, 3.0, 4.0, 5.0, 2.0, 1.0, 6.0];
@@ -515,9 +515,9 @@ impl TableData for HistogramValues {
         self.v.len()
     }
 
-    fn f64(&self, row: usize, col: ColId) -> Option<f64> {
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
-            ColId(0) => self.v.get(row).copied(),
+            ColumnId(0) => self.v.get(row).copied(),
             _ => None,
         }
     }
@@ -531,9 +531,9 @@ fn histogram_demo() -> html::HtmlSection {
     let agg_id = TableId(42);
     let sorted_id = TableId(43);
 
-    let v_col = ColId(0);
-    let bin0_col = ColId(1);
-    let count_col = ColId(2);
+    let v_col = ColumnId(0);
+    let bin0_col = ColumnId(1);
+    let count_col = ColumnId(2);
 
     let step = 2.0_f64;
     let values = vec![
@@ -685,11 +685,11 @@ impl TableData for StackValues {
         self.cat.len().min(self.series.len()).min(self.v.len())
     }
 
-    fn f64(&self, row: usize, col: ColId) -> Option<f64> {
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
-            ColId(0) => self.cat.get(row).copied(),
-            ColId(1) => self.series.get(row).copied(),
-            ColId(2) => self.v.get(row).copied(),
+            ColumnId(0) => self.cat.get(row).copied(),
+            ColumnId(1) => self.series.get(row).copied(),
+            ColumnId(2) => self.v.get(row).copied(),
             _ => None,
         }
     }
@@ -704,11 +704,11 @@ fn stack_demo() -> html::HtmlSection {
     let source_id = TableId(50);
     let stacked_id = TableId(51);
 
-    let cat_col = ColId(0);
-    let series_col = ColId(1);
-    let val_col = ColId(2);
-    let y0_col = ColId(3);
-    let y1_col = ColId(4);
+    let cat_col = ColumnId(0);
+    let series_col = ColumnId(1);
+    let val_col = ColumnId(2);
+    let y0_col = ColumnId(3);
+    let y1_col = ColumnId(4);
 
     // Four categories (0..3), three series (0..2).
     // Includes a negative value to exercise downward stacking.
@@ -875,11 +875,11 @@ impl TableData for StackedAreaSourceValues {
         self.x.len().min(self.series.len()).min(self.y.len())
     }
 
-    fn f64(&self, row: usize, col: ColId) -> Option<f64> {
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
-            ColId(0) => self.x.get(row).copied(),
-            ColId(1) => self.series.get(row).copied(),
-            ColId(2) => self.y.get(row).copied(),
+            ColumnId(0) => self.x.get(row).copied(),
+            ColumnId(1) => self.series.get(row).copied(),
+            ColumnId(2) => self.y.get(row).copied(),
             _ => None,
         }
     }
@@ -895,11 +895,11 @@ fn stacked_area_demo() -> html::HtmlSection {
     let s1_id = TableId(63);
     let s2_id = TableId(64);
 
-    let x_col = ColId(0);
-    let series_col = ColId(1);
-    let y_col = ColId(2);
-    let y0_col = ColId(3);
-    let y1_col = ColId(4);
+    let x_col = ColumnId(0);
+    let series_col = ColumnId(1);
+    let y_col = ColumnId(2);
+    let y0_col = ColumnId(3);
+    let y1_col = ColumnId(4);
 
     // 6 x positions, 3 series each (18 rows total).
     // Data is arranged in x-major order so our downstream per-series sorts are deterministic.
@@ -1083,11 +1083,11 @@ impl TableData for PercentStackValues {
         self.cat.len().min(self.series.len()).min(self.v.len())
     }
 
-    fn f64(&self, row: usize, col: ColId) -> Option<f64> {
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
-            ColId(0) => self.cat.get(row).copied(),
-            ColId(1) => self.series.get(row).copied(),
-            ColId(2) => self.v.get(row).copied(),
+            ColumnId(0) => self.cat.get(row).copied(),
+            ColumnId(1) => self.series.get(row).copied(),
+            ColumnId(2) => self.v.get(row).copied(),
             _ => None,
         }
     }
@@ -1099,11 +1099,11 @@ fn percent_stack_demo() -> html::HtmlSection {
     let source_id = TableId(70);
     let stacked_id = TableId(71);
 
-    let cat_col = ColId(0);
-    let series_col = ColId(1);
-    let val_col = ColId(2);
-    let y0_col = ColId(3);
-    let y1_col = ColId(4);
+    let cat_col = ColumnId(0);
+    let series_col = ColumnId(1);
+    let val_col = ColumnId(2);
+    let y0_col = ColumnId(3);
+    let y1_col = ColumnId(4);
 
     let cat = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 3.0, 3.0, 3.0];
     let series = vec![0.0, 1.0, 2.0, 0.0, 1.0, 2.0, 0.0, 1.0, 2.0, 0.0, 1.0, 2.0];
@@ -1219,11 +1219,11 @@ impl TableData for StreamValues {
         self.x.len().min(self.series.len()).min(self.y.len())
     }
 
-    fn f64(&self, row: usize, col: ColId) -> Option<f64> {
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
-            ColId(0) => self.x.get(row).copied(),
-            ColId(1) => self.series.get(row).copied(),
-            ColId(2) => self.y.get(row).copied(),
+            ColumnId(0) => self.x.get(row).copied(),
+            ColumnId(1) => self.series.get(row).copied(),
+            ColumnId(2) => self.y.get(row).copied(),
             _ => None,
         }
     }
@@ -1239,11 +1239,11 @@ fn streamgraph_demo() -> html::HtmlSection {
         let s1_id = TableId(83);
         let s2_id = TableId(84);
 
-        let x_col = ColId(0);
-        let series_col = ColId(1);
-        let y_col = ColId(2);
-        let y0_col = ColId(3);
-        let y1_col = ColId(4);
+        let x_col = ColumnId(0);
+        let series_col = ColumnId(1);
+        let y_col = ColumnId(2);
+        let y0_col = ColumnId(3);
+        let y1_col = ColumnId(4);
 
         let x_vals: Vec<f64> = (0..=8).map(|v| v as f64).collect();
         let series_vals = [0.0, 1.0, 2.0];
@@ -1457,10 +1457,10 @@ impl TableData for AngleValues {
         self.x.len().min(self.y.len())
     }
 
-    fn f64(&self, row: usize, col: ColId) -> Option<f64> {
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
-            ColId(0) => self.x.get(row).copied(),
-            ColId(1) => self.y.get(row).copied(),
+            ColumnId(0) => self.x.get(row).copied(),
+            ColumnId(1) => self.y.get(row).copied(),
             _ => None,
         }
     }
@@ -1470,8 +1470,8 @@ fn axis_label_angle_demo() -> html::HtmlSection {
     // Demonstrates rotated axis labels and long label formatting.
     let mut scene = Scene::new();
     let table_id = TableId(6);
-    let x_col = ColId(0);
-    let y_col = ColId(1);
+    let x_col = ColumnId(0);
+    let y_col = ColumnId(1);
 
     let measurer = HeuristicTextMeasurer;
     let plot_size = Size {
@@ -1746,7 +1746,7 @@ fn bar_demo() -> html::HtmlSection {
     // A minimal “bar chart”: one rect mark per row with height driven by a numeric column.
     let mut scene = Scene::new();
     let table_id = TableId(1);
-    let y_col = ColId(0);
+    let y_col = ColumnId(0);
 
     let measurer = HeuristicTextMeasurer;
     let plot_size = Size {
@@ -1882,10 +1882,10 @@ impl TableData for ScatterValues {
         self.x.len().min(self.y.len())
     }
 
-    fn f64(&self, row: usize, col: ColId) -> Option<f64> {
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
-            ColId(0) => self.x.get(row).copied(),
-            ColId(1) => self.y.get(row).copied(),
+            ColumnId(0) => self.x.get(row).copied(),
+            ColumnId(1) => self.y.get(row).copied(),
             _ => None,
         }
     }
@@ -1895,8 +1895,8 @@ fn scatter_demo() -> html::HtmlSection {
     // A minimal scatter plot: one rect mark per row with x/y driven by two numeric columns.
     let mut scene = Scene::new();
     let table_id = TableId(2);
-    let x_col = ColId(0);
-    let y_col = ColId(1);
+    let x_col = ColumnId(0);
+    let y_col = ColumnId(1);
 
     let measurer = HeuristicTextMeasurer;
     let plot_size = Size {
@@ -2008,8 +2008,8 @@ fn line_demo() -> html::HtmlSection {
     // A minimal line chart: a single `Path` mark derived from a table.
     let mut scene = Scene::new();
     let table_id = TableId(3);
-    let x_col = ColId(0);
-    let y_col = ColId(1);
+    let x_col = ColumnId(0);
+    let y_col = ColumnId(1);
 
     let measurer = HeuristicTextMeasurer;
     let plot_size = Size {
@@ -2120,8 +2120,8 @@ fn area_demo() -> html::HtmlSection {
     // A minimal area chart: a filled area with an optional stroked outline.
     let mut scene = Scene::new();
     let table_id = TableId(4);
-    let x_col = ColId(0);
-    let y_col = ColId(1);
+    let x_col = ColumnId(0);
+    let y_col = ColumnId(1);
 
     let measurer = HeuristicTextMeasurer;
     let plot_size = Size {

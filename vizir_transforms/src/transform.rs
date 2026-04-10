@@ -7,7 +7,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
-use vizir_core::{ColId, TableId};
+use vizir_core::{ColumnId, TableId};
 
 /// Stack baseline offset mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,9 +57,9 @@ pub struct AggregateField {
     /// Operation to apply.
     pub op: AggregateOp,
     /// Input column.
-    pub input: ColId,
+    pub input: ColumnId,
     /// Output column id.
-    pub output: ColId,
+    pub output: ColumnId,
 }
 
 /// Sorting order for [`Transform::Sort`].
@@ -94,7 +94,7 @@ pub enum CompareOp {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Predicate {
     /// Column to read.
-    pub col: ColId,
+    pub col: ColumnId,
     /// Comparison operator.
     pub op: CompareOp,
     /// Right-hand constant.
@@ -127,7 +127,7 @@ pub enum Transform {
         /// Predicate to apply per row.
         predicate: Predicate,
         /// Columns to carry through to the output table.
-        columns: Vec<ColId>,
+        columns: Vec<ColumnId>,
     },
     /// Select a subset of columns.
     Project {
@@ -136,7 +136,7 @@ pub enum Transform {
         /// Output table.
         output: TableId,
         /// Columns to include in the output table.
-        columns: Vec<ColId>,
+        columns: Vec<ColumnId>,
     },
     /// Reorder rows by a numeric key column.
     Sort {
@@ -145,11 +145,11 @@ pub enum Transform {
         /// Output table.
         output: TableId,
         /// Column used as the sort key.
-        by: ColId,
+        by: ColumnId,
         /// Sort order.
         order: SortOrder,
         /// Columns to carry through to the output table.
-        columns: Vec<ColId>,
+        columns: Vec<ColumnId>,
     },
     /// Group rows by one or more key columns and compute aggregates.
     ///
@@ -160,7 +160,7 @@ pub enum Transform {
         /// Output table.
         output: TableId,
         /// Group-by key columns.
-        group_by: Vec<ColId>,
+        group_by: Vec<ColumnId>,
         /// Aggregated fields.
         fields: Vec<AggregateField>,
     },
@@ -173,13 +173,13 @@ pub enum Transform {
         /// Output table.
         output: TableId,
         /// Input column to bin.
-        input_col: ColId,
+        input_col: ColumnId,
         /// Output column containing the bin start value.
-        output_start: ColId,
+        output_start: ColumnId,
         /// Bin step size in data units.
         step: f64,
         /// Columns to carry through to the output table.
-        columns: Vec<ColId>,
+        columns: Vec<ColumnId>,
     },
     /// Compute a "zero" stack layout, writing start/end offsets per row.
     ///
@@ -197,23 +197,23 @@ pub enum Transform {
         /// Output table.
         output: TableId,
         /// Group-by key columns defining independent stacks.
-        group_by: Vec<ColId>,
+        group_by: Vec<ColumnId>,
         /// Baseline offset mode.
         offset: StackOffset,
         /// Optional per-group sort key.
         ///
         /// This corresponds to Vega's `sort` parameter (in a v0 form). When set, rows are stacked
         /// in sorted order within each group, but the output table row order is preserved.
-        sort_by: Option<ColId>,
+        sort_by: Option<ColumnId>,
         /// Sort order when `sort_by` is set.
         sort_order: SortOrder,
         /// Input column providing the value to accumulate.
-        field: ColId,
+        field: ColumnId,
         /// Output column containing the stack start offset (default `y0` in Vega).
-        output_start: ColId,
+        output_start: ColumnId,
         /// Output column containing the stack end offset (default `y1` in Vega).
-        output_end: ColId,
+        output_end: ColumnId,
         /// Columns to carry through to the output table.
-        columns: Vec<ColId>,
+        columns: Vec<ColumnId>,
     },
 }

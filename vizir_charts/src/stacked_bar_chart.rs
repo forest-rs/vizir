@@ -12,7 +12,7 @@ use alloc::string::String;
 
 use peniko::Brush;
 use peniko::color::palette::css;
-use vizir_core::{ColId, Mark, TableId};
+use vizir_core::{ColumnId, Mark, TableId};
 use vizir_transforms::{Program, SortOrder, StackOffset, Transform};
 
 use crate::LegendItem;
@@ -35,19 +35,19 @@ pub struct StackedBarChartSpec {
     /// Output table (stack result).
     pub output: TableId,
     /// Category (stack group key).
-    pub category: ColId,
+    pub category: ColumnId,
     /// Series column (carried through, and can be used for fill palettes).
-    pub series: ColId,
+    pub series: ColumnId,
     /// Value column to stack.
-    pub value: ColId,
+    pub value: ColumnId,
     /// Output y0 column.
-    pub y0: ColId,
+    pub y0: ColumnId,
     /// Output y1 column.
-    pub y1: ColId,
+    pub y1: ColumnId,
     /// Optional per-group sort key for stacking.
     ///
     /// Default: `Some(series)` so stacked segment order is stable.
-    pub stack_sort_by: Option<ColId>,
+    pub stack_sort_by: Option<ColumnId>,
     /// Sort order for `stack_sort_by`.
     ///
     /// Default: `Asc`.
@@ -63,11 +63,11 @@ impl StackedBarChartSpec {
     pub fn new(
         input: TableId,
         output: TableId,
-        category: ColId,
-        series: ColId,
-        value: ColId,
-        y0: ColId,
-        y1: ColId,
+        category: ColumnId,
+        series: ColumnId,
+        value: ColumnId,
+        y0: ColumnId,
+        y1: ColumnId,
     ) -> Self {
         Self {
             input,
@@ -84,7 +84,7 @@ impl StackedBarChartSpec {
     }
 
     /// Sets the stacking sort key (Vega `stack.sort`).
-    pub fn with_stack_sort_by(mut self, sort_by: ColId, order: SortOrder) -> Self {
+    pub fn with_stack_sort_by(mut self, sort_by: ColumnId, order: SortOrder) -> Self {
         self.stack_sort_by = Some(sort_by);
         self.stack_sort_order = order;
         self

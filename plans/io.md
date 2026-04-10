@@ -45,7 +45,7 @@ Core rule: keep IO/backends as separate adapter crates.
 ### M1: Arrow adapter
 
 - Implement `TableData` over Arrow arrays for numeric columns.
-- Define a stable mapping from column names → `ColId` (likely an interner in chart-layer code).
+- Define a stable mapping from column names → `ColumnId` (likely an interner in chart-layer code).
 
 ### M2: DataFusion executor (optional)
 

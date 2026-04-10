@@ -12,7 +12,7 @@ use alloc::string::String;
 
 use peniko::Brush;
 use peniko::color::palette::css;
-use vizir_core::{ColId, TableId};
+use vizir_core::{ColumnId, TableId};
 use vizir_transforms::{CompareOp, Predicate, Program, SortOrder, StackOffset, Transform};
 
 use crate::LegendItem;
@@ -33,15 +33,15 @@ pub struct StackedAreaChartSpec {
     /// Output table (stack result).
     pub stacked: TableId,
     /// X column. This is used as the stack group key and the horizontal coordinate.
-    pub x: ColId,
+    pub x: ColumnId,
     /// Series column.
-    pub series: ColId,
+    pub series: ColumnId,
     /// Value column to stack.
-    pub value: ColId,
+    pub value: ColumnId,
     /// Output y0 column.
-    pub y0: ColId,
+    pub y0: ColumnId,
     /// Output y1 column.
-    pub y1: ColId,
+    pub y1: ColumnId,
     /// Baseline offset mode.
     ///
     /// Default: `StackOffset::Zero`.
@@ -53,11 +53,11 @@ impl StackedAreaChartSpec {
     pub fn new(
         input: TableId,
         stacked: TableId,
-        x: ColId,
-        series: ColId,
-        value: ColId,
-        y0: ColId,
-        y1: ColId,
+        x: ColumnId,
+        series: ColumnId,
+        value: ColumnId,
+        y0: ColumnId,
+        y1: ColumnId,
     ) -> Self {
         Self {
             input,

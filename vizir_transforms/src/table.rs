@@ -8,7 +8,7 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use vizir_core::{ColId, Table, TableData, TableId};
+use vizir_core::{ColumnId, Table, TableData, TableId};
 
 /// Errors returned when building or using a [`TableFrame`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,14 +29,14 @@ pub struct TableFrame {
     /// Stable keys for each row.
     pub row_keys: Vec<u64>,
     /// Column ids carried by this frame.
-    pub columns: Vec<ColId>,
+    pub columns: Vec<ColumnId>,
     /// Columnar numeric data, aligned to `columns`.
     pub data: Vec<Vec<f64>>,
 }
 
 impl TableFrame {
     /// Create an empty frame.
-    pub fn new(columns: Vec<ColId>) -> Result<Self, TableFrameError> {
+    pub fn new(columns: Vec<ColumnId>) -> Result<Self, TableFrameError> {
         if columns.is_empty() {
             return Err(TableFrameError::EmptyColumns);
         }
@@ -50,7 +50,7 @@ impl TableFrame {
     /// Extract a numeric frame from a `vizir_core` table.
     ///
     /// Missing values are represented as `NaN` in the output columns.
-    pub fn from_table(table: &Table, columns: Vec<ColId>) -> Result<Self, TableFrameError> {
+    pub fn from_table(table: &Table, columns: Vec<ColumnId>) -> Result<Self, TableFrameError> {
         if columns.is_empty() {
             return Err(TableFrameError::EmptyColumns);
         }
@@ -78,13 +78,13 @@ impl TableFrame {
         self.row_keys.len()
     }
 
-    /// Returns a column index for a `ColId`, if present.
-    pub fn column_index(&self, col: ColId) -> Option<usize> {
+    /// Returns a column index for a `ColumnId`, if present.
+    pub fn column_index(&self, col: ColumnId) -> Option<usize> {
         self.columns.iter().position(|&c| c == col)
     }
 
     /// Gets a numeric value for a row/col if both exist.
-    pub fn f64(&self, row: usize, col: ColId) -> Option<f64> {
+    pub fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         let ci = self.column_index(col)?;
         self.data.get(ci)?.get(row).copied()
     }
@@ -105,7 +105,7 @@ impl TableFrame {
 
 #[derive(Debug)]
 struct FrameData {
-    columns: Vec<ColId>,
+    columns: Vec<ColumnId>,
     data: Vec<Vec<f64>>,
 }
 
@@ -114,7 +114,7 @@ impl TableData for FrameData {
         self.data.first().map_or(0, |c| c.len())
     }
 
-    fn f64(&self, row: usize, col: ColId) -> Option<f64> {
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         let idx = self.columns.iter().position(|&c| c == col)?;
         self.data.get(idx)?.get(row).copied()
     }

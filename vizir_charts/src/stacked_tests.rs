@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 
 use kurbo::Rect;
 use peniko::color::palette::css;
-use vizir_core::{ColId, MarkDiff, Scene, Table, TableData, TableId};
+use vizir_core::{ColumnId, MarkDiff, Scene, Table, TableData, TableId};
 use vizir_transforms::{SortOrder, Transform};
 
 use crate::{
@@ -29,11 +29,11 @@ impl TableData for StackedValues {
         self.cat.len().min(self.y0.len()).min(self.y1.len())
     }
 
-    fn f64(&self, row: usize, col: ColId) -> Option<f64> {
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
-            ColId(0) => self.cat.get(row).copied(),
-            ColId(1) => self.y0.get(row).copied(),
-            ColId(2) => self.y1.get(row).copied(),
+            ColumnId(0) => self.cat.get(row).copied(),
+            ColumnId(1) => self.y0.get(row).copied(),
+            ColumnId(2) => self.y1.get(row).copied(),
             _ => None,
         }
     }
@@ -63,9 +63,9 @@ fn assert_rect_close(a: Rect, b: Rect) {
 #[test]
 fn stacked_bar_uses_category_for_x_and_y0_y1_for_vertical_span() {
     let table_id = TableId(1);
-    let cat_col = ColId(0);
-    let y0_col = ColId(1);
-    let y1_col = ColId(2);
+    let cat_col = ColumnId(0);
+    let y0_col = ColumnId(1);
+    let y1_col = ColumnId(2);
 
     let mut scene = Scene::new();
     let mut t = Table::new(table_id);
@@ -109,11 +109,11 @@ fn stacked_area_chart_builds_stack_and_series_programs() {
     let spec = StackedAreaChartSpec::new(
         TableId(1),
         TableId(2),
-        ColId(0),
-        ColId(1),
-        ColId(2),
-        ColId(3),
-        ColId(4),
+        ColumnId(0),
+        ColumnId(1),
+        ColumnId(2),
+        ColumnId(3),
+        ColumnId(4),
     );
 
     let p = spec.program();
@@ -139,11 +139,11 @@ fn stacked_bar_chart_defaults_sort_within_stack_by_series() {
     let spec = StackedBarChartSpec::new(
         TableId(1),
         TableId(2),
-        ColId(0),
-        ColId(1),
-        ColId(2),
-        ColId(3),
-        ColId(4),
+        ColumnId(0),
+        ColumnId(1),
+        ColumnId(2),
+        ColumnId(3),
+        ColumnId(4),
     );
     let p = spec.program();
     match &p.transforms()[0] {
@@ -152,7 +152,7 @@ fn stacked_bar_chart_defaults_sort_within_stack_by_series() {
             sort_order,
             ..
         } => {
-            assert_eq!(*sort_by, Some(ColId(1)));
+            assert_eq!(*sort_by, Some(ColumnId(1)));
             assert_eq!(*sort_order, SortOrder::Asc);
         }
         _ => panic!("expected Stack"),

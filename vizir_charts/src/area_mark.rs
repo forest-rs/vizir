@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 
 use kurbo::BezPath;
 use peniko::{Brush, Color};
-use vizir_core::{ColId, InputRef, Mark, MarkId, TableId};
+use vizir_core::{ColumnId, InputRef, Mark, MarkId, TableId};
 
 use crate::axis::StrokeStyle;
 use crate::scale::ScaleContinuous;
@@ -26,9 +26,9 @@ pub struct AreaMarkSpec {
     /// Source table id.
     pub table: TableId,
     /// Column for x values.
-    pub x: ColId,
+    pub x: ColumnId,
     /// Column for y values.
-    pub y: ColId,
+    pub y: ColumnId,
     /// X scale mapping data x into scene x.
     pub x_scale: ScaleContinuous,
     /// Y scale mapping data y into scene y.
@@ -48,8 +48,8 @@ impl AreaMarkSpec {
     pub fn new(
         id_base: u64,
         table: TableId,
-        x: ColId,
-        y: ColId,
+        x: ColumnId,
+        y: ColumnId,
         x_scale: ScaleContinuous,
         y_scale: ScaleContinuous,
     ) -> Self {

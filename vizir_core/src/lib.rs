@@ -67,9 +67,9 @@ impl MarkId {
     }
 }
 
-/// Stable identifier for a table column (placeholder).
+/// Stable identifier for a table column.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ColId(pub u32);
+pub struct ColumnId(pub u32);
 
 /// The geometric "kind" of a mark, which determines how channels are interpreted.
 ///
@@ -106,7 +106,7 @@ pub enum InputRef {
         /// The referenced table.
         table: TableId,
         /// The referenced column.
-        col: ColId,
+        col: ColumnId,
     },
     /// Reference a signal.
     Signal {
@@ -183,7 +183,7 @@ pub trait TableData: fmt::Debug {
     fn row_count(&self) -> usize;
 
     /// Return a numeric value for a given row/column.
-    fn f64(&self, row: usize, col: ColId) -> Option<f64>;
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64>;
 }
 
 /// Type-erased access to a [`Signal`] for storage in a scene.
@@ -1046,7 +1046,7 @@ impl<'a> EvalCtx<'a> {
     }
 
     /// Read a numeric table value, if a table data accessor is present.
-    pub fn table_f64(&self, table: TableId, row: usize, col: ColId) -> Option<f64> {
+    pub fn table_f64(&self, table: TableId, row: usize, col: ColumnId) -> Option<f64> {
         let t = self.tables.get(&table)?;
         let data = t.data.as_deref()?;
         data.f64(row, col)

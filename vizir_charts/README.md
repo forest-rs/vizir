@@ -7,11 +7,6 @@ It is not a Vega/Vega-Lite implementation: there is no declarative grammar and
 no automatic compilation step. Instead, higher-level layers can use these
 building blocks to create stable-identity marks and feed them into a `vizir_core::Scene`.
 
-Experimental migration note:
-- `vizir_charts::spec` is a new experimental lowering surface for unit-chart authored specs.
-- Existing hand-wired `ChartSpec` / `*MarkSpec` workflows are unchanged.
-- Expect iteration on the `spec` API while the first lowering slice is being proven.
-
 ## Plans
 
 Living roadmap/design notes are in `plans/` at the workspace root:

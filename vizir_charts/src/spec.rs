@@ -26,7 +26,7 @@ use alloc::vec::Vec;
 use kurbo::Rect;
 use peniko::Brush;
 use peniko::color::palette::css;
-use vizir_core::{ColId, Mark, MarkDiff, MarkId, Scene, TableId};
+use vizir_core::{ColumnId, Mark, MarkDiff, MarkId, Scene, TableId};
 use vizir_transforms::{
     AggregateField, AggregateOp, Predicate, Program, SceneExecutionError, SortOrder, StackOffset,
     TableFrame, TableFrameError, Transform,
@@ -77,7 +77,7 @@ pub enum MarkDef {
 /// A single authored channel definition.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChannelDef {
-    field: ColId,
+    field: ColumnId,
     kind: FieldKind,
     aggregate: Option<AggregateOp>,
     title: Option<String>,
@@ -85,7 +85,7 @@ pub struct ChannelDef {
 
 impl ChannelDef {
     /// Creates a quantitative channel over the given field.
-    pub fn quantitative(field: ColId) -> Self {
+    pub fn quantitative(field: ColumnId) -> Self {
         Self {
             field,
             kind: FieldKind::Quantitative,
@@ -95,7 +95,7 @@ impl ChannelDef {
     }
 
     /// Creates an ordinal channel over the given field.
-    pub fn ordinal(field: ColId) -> Self {
+    pub fn ordinal(field: ColumnId) -> Self {
         Self {
             field,
             kind: FieldKind::Ordinal,
@@ -105,7 +105,7 @@ impl ChannelDef {
     }
 
     /// Creates a nominal channel over the given field.
-    pub fn nominal(field: ColId) -> Self {
+    pub fn nominal(field: ColumnId) -> Self {
         Self {
             field,
             kind: FieldKind::Nominal,
@@ -115,7 +115,7 @@ impl ChannelDef {
     }
 
     /// Creates a temporal channel over the given field.
-    pub fn temporal(field: ColId) -> Self {
+    pub fn temporal(field: ColumnId) -> Self {
         Self {
             field,
             kind: FieldKind::Temporal,
@@ -136,7 +136,7 @@ impl ChannelDef {
         self
     }
 
-    fn field(&self) -> ColId {
+    fn field(&self) -> ColumnId {
         self.field
     }
 
@@ -213,32 +213,32 @@ impl EncodingSet {
 enum TransformSpecKind {
     Filter {
         predicate: Predicate,
-        columns: Vec<ColId>,
+        columns: Vec<ColumnId>,
     },
     Sort {
-        by: ColId,
+        by: ColumnId,
         order: SortOrder,
-        columns: Vec<ColId>,
+        columns: Vec<ColumnId>,
     },
     Aggregate {
-        group_by: Vec<ColId>,
+        group_by: Vec<ColumnId>,
         fields: Vec<AggregateField>,
     },
     Bin {
-        input_col: ColId,
-        output_start: ColId,
+        input_col: ColumnId,
+        output_start: ColumnId,
         step: f64,
-        columns: Vec<ColId>,
+        columns: Vec<ColumnId>,
     },
     Stack {
-        group_by: Vec<ColId>,
+        group_by: Vec<ColumnId>,
         offset: StackOffset,
-        sort_by: Option<ColId>,
+        sort_by: Option<ColumnId>,
         sort_order: SortOrder,
-        field: ColId,
-        output_start: ColId,
-        output_end: ColId,
-        columns: Vec<ColId>,
+        field: ColumnId,
+        output_start: ColumnId,
+        output_end: ColumnId,
+        columns: Vec<ColumnId>,
     },
 }
 
@@ -250,28 +250,33 @@ pub struct TransformSpec {
 
 impl TransformSpec {
     /// Creates a filter transform.
-    pub fn filter(predicate: Predicate, columns: Vec<ColId>) -> Self {
+    pub fn filter(predicate: Predicate, columns: Vec<ColumnId>) -> Self {
         Self {
             kind: TransformSpecKind::Filter { predicate, columns },
         }
     }
 
     /// Creates a sort transform.
-    pub fn sort(by: ColId, order: SortOrder, columns: Vec<ColId>) -> Self {
+    pub fn sort(by: ColumnId, order: SortOrder, columns: Vec<ColumnId>) -> Self {
         Self {
             kind: TransformSpecKind::Sort { by, order, columns },
         }
     }
 
     /// Creates an aggregate transform.
-    pub fn aggregate(group_by: Vec<ColId>, fields: Vec<AggregateField>) -> Self {
+    pub fn aggregate(group_by: Vec<ColumnId>, fields: Vec<AggregateField>) -> Self {
         Self {
             kind: TransformSpecKind::Aggregate { group_by, fields },
         }
     }
 
     /// Creates a fixed-step bin transform.
-    pub fn bin(input_col: ColId, output_start: ColId, step: f64, columns: Vec<ColId>) -> Self {
+    pub fn bin(
+        input_col: ColumnId,
+        output_start: ColumnId,
+        step: f64,
+        columns: Vec<ColumnId>,
+    ) -> Self {
         Self {
             kind: TransformSpecKind::Bin {
                 input_col,
@@ -288,14 +293,14 @@ impl TransformSpec {
         reason = "matches the authored stack parameters directly"
     )]
     pub fn stack(
-        group_by: Vec<ColId>,
+        group_by: Vec<ColumnId>,
         offset: StackOffset,
-        sort_by: Option<ColId>,
+        sort_by: Option<ColumnId>,
         sort_order: SortOrder,
-        field: ColId,
-        output_start: ColId,
-        output_end: ColId,
-        columns: Vec<ColId>,
+        field: ColumnId,
+        output_start: ColumnId,
+        output_end: ColumnId,
+        columns: Vec<ColumnId>,
     ) -> Self {
         Self {
             kind: TransformSpecKind::Stack {
@@ -465,7 +470,7 @@ impl UnitSpec {
         let mut lowered_y_field = y.field();
         if let Some(aggregate) = y.aggregate() {
             let output = alloc_table(&mut next_table);
-            let output_col = ColId(next_derived_col(self));
+            let output_col = ColumnId(next_derived_col(self));
             let mut group_by = vec![x.field()];
             if let Some(color) = color {
                 push_unique_col(&mut group_by, color.field());
@@ -635,7 +640,7 @@ pub enum LoweringError {
     /// Failed to infer a numeric domain from the lowered data.
     MissingDomain {
         /// The affected field.
-        field: ColId,
+        field: ColumnId,
         /// The channel role that needed the domain.
         role: &'static str,
     },
@@ -751,7 +756,7 @@ impl SeriesLayer {
 #[derive(Clone, Debug)]
 struct BarLayer {
     table: TableId,
-    y: ColId,
+    y: ColumnId,
     baseline: f64,
     fill: Brush,
 }
@@ -786,8 +791,8 @@ impl BarLayer {
 struct LineLayer {
     id: MarkId,
     table: TableId,
-    x: ColId,
-    y: ColId,
+    x: ColumnId,
+    y: ColumnId,
     stroke: StrokeStyle,
 }
 
@@ -815,8 +820,8 @@ impl LineLayer {
 #[derive(Clone, Debug)]
 struct PointLayer {
     table: TableId,
-    x: ColId,
-    y: ColId,
+    x: ColumnId,
+    y: ColumnId,
     symbol: Symbol,
     size: f64,
     fill: Brush,
@@ -854,7 +859,7 @@ fn build_chart_spec(
     spec: &UnitSpec,
     frame: &TableFrame,
     x: &ChannelDef,
-    y_field: ColId,
+    y_field: ColumnId,
     y_title: Option<&str>,
     legend_items: Vec<LegendItem>,
 ) -> Result<ChartSpec, LoweringError> {
@@ -960,7 +965,7 @@ fn build_x_axis(
 fn build_y_axis(
     spec: &UnitSpec,
     frame: &TableFrame,
-    y_field: ColId,
+    y_field: ColumnId,
     y_title: Option<&str>,
     mark: MarkDef,
 ) -> Result<AxisSpec, LoweringError> {
@@ -1059,7 +1064,7 @@ fn preview_output_frame(
     program: &Program,
     input_table: TableId,
     output_table: TableId,
-    columns: Vec<ColId>,
+    columns: Vec<ColumnId>,
 ) -> Result<TableFrame, LoweringError> {
     if program.transforms().is_empty() {
         let table = scene
@@ -1083,7 +1088,11 @@ fn preview_output_frame(
     }
 }
 
-fn required_columns(x: &ChannelDef, y_field: ColId, color: Option<&ChannelDef>) -> Vec<ColId> {
+fn required_columns(
+    x: &ChannelDef,
+    y_field: ColumnId,
+    color: Option<&ChannelDef>,
+) -> Vec<ColumnId> {
     let mut out = vec![x.field(), y_field];
     if let Some(color) = color {
         push_unique_col(&mut out, color.field());
@@ -1093,7 +1102,7 @@ fn required_columns(x: &ChannelDef, y_field: ColId, color: Option<&ChannelDef>) 
 
 fn infer_frame_domain(
     frame: &TableFrame,
-    col: ColId,
+    col: ColumnId,
     role: &'static str,
 ) -> Result<(f64, f64), LoweringError> {
     let mut min = f64::INFINITY;
@@ -1132,7 +1141,7 @@ fn include_zero((min, max): (f64, f64)) -> (f64, f64) {
     (min.min(0.0), max.max(0.0))
 }
 
-fn category_labels(frame: &TableFrame, col: ColId, kind: FieldKind) -> Vec<String> {
+fn category_labels(frame: &TableFrame, col: ColumnId, kind: FieldKind) -> Vec<String> {
     let mut labels = Vec::with_capacity(frame.row_count());
     for row in 0..frame.row_count() {
         let label = frame
@@ -1144,7 +1153,7 @@ fn category_labels(frame: &TableFrame, col: ColId, kind: FieldKind) -> Vec<Strin
     labels
 }
 
-fn distinct_values(frame: &TableFrame, col: ColId) -> Vec<f64> {
+fn distinct_values(frame: &TableFrame, col: ColumnId) -> Vec<f64> {
     let mut values = Vec::new();
     for row in 0..frame.row_count() {
         let Some(v) = frame.f64(row, col) else {
@@ -1197,7 +1206,7 @@ fn default_series_fills(count: usize) -> Vec<Brush> {
         .collect()
 }
 
-fn dedup_cols(mut cols: Vec<ColId>) -> Vec<ColId> {
+fn dedup_cols(mut cols: Vec<ColumnId>) -> Vec<ColumnId> {
     let mut out = Vec::with_capacity(cols.len());
     for col in cols.drain(..) {
         push_unique_col(&mut out, col);
@@ -1205,7 +1214,7 @@ fn dedup_cols(mut cols: Vec<ColId>) -> Vec<ColId> {
     out
 }
 
-fn push_unique_col(cols: &mut Vec<ColId>, col: ColId) {
+fn push_unique_col(cols: &mut Vec<ColumnId>, col: ColumnId) {
     if cols.iter().all(|existing| *existing != col) {
         cols.push(col);
     }
@@ -1311,10 +1320,10 @@ mod tests {
             self.a.len().min(self.b.len())
         }
 
-        fn f64(&self, row: usize, col: ColId) -> Option<f64> {
+        fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
             match col {
-                ColId(0) => self.a.get(row).copied(),
-                ColId(1) => self.b.get(row).copied(),
+                ColumnId(0) => self.a.get(row).copied(),
+                ColumnId(1) => self.b.get(row).copied(),
                 _ => None,
             }
         }
@@ -1332,11 +1341,11 @@ mod tests {
             self.a.len().min(self.b.len()).min(self.c.len())
         }
 
-        fn f64(&self, row: usize, col: ColId) -> Option<f64> {
+        fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
             match col {
-                ColId(0) => self.a.get(row).copied(),
-                ColId(1) => self.b.get(row).copied(),
-                ColId(2) => self.c.get(row).copied(),
+                ColumnId(0) => self.a.get(row).copied(),
+                ColumnId(1) => self.b.get(row).copied(),
+                ColumnId(2) => self.c.get(row).copied(),
                 _ => None,
             }
         }
@@ -1356,9 +1365,9 @@ mod tests {
 
         let spec = UnitSpec::new(0xAA00, TableId(100), DataRef::Table(table_id), MarkDef::Bar)
             .with_title("aggregate bar")
-            .with_x(ChannelDef::ordinal(ColId(0)).with_title("category"))
+            .with_x(ChannelDef::ordinal(ColumnId(0)).with_title("category"))
             .with_y(
-                ChannelDef::quantitative(ColId(1))
+                ChannelDef::quantitative(ColumnId(1))
                     .with_aggregate(AggregateOp::Sum)
                     .with_title("sum(value)"),
             );
@@ -1397,9 +1406,9 @@ mod tests {
             DataRef::Table(table_id),
             MarkDef::Point,
         )
-        .with_x(ChannelDef::quantitative(ColId(0)).with_title("x"))
-        .with_y(ChannelDef::quantitative(ColId(1)).with_title("y"))
-        .with_color(ChannelDef::nominal(ColId(2)).with_title("series"));
+        .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+        .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("y"))
+        .with_color(ChannelDef::nominal(ColumnId(2)).with_title("series"));
 
         let lowered = spec.lower(&scene).expect("lower point chart");
         assert!(lowered.program().is_some());
@@ -1438,12 +1447,12 @@ mod tests {
             MarkDef::Line,
         )
         .with_transform(TransformSpec::sort(
-            ColId(0),
+            ColumnId(0),
             SortOrder::Asc,
-            vec![ColId(0), ColId(1)],
+            vec![ColumnId(0), ColumnId(1)],
         ))
-        .with_x(ChannelDef::quantitative(ColId(0)).with_title("x"))
-        .with_y(ChannelDef::quantitative(ColId(1)).with_title("y"));
+        .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+        .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("y"));
 
         let lowered = spec.lower(&scene).expect("lower line chart");
         lowered
@@ -1455,9 +1464,9 @@ mod tests {
             .get(&lowered.output_table())
             .expect("sorted table");
         let data = sorted.data.as_deref().expect("sorted data");
-        assert_eq!(data.f64(0, ColId(0)), Some(0.0));
-        assert_eq!(data.f64(1, ColId(0)), Some(1.0));
-        assert_eq!(data.f64(2, ColId(0)), Some(2.0));
+        assert_eq!(data.f64(0, ColumnId(0)), Some(0.0));
+        assert_eq!(data.f64(1, ColumnId(0)), Some(1.0));
+        assert_eq!(data.f64(2, ColumnId(0)), Some(2.0));
 
         let (_layout, marks) = lowered
             .marks(&scene, &HeuristicTextMeasurer)
