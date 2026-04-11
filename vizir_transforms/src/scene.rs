@@ -224,6 +224,31 @@ fn required_input_columns(transforms: &[Transform]) -> HashMap<TableId, HashSet<
                 }
                 produced.insert(*output);
             }
+            Transform::Lookup {
+                input,
+                output,
+                from_table,
+                key,
+                from_key,
+                fields,
+                columns,
+            } => {
+                if !produced.contains(input) {
+                    let set = out.entry(*input).or_default();
+                    for &c in columns {
+                        set.insert(c);
+                    }
+                    set.insert(*key);
+                }
+                if !produced.contains(from_table) {
+                    let set = out.entry(*from_table).or_default();
+                    set.insert(*from_key);
+                    for field in fields {
+                        set.insert(field.input);
+                    }
+                }
+                produced.insert(*output);
+            }
             Transform::Window {
                 input,
                 output,

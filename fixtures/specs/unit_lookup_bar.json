@@ -1,0 +1,21 @@
+{
+  "mark": "bar",
+  "title": "Lookup Bars",
+  "transform": [
+    {
+      "lookup": {
+        "fromTable": 13800,
+        "key": "category",
+        "from": "lookup_category",
+        "values": [
+          { "field": "lookup_value", "as": "value" }
+        ]
+      },
+      "columns": ["category"]
+    }
+  ],
+  "encoding": {
+    "x": { "field": "category", "type": "ordinal", "title": "category" },
+    "y": { "field": "value", "type": "quantitative", "title": "lookup value" }
+  }
+}

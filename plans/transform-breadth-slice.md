@@ -5,6 +5,7 @@ Goals:
   the parser-facing adapter, and the JSON parser.
 - Add a narrow `window` transform through the same path.
 - Add a narrow numeric-only `fold` transform through the same path.
+- Add a narrow one-key `lookup` transform through the same path.
 - Keep the `window` proof calm enough that the demo reads like a capability, not a trick.
 - Prove all slices with fixture-backed demos and tests.
 
@@ -26,11 +27,17 @@ Planned slices:
    - Start with numeric-only field folding.
    - Emit a numeric slot column plus a folded numeric value column.
    - Require explicit carry-through `columns` and explicit output aliases.
+4. `lookup`
+   - Start with one numeric key in the base table matched to one numeric key in a second scene table.
+   - Append numeric lookup fields, reject duplicate lookup keys, and use `NaN` for misses.
+   - Keep the parsed/JSON shape explicit about the secondary table id.
 
 Risks:
 - Derived output alias allocation can drift between authored and parsed seams if tests are weak.
 - `window` semantics can over-promise if we imply full SQL/Vega window behavior.
 - `fold` can over-promise if the numeric slot output looks like a real string field-name channel.
+- `lookup` can over-promise if the second-table reference or shared field resolver reads like a
+  full Vega-Lite data-source system.
 - These transforms can make demos look more general than the supported parser slice really is.
 
 Acceptance bar:

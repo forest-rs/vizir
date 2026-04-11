@@ -139,6 +139,15 @@ pub struct WindowField {
     pub output: ColumnId,
 }
 
+/// One output field for [`Transform::Lookup`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LookupField {
+    /// Column to read from the lookup table.
+    pub input: ColumnId,
+    /// Output column id in the enriched result.
+    pub output: ColumnId,
+}
+
 /// A row predicate used by [`Transform::Filter`].
 ///
 /// This is intentionally tiny at v0: it supports a single numeric comparison.
@@ -276,6 +285,25 @@ pub enum Transform {
         output_key: ColumnId,
         /// Output column containing the folded numeric value.
         output_value: ColumnId,
+        /// Columns to carry through to the output table.
+        columns: Vec<ColumnId>,
+    },
+    /// Enrich rows by looking up values from another table on one numeric key.
+    ///
+    /// Output columns are `columns` (in order) followed by the `fields` outputs (in order).
+    Lookup {
+        /// Input table.
+        input: TableId,
+        /// Output table.
+        output: TableId,
+        /// Lookup source table.
+        from_table: TableId,
+        /// Key column in the input table.
+        key: ColumnId,
+        /// Key column in the lookup table.
+        from_key: ColumnId,
+        /// Lookup value columns to append.
+        fields: Vec<LookupField>,
         /// Columns to carry through to the output table.
         columns: Vec<ColumnId>,
     },

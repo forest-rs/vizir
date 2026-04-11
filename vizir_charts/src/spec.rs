@@ -32,7 +32,7 @@ use vizir_core::{
     RectEncodings, Scene, TableId, TextAnchor, TextBaseline, TextEncodings,
 };
 use vizir_transforms::{
-    AggregateField, AggregateOp, CalculateExpr, CalculateOperand, Predicate, Program,
+    AggregateField, AggregateOp, CalculateExpr, CalculateOperand, LookupField, Predicate, Program,
     SceneExecutionError, SortOrder, StackOffset, TableFrame, TableFrameError, Transform,
     WindowField,
 };
@@ -356,6 +356,13 @@ enum TransformSpecKind {
         output_value: ColumnId,
         columns: Vec<ColumnId>,
     },
+    Lookup {
+        from_table: TableId,
+        key: ColumnId,
+        from_key: ColumnId,
+        fields: Vec<LookupField>,
+        columns: Vec<ColumnId>,
+    },
     Window {
         group_by: Vec<ColumnId>,
         sort_by: ColumnId,
@@ -458,6 +465,25 @@ impl TransformSpec {
                 fields,
                 output_key,
                 output_value,
+                columns,
+            },
+        }
+    }
+
+    /// Creates a narrow one-key lookup transform against another table already present in the scene.
+    pub fn lookup(
+        from_table: TableId,
+        key: ColumnId,
+        from_key: ColumnId,
+        fields: Vec<LookupField>,
+        columns: Vec<ColumnId>,
+    ) -> Self {
+        Self {
+            kind: TransformSpecKind::Lookup {
+                from_table,
+                key,
+                from_key,
+                fields,
                 columns,
             },
         }
@@ -3538,6 +3564,21 @@ fn lower_authored_transform(
             output_value: *output_value,
             columns: columns.clone(),
         }),
+        TransformSpecKind::Lookup {
+            from_table,
+            key,
+            from_key,
+            fields,
+            columns,
+        } => program.push(Transform::Lookup {
+            input,
+            output,
+            from_table: *from_table,
+            key: *key,
+            from_key: *from_key,
+            fields: fields.clone(),
+            columns: columns.clone(),
+        }),
         TransformSpecKind::Window {
             group_by,
             sort_by,
@@ -4056,6 +4097,12 @@ fn extend_transform_input_columns(out: &mut Vec<ColumnId>, transform: &Transform
             for &col in fields {
                 push_unique_col(out, col);
             }
+            for &col in columns {
+                push_unique_col(out, col);
+            }
+        }
+        TransformSpecKind::Lookup { key, columns, .. } => {
+            push_unique_col(out, *key);
             for &col in columns {
                 push_unique_col(out, col);
             }
@@ -4610,6 +4657,21 @@ fn next_derived_col(spec: &UnitSpec) -> u32 {
                     max_col = max_col.max(col.0);
                 }
             }
+            TransformSpecKind::Lookup {
+                key,
+                from_key,
+                fields,
+                columns,
+                ..
+            } => {
+                max_col = max_col.max(key.0).max(from_key.0);
+                for field in fields {
+                    max_col = max_col.max(field.input.0).max(field.output.0);
+                }
+                for col in columns {
+                    max_col = max_col.max(col.0);
+                }
+            }
             TransformSpecKind::Window {
                 group_by,
                 sort_by,
@@ -4915,6 +4977,63 @@ mod tests {
             .expect("folded output table");
         assert_eq!(folded.row_keys.len(), 6);
         assert!(lowered.chart().legend.is_some());
+    }
+
+    #[test]
+    fn lookup_bar_lowering_reads_values_from_secondary_table() {
+        let mut scene = Scene::new();
+        let input_table = TableId(1018);
+        let mut input = Table::new(input_table);
+        input.row_keys = vec![40, 41, 42];
+        input.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![0.0, 0.0, 0.0],
+        }));
+        scene.insert_table(input);
+
+        let lookup_table = TableId(1019);
+        let mut lookup = Table::new(lookup_table);
+        lookup.row_keys = vec![50, 51];
+        lookup.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 2.0],
+            b: vec![4.0, 6.0],
+        }));
+        scene.insert_table(lookup);
+
+        let spec = UnitSpec::new(
+            0xAAC0,
+            TableId(1020),
+            DataRef::Table(input_table),
+            MarkDef::Bar,
+        )
+        .with_transform(TransformSpec::lookup(
+            lookup_table,
+            ColumnId(0),
+            ColumnId(0),
+            vec![LookupField {
+                input: ColumnId(1),
+                output: ColumnId(10),
+            }],
+            vec![ColumnId(0)],
+        ))
+        .with_x(ChannelDef::ordinal(ColumnId(0)).with_title("category"))
+        .with_y(ChannelDef::quantitative(ColumnId(10)).with_title("lookup value"));
+
+        let lowered = spec
+            .lower_into_scene(&mut scene)
+            .expect("lower lookup bars");
+        let enriched = scene
+            .tables
+            .get(&lowered.output_table())
+            .expect("lookup output table");
+        let data = enriched.data.as_deref().expect("lookup table data");
+        assert_eq!(data.f64(0, ColumnId(10)), Some(4.0));
+        assert!(
+            data.f64(1, ColumnId(10))
+                .expect("missing lookup value")
+                .is_nan()
+        );
+        assert_eq!(data.f64(2, ColumnId(10)), Some(6.0));
     }
 
     #[test]

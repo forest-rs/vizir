@@ -69,9 +69,10 @@ Status meanings:
 | `aggregate` | supported | Derived output aliases supported via adapter/json path |
 | `bin` | partial | Requires explicit `columns` carry-through list |
 | `fold` | partial | Numeric-only today: repeats each row per folded field and emits a numeric slot id plus folded numeric value, with explicit `columns` |
+| `lookup` | partial | One-key table enrichment today: reads from one explicit scene table, appends numeric lookup fields, rejects duplicate lookup keys, and uses `NaN` for misses |
 | `window` | partial | Narrow slice only: `row_number` and `rank` over one required sort key, optional `group_by`, and explicit `columns` |
 | `stack` | partial | Requires explicit `columns`; output aliases supported |
-| `pivot`, `flatten`, `lookup`, `density`, `regression`, etc. | missing | Not in authored seam today |
+| `pivot`, `flatten`, `density`, `regression`, etc. | missing | Not in authored seam today |
 
 ### Parser-facing layers
 
@@ -112,6 +113,10 @@ Status meanings:
 - `fold` currently means numeric-only wide-to-long lowering: each folded input field becomes a
   repeated row, the folded key is emitted as a 0-based numeric slot id, and the folded value is
   numeric. String field-name outputs are not in the runtime yet.
+- `lookup` currently means one numeric key in the input table matched against one numeric key in a
+  second explicit scene table. It appends numeric lookup fields, rejects duplicate lookup keys,
+  and uses `NaN` when no match exists. The parsed/JSON path currently resolves lookup-side field
+  names through the same shared field resolver as the base table.
 - `window` currently means one required sort key, optional `group_by`, and only the
   `row_number` / `rank` operations, with an explicit carry-through `columns` list in the
   parsed/JSON path.

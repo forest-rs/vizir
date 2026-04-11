@@ -40,6 +40,26 @@ impl TableData for BarValues {
     }
 }
 
+#[derive(Debug)]
+struct TwoCols {
+    a: Vec<f64>,
+    b: Vec<f64>,
+}
+
+impl TableData for TwoCols {
+    fn row_count(&self) -> usize {
+        self.a.len().min(self.b.len())
+    }
+
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        match col {
+            ColumnId(0) => self.a.get(row).copied(),
+            ColumnId(1) => self.b.get(row).copied(),
+            _ => None,
+        }
+    }
+}
+
 fn main() {
     let sections = vec![
         bar_demo(),
@@ -53,6 +73,7 @@ fn main() {
         lowered_json_calculate_demo(),
         lowered_json_joinaggregate_demo(),
         lowered_json_fold_demo(),
+        lowered_json_lookup_demo(),
         lowered_json_window_demo(),
         lowered_json_grouped_bar_demo(),
         lowered_json_stacked_bar_demo(),
@@ -748,6 +769,61 @@ fn lowered_json_fold_demo() -> html::HtmlSection {
     html::HtmlSection {
         title: "Lowered JSON Fold",
         description: "A grouped bar chart built from JSON text, proving numeric-only `fold` lowering from wide rows into repeated series slots.",
+        svg: render_lowered_unit_spec(&mut scene, spec),
+    }
+}
+
+fn lowered_json_lookup_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(137056);
+    let mut table = Table::new(source_id);
+    table.row_keys = vec![0, 1, 2];
+    table.data = Some(Box::new(TwoCols {
+        a: vec![0.0, 1.0, 2.0],
+        b: vec![0.0, 0.0, 0.0],
+    }));
+    scene.insert_table(table);
+
+    let lookup_id = TableId(13800);
+    let mut lookup = Table::new(lookup_id);
+    lookup.row_keys = vec![10, 11];
+    lookup.data = Some(Box::new(TwoCols {
+        a: vec![0.0, 2.0],
+        b: vec![4.0, 6.0],
+    }));
+    scene.insert_table(lookup);
+
+    let parsed = parse_unit_spec_json(include_str!("../../fixtures/specs/unit_lookup_bar.json"))
+        .expect("parse lookup bar spec");
+
+    let resolver = SliceFieldResolver::new(&[
+        SchemaField {
+            name: "category",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "lookup_category",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "lookup_value",
+            column: ColumnId(1),
+        },
+    ]);
+    let spec = parsed
+        .adapt(
+            &resolver,
+            AdaptContext {
+                id_base: 0xD0_858,
+                derived_table_base: TableId(13736),
+                data: DataRef::Table(source_id),
+            },
+        )
+        .expect("adapt lookup bar spec");
+
+    html::HtmlSection {
+        title: "Lowered JSON Lookup",
+        description: "A bar chart built from JSON text, proving narrow one-key `lookup` enrichment from a second scene table.",
         svg: render_lowered_unit_spec(&mut scene, spec),
     }
 }

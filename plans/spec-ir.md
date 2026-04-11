@@ -128,6 +128,7 @@ Support only the transform variants we already execute well:
 - `Aggregate`
 - `Bin`
 - `Fold`
+- `Lookup`
 - `Window`
 - `Stack`
 

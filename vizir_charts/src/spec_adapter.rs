@@ -16,7 +16,7 @@ use peniko::Brush;
 use vizir_core::{ColumnId, TableId};
 use vizir_transforms::{
     AggregateField, AggregateOp, CalculateExpr, CalculateOp, CalculateOperand, CompareOp,
-    Predicate, SortOrder, StackOffset, WindowField, WindowOp,
+    LookupField, Predicate, SortOrder, StackOffset, WindowField, WindowOp,
 };
 
 use crate::{
@@ -401,6 +401,25 @@ impl ParsedWindowField {
     }
 }
 
+/// One output field in a parsed narrow lookup transform.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParsedLookupField {
+    /// Field name to read from the lookup table.
+    pub field: String,
+    /// Output field name in the enriched result.
+    pub as_field: String,
+}
+
+impl ParsedLookupField {
+    /// Creates a parsed lookup field.
+    pub fn new(field: impl Into<String>, as_field: impl Into<String>) -> Self {
+        Self {
+            field: field.into(),
+            as_field: as_field.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 enum ParsedTransformKind {
     Filter {
@@ -436,6 +455,13 @@ enum ParsedTransformKind {
         fields: Vec<String>,
         as_key: String,
         as_value: String,
+        columns: Vec<String>,
+    },
+    Lookup {
+        from_table: TableId,
+        key: String,
+        from_key: String,
+        fields: Vec<ParsedLookupField>,
         columns: Vec<String>,
     },
     Window {
@@ -547,6 +573,25 @@ impl ParsedTransformSpec {
                 fields: collect_names(fields),
                 as_key: as_key.into(),
                 as_value: as_value.into(),
+                columns: collect_names(columns),
+            },
+        }
+    }
+
+    /// Creates a parsed narrow lookup transform.
+    pub fn lookup(
+        from_table: TableId,
+        key: impl Into<String>,
+        from_key: impl Into<String>,
+        fields: Vec<ParsedLookupField>,
+        columns: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            kind: ParsedTransformKind::Lookup {
+                from_table,
+                key: key.into(),
+                from_key: from_key.into(),
+                fields,
                 columns: collect_names(columns),
             },
         }
@@ -1548,6 +1593,27 @@ fn adapt_transform(
             fields.allocate_output(as_value)?,
             resolve_columns(fields, columns, "fold carry-through")?,
         )),
+        ParsedTransformKind::Lookup {
+            from_table,
+            key,
+            from_key,
+            fields: lookup_fields,
+            columns,
+        } => Ok(TransformSpec::lookup(
+            *from_table,
+            fields.resolve_input(key, "lookup key")?,
+            fields.resolve_input(from_key, "lookup from")?,
+            lookup_fields
+                .iter()
+                .map(|field| {
+                    Ok(LookupField {
+                        input: fields.resolve_input(&field.field, "lookup field")?,
+                        output: fields.allocate_output(&field.as_field)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            resolve_columns(fields, columns, "lookup carry-through")?,
+        )),
         ParsedTransformKind::Window {
             group_by,
             sort_by,
@@ -2002,6 +2068,68 @@ mod tests {
             .get(&lowered.output_table())
             .expect("fold output");
         assert_eq!(folded.row_keys.len(), 6);
+    }
+
+    #[test]
+    fn parsed_lookup_transform_enriches_from_secondary_table() {
+        let parsed = ParsedUnitSpec::new(ParsedMarkDef::Bar)
+            .with_transform(ParsedTransformSpec::lookup(
+                TableId(205),
+                "category",
+                "lookup_category",
+                vec![ParsedLookupField::new("lookup_value", "value")],
+                ["category"],
+            ))
+            .with_x(ParsedChannelDef::ordinal("category"))
+            .with_y(ParsedChannelDef::quantitative("value"));
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "category",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "lookup_category",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "lookup_value",
+                column: ColumnId(1),
+            },
+        ]);
+
+        let mut scene = Scene::new();
+        let input_table = TableId(204);
+        let mut input = Table::new(input_table);
+        input.row_keys = vec![250, 251, 252];
+        input.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![0.0, 0.0, 0.0],
+        }));
+        scene.insert_table(input);
+
+        let mut lookup = Table::new(TableId(205));
+        lookup.row_keys = vec![260, 261];
+        lookup.data = Some(Box::new(TwoCols {
+            a: vec![0.0, 2.0],
+            b: vec![4.0, 6.0],
+        }));
+        scene.insert_table(lookup);
+
+        let unit = parsed
+            .adapt(&resolver, context(input_table))
+            .expect("adapt lookup spec");
+        let lowered = unit
+            .lower_into_scene(&mut scene)
+            .expect("lower lookup spec");
+        let enriched = scene
+            .tables
+            .get(&lowered.output_table())
+            .expect("lookup output");
+        let data = enriched.data.as_deref().expect("lookup data");
+        assert_eq!(data.f64(0, ColumnId(2)), Some(4.0));
+        assert!(data.f64(1, ColumnId(2)).expect("lookup miss").is_nan());
+        assert_eq!(data.f64(2, ColumnId(2)), Some(6.0));
     }
 
     #[test]

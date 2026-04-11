@@ -13,8 +13,8 @@ use vizir_core::{ColumnId, TableId};
 
 use crate::table::TableFrame;
 use crate::transform::{
-    AggregateField, AggregateOp, CalculateExpr, CalculateOp, CalculateOperand, SortOrder,
-    StackOffset, Transform, WindowOp,
+    AggregateField, AggregateOp, CalculateExpr, CalculateOp, CalculateOperand, LookupField,
+    SortOrder, StackOffset, Transform, WindowOp,
 };
 
 /// Errors returned when executing a transform [`Program`].
@@ -469,6 +469,69 @@ impl Program {
                         *output,
                         TableFrame {
                             row_keys,
+                            columns: out_columns,
+                            data: out_data,
+                        },
+                    );
+                }
+                Transform::Lookup {
+                    input,
+                    output,
+                    from_table,
+                    key,
+                    from_key,
+                    fields,
+                    columns,
+                } => {
+                    let frame = get_frame(*input, inputs, &out.tables)?;
+                    let lookup = get_frame(*from_table, inputs, &out.tables)?;
+                    if columns.is_empty() || fields.is_empty() {
+                        return Err(ExecutionError::InvalidTransform);
+                    }
+                    require_columns(*input, frame, columns)?;
+                    require_columns(*input, frame, core::slice::from_ref(key))?;
+                    require_columns(*from_table, lookup, core::slice::from_ref(from_key))?;
+                    require_lookup_fields(*from_table, lookup, fields)?;
+                    validate_derived_output_columns(
+                        columns,
+                        fields.iter().map(|field| field.output),
+                    )?;
+
+                    let mut lookup_index: HashMap<u64, usize> = HashMap::new();
+                    for row in 0..lookup.row_count() {
+                        let bits = lookup.f64(row, *from_key).unwrap_or(f64::NAN).to_bits();
+                        if lookup_index.insert(bits, row).is_some() {
+                            return Err(ExecutionError::InvalidTransform);
+                        }
+                    }
+
+                    let mut out_columns = Vec::with_capacity(columns.len() + fields.len());
+                    out_columns.extend(columns.iter().copied());
+                    out_columns.extend(fields.iter().map(|field| field.output));
+
+                    let mut out_data: Vec<Vec<f64>> = Vec::with_capacity(out_columns.len());
+                    for &col in columns {
+                        let ci = frame.column_index(col).expect("validated");
+                        out_data.push(frame.data[ci].clone());
+                    }
+
+                    let mut lookup_values: Vec<Vec<f64>> =
+                        vec![vec![f64::NAN; frame.row_count()]; fields.len()];
+                    for (row, _) in frame.row_keys.iter().enumerate() {
+                        let bits = frame.f64(row, *key).unwrap_or(f64::NAN).to_bits();
+                        if let Some(&lookup_row) = lookup_index.get(&bits) {
+                            for (fi, field) in fields.iter().enumerate() {
+                                lookup_values[fi][row] =
+                                    lookup.f64(lookup_row, field.input).unwrap_or(f64::NAN);
+                            }
+                        }
+                    }
+                    out_data.extend(lookup_values);
+
+                    out.tables.insert(
+                        *output,
+                        TableFrame {
+                            row_keys: frame.row_keys.clone(),
                             columns: out_columns,
                             data: out_data,
                         },
@@ -975,6 +1038,17 @@ fn require_aggregate_fields(
     Ok(())
 }
 
+fn require_lookup_fields(
+    table: TableId,
+    frame: &TableFrame,
+    fields: &[LookupField],
+) -> Result<(), ExecutionError> {
+    for field in fields {
+        require_columns(table, frame, core::slice::from_ref(&field.input))?;
+    }
+    Ok(())
+}
+
 fn validate_derived_output_columns(
     columns: &[ColumnId],
     outputs: impl IntoIterator<Item = ColumnId>,
@@ -1416,6 +1490,52 @@ mod tests {
         assert_eq!(t.data[1], vec![0.0, 1.0, 0.0, 1.0]);
         assert_eq!(t.data[2], vec![2.0, 3.0, 4.0, 5.0]);
         assert_eq!(t.row_count(), 4);
+    }
+
+    #[test]
+    fn lookup_enriches_rows_from_a_secondary_table() {
+        let mut p = Program::new();
+        p.push(Transform::Lookup {
+            input: TableId(1),
+            output: TableId(3),
+            from_table: TableId(2),
+            key: ColumnId(0),
+            from_key: ColumnId(0),
+            fields: vec![LookupField {
+                input: ColumnId(1),
+                output: ColumnId(2),
+            }],
+            columns: vec![ColumnId(0)],
+        });
+
+        let inputs: HashMap<_, _> = [
+            (
+                TableId(1),
+                TableFrame {
+                    row_keys: vec![10, 11, 12],
+                    columns: vec![ColumnId(0)],
+                    data: vec![vec![0.0, 1.0, 2.0]],
+                },
+            ),
+            (
+                TableId(2),
+                TableFrame {
+                    row_keys: vec![20, 21],
+                    columns: vec![ColumnId(0), ColumnId(1)],
+                    data: vec![vec![0.0, 2.0], vec![4.0, 6.0]],
+                },
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        let out = p.execute(&inputs).unwrap();
+        let t = out.tables.get(&TableId(3)).unwrap();
+        assert_eq!(t.columns, vec![ColumnId(0), ColumnId(2)]);
+        assert_eq!(t.data[1][0], 4.0);
+        assert!(t.data[1][1].is_nan());
+        assert_eq!(t.data[1][2], 6.0);
+        assert_eq!(t.row_keys, vec![10, 11, 12]);
     }
 
     #[test]

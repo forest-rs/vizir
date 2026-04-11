@@ -15,13 +15,14 @@ use alloc::vec::Vec;
 use peniko::{Brush, Color};
 use serde::Deserialize;
 use serde_json::Value;
+use vizir_core::TableId;
 use vizir_transforms::{AggregateOp, CalculateOp, CompareOp, SortOrder, StackOffset, WindowOp};
 
 use crate::{
     ParsedAggregateField, ParsedCalculateExpr, ParsedCalculateOperand, ParsedChannelDef,
     ParsedEncodingSet, ParsedFacetSpec, ParsedFieldKind, ParsedLayerChildSpec, ParsedLayerSpec,
-    ParsedMarkDef, ParsedPredicate, ParsedTransformSpec, ParsedUnitSpec, ParsedWindowField,
-    StrokeStyle,
+    ParsedLookupField, ParsedMarkDef, ParsedPredicate, ParsedTransformSpec, ParsedUnitSpec,
+    ParsedWindowField, StrokeStyle,
 };
 
 /// Errors returned while parsing a narrow JSON unit spec.
@@ -364,6 +365,32 @@ struct JsonFoldTransform {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct JsonLookupTransform {
+    lookup: JsonLookupBody,
+    #[serde(default)]
+    columns: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JsonLookupBody {
+    #[serde(rename = "fromTable")]
+    from_table: u32,
+    key: String,
+    from: String,
+    values: Vec<JsonLookupField>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JsonLookupField {
+    field: String,
+    #[serde(rename = "as")]
+    as_field: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct JsonWindowTransform {
     window: Vec<JsonWindowField>,
     #[serde(default)]
@@ -610,6 +637,31 @@ fn parse_transform(value: Value) -> Result<ParsedTransformSpec, JsonSpecError> {
             raw.fold,
             raw.as_fields[0].clone(),
             raw.as_fields[1].clone(),
+            raw.columns,
+        ));
+    }
+
+    if object.contains_key("lookup") {
+        let raw: JsonLookupTransform = serde_json::from_value(value)?;
+        if raw.columns.is_empty() {
+            return Err(JsonSpecError::Invalid(String::from(
+                "lookup transforms currently require a `columns` array",
+            )));
+        }
+        if raw.lookup.values.is_empty() {
+            return Err(JsonSpecError::Invalid(String::from(
+                "lookup transforms currently require at least one output field",
+            )));
+        }
+        return Ok(ParsedTransformSpec::lookup(
+            TableId(raw.lookup.from_table),
+            raw.lookup.key,
+            raw.lookup.from,
+            raw.lookup
+                .values
+                .into_iter()
+                .map(|field| ParsedLookupField::new(field.field, field.as_field))
+                .collect(),
             raw.columns,
         ));
     }
@@ -1052,6 +1104,37 @@ mod tests {
                 },
             )
             .expect("adapt fold fixture");
+    }
+
+    #[test]
+    fn parses_lookup_fixture() {
+        let spec = parse_unit_spec_json(include_str!("../../fixtures/specs/unit_lookup_bar.json"))
+            .expect("parse lookup spec");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "category",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "lookup_category",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "lookup_value",
+                column: ColumnId(1),
+            },
+        ]);
+        let _unit = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xB0_068,
+                    derived_table_base: TableId(204),
+                    data: DataRef::Table(TableId(23)),
+                },
+            )
+            .expect("adapt lookup fixture");
     }
 
     #[test]
