@@ -51,6 +51,8 @@ fn main() {
         lowered_spec_demo(),
         lowered_json_spec_demo(),
         lowered_json_calculate_demo(),
+        lowered_json_joinaggregate_demo(),
+        lowered_json_window_demo(),
         lowered_json_grouped_bar_demo(),
         lowered_json_stacked_bar_demo(),
         lowered_json_facet_demo(),
@@ -648,6 +650,97 @@ fn lowered_json_calculate_demo() -> html::HtmlSection {
     }
 }
 
+fn lowered_json_joinaggregate_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(13705);
+    let mut table = Table::new(source_id);
+    table.row_keys = vec![0, 1, 2, 3, 4, 5];
+    table.data = Some(Box::new(SeriesPointValues {
+        x: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+        value: vec![2.0, 4.0, 6.0, 3.0, 5.0, 7.0],
+        series: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    }));
+    scene.insert_table(table);
+
+    let parsed = parse_unit_spec_json(include_str!(
+        "../../fixtures/specs/unit_joinaggregate_point.json"
+    ))
+    .expect("parse joinaggregate point spec");
+
+    let resolver = SliceFieldResolver::new(&[
+        SchemaField {
+            name: "x",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "value",
+            column: ColumnId(1),
+        },
+        SchemaField {
+            name: "series",
+            column: ColumnId(2),
+        },
+    ]);
+    let spec = parsed
+        .adapt(
+            &resolver,
+            AdaptContext {
+                id_base: 0xD0_850,
+                derived_table_base: TableId(1373),
+                data: DataRef::Table(source_id),
+            },
+        )
+        .expect("adapt joinaggregate point spec");
+
+    html::HtmlSection {
+        title: "Lowered JSON JoinAggregate",
+        description: "A point chart built from JSON text, proving grouped aggregates can be written back per row through the authored seam.",
+        svg: render_lowered_unit_spec(&mut scene, spec),
+    }
+}
+
+fn lowered_json_window_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(13706);
+    let mut table = Table::new(source_id);
+    table.row_keys = vec![0, 1, 2, 3, 4, 5];
+    table.data = Some(Box::new(RankSeriesValues {
+        value: vec![9.0, 5.0, 1.0, 8.0, 4.0, 2.0],
+        series: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    }));
+    scene.insert_table(table);
+
+    let parsed = parse_unit_spec_json(include_str!("../../fixtures/specs/unit_window_line.json"))
+        .expect("parse window line spec");
+
+    let resolver = SliceFieldResolver::new(&[
+        SchemaField {
+            name: "value",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "series",
+            column: ColumnId(1),
+        },
+    ]);
+    let spec = parsed
+        .adapt(
+            &resolver,
+            AdaptContext {
+                id_base: 0xD0_860,
+                derived_table_base: TableId(1374),
+                data: DataRef::Table(source_id),
+            },
+        )
+        .expect("adapt window line spec");
+
+    html::HtmlSection {
+        title: "Lowered JSON Window",
+        description: "A ranked line chart built from JSON text, proving narrow `window` lowering for per-series rank values.",
+        svg: render_lowered_unit_spec(&mut scene, spec),
+    }
+}
+
 fn lowered_json_grouped_bar_demo() -> html::HtmlSection {
     let mut scene = Scene::new();
     let source_id = TableId(1371);
@@ -1161,6 +1254,19 @@ struct CalculateValues {
 }
 
 #[derive(Debug)]
+struct SeriesPointValues {
+    x: Vec<f64>,
+    value: Vec<f64>,
+    series: Vec<f64>,
+}
+
+#[derive(Debug)]
+struct RankSeriesValues {
+    value: Vec<f64>,
+    series: Vec<f64>,
+}
+
+#[derive(Debug)]
 struct PointStrokeValues {
     x: Vec<f64>,
     y: Vec<f64>,
@@ -1234,6 +1340,35 @@ impl TableData for CalculateValues {
             ColumnId(0) => self.x.get(row).copied(),
             ColumnId(1) => self.base.get(row).copied(),
             ColumnId(2) => self.delta.get(row).copied(),
+            _ => None,
+        }
+    }
+}
+
+impl TableData for SeriesPointValues {
+    fn row_count(&self) -> usize {
+        self.x.len().min(self.value.len()).min(self.series.len())
+    }
+
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        match col {
+            ColumnId(0) => self.x.get(row).copied(),
+            ColumnId(1) => self.value.get(row).copied(),
+            ColumnId(2) => self.series.get(row).copied(),
+            _ => None,
+        }
+    }
+}
+
+impl TableData for RankSeriesValues {
+    fn row_count(&self) -> usize {
+        self.value.len().min(self.series.len())
+    }
+
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        match col {
+            ColumnId(0) => self.value.get(row).copied(),
+            ColumnId(1) => self.series.get(row).copied(),
             _ => None,
         }
     }

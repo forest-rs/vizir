@@ -65,10 +65,12 @@ Status meanings:
 | `filter` | partial | Requires explicit `columns` carry-through list in adapter/json layer |
 | `sort` | partial | Requires explicit `columns` carry-through list in adapter/json layer |
 | `calculate` | partial | Narrow arithmetic-only expressions today: two numeric operands (`field` or constant), one derived alias, and an explicit `columns` carry-through list |
+| `joinaggregate` | partial | Reuses aggregate ops, writes grouped values back per row, and currently requires explicit `columns` plus derived aliases |
 | `aggregate` | supported | Derived output aliases supported via adapter/json path |
 | `bin` | partial | Requires explicit `columns` carry-through list |
+| `window` | partial | Narrow slice only: `row_number` and `rank` over one required sort key, optional `group_by`, and explicit `columns` |
 | `stack` | partial | Requires explicit `columns`; output aliases supported |
-| `joinaggregate`, `window`, `fold`, `pivot`, `flatten`, `lookup`, `density`, `regression`, etc. | missing | Not in authored seam today |
+| `fold`, `pivot`, `flatten`, `lookup`, `density`, `regression`, etc. | missing | Not in authored seam today |
 
 ### Parser-facing layers
 
@@ -104,6 +106,11 @@ Status meanings:
 - `calculate` currently means a narrow arithmetic expression only: two numeric operands
   (`field` or constant), one of `add`/`sub`/`mul`/`div`, one derived output alias, and an
   explicit carry-through `columns` list in the parsed/JSON path.
+- `joinaggregate` currently reuses the existing aggregate ops, writes grouped values back per row,
+  and requires an explicit carry-through `columns` list in the parsed/JSON path.
+- `window` currently means one required sort key, optional `group_by`, and only the
+  `row_number` / `rank` operations, with an explicit carry-through `columns` list in the
+  parsed/JSON path.
 - `aggregate` on `x`, `x2`, `color`, `y2`, `opacity`, `stroke`, `strokeWidth`, `order`, `detail`, and `text` is rejected.
 - `x2` is currently only supported on `area`.
 - `y2` is currently supported on `area` and `bar`.

@@ -13,7 +13,8 @@ use vizir_core::{ColumnId, TableId};
 
 use crate::table::TableFrame;
 use crate::transform::{
-    AggregateOp, CalculateExpr, CalculateOp, CalculateOperand, SortOrder, StackOffset, Transform,
+    AggregateField, AggregateOp, CalculateExpr, CalculateOp, CalculateOperand, SortOrder,
+    StackOffset, Transform, WindowOp,
 };
 
 /// Errors returned when executing a transform [`Program`].
@@ -250,6 +251,66 @@ impl Program {
                         },
                     );
                 }
+                Transform::JoinAggregate {
+                    input,
+                    output,
+                    group_by,
+                    fields,
+                    columns,
+                } => {
+                    let frame = get_frame(*input, inputs, &out.tables)?;
+                    if columns.is_empty() || fields.is_empty() {
+                        return Err(ExecutionError::InvalidTransform);
+                    }
+                    require_columns(*input, frame, columns)?;
+                    if !group_by.is_empty() {
+                        require_columns(*input, frame, group_by)?;
+                    }
+                    require_aggregate_fields(*input, frame, fields)?;
+                    validate_derived_output_columns(
+                        columns,
+                        fields.iter().map(|field| field.output),
+                    )?;
+
+                    let groups = build_aggregate_groups(frame, group_by, fields);
+                    let mut group_index: HashMap<Vec<u64>, usize> = HashMap::new();
+                    for (idx, group) in groups.iter().enumerate() {
+                        group_index.insert(group.key.clone(), idx);
+                    }
+
+                    let mut out_columns = Vec::with_capacity(columns.len() + fields.len());
+                    out_columns.extend(columns.iter().copied());
+                    out_columns.extend(fields.iter().map(|field| field.output));
+
+                    let mut out_data: Vec<Vec<f64>> = Vec::with_capacity(out_columns.len());
+                    for &col in columns {
+                        let ci = frame.column_index(col).expect("validated");
+                        out_data.push(frame.data[ci].clone());
+                    }
+
+                    let mut joined_values: Vec<Vec<f64>> =
+                        vec![vec![f64::NAN; frame.row_count()]; fields.len()];
+                    for (row, _) in frame.row_keys.iter().enumerate() {
+                        let key = frame_group_key(frame, row, group_by);
+                        let gi = *group_index
+                            .get(&key)
+                            .ok_or(ExecutionError::InvalidTransform)?;
+                        let group = &groups[gi];
+                        for (fi, field) in fields.iter().enumerate() {
+                            joined_values[fi][row] = aggregate_field_value(group, fi, field);
+                        }
+                    }
+                    out_data.extend(joined_values);
+
+                    out.tables.insert(
+                        *output,
+                        TableFrame {
+                            row_keys: frame.row_keys.clone(),
+                            columns: out_columns,
+                            data: out_data,
+                        },
+                    );
+                }
                 Transform::Aggregate {
                     input,
                     output,
@@ -263,75 +324,8 @@ impl Program {
                     if !group_by.is_empty() {
                         require_columns(*input, frame, group_by)?;
                     }
-                    for f in fields {
-                        require_columns(*input, frame, core::slice::from_ref(&f.input))?;
-                    }
-
-                    #[derive(Debug)]
-                    struct Acc {
-                        group_vals: Vec<f64>,
-                        sum: Vec<f64>,
-                        count: Vec<u64>,
-                        min: Vec<f64>,
-                        max: Vec<f64>,
-                    }
-
-                    let mut groups: HashMap<Vec<u64>, usize> = HashMap::new();
-                    let mut order: Vec<Vec<u64>> = Vec::new();
-                    let mut accs: Vec<Acc> = Vec::new();
-
-                    for row in 0..frame.row_count() {
-                        let mut key: Vec<u64> = Vec::with_capacity(group_by.len());
-                        let mut group_vals: Vec<f64> = Vec::with_capacity(group_by.len());
-                        for &c in group_by {
-                            let v = frame.f64(row, c).unwrap_or(f64::NAN);
-                            key.push(v.to_bits());
-                            group_vals.push(v);
-                        }
-
-                        let idx = match groups.get(&key).copied() {
-                            Some(i) => i,
-                            None => {
-                                let i = accs.len();
-                                order.push(key.clone());
-                                groups.insert(key, i);
-                                accs.push(Acc {
-                                    group_vals,
-                                    sum: vec![0.0; fields.len()],
-                                    count: vec![0; fields.len()],
-                                    min: vec![f64::INFINITY; fields.len()],
-                                    max: vec![f64::NEG_INFINITY; fields.len()],
-                                });
-                                i
-                            }
-                        };
-
-                        let acc = &mut accs[idx];
-                        for (fi, f) in fields.iter().enumerate() {
-                            let v = frame.f64(row, f.input).unwrap_or(f64::NAN);
-                            match f.op {
-                                AggregateOp::Count => {
-                                    acc.count[fi] = acc.count[fi].saturating_add(1);
-                                }
-                                AggregateOp::Sum | AggregateOp::Mean => {
-                                    if v.is_finite() {
-                                        acc.sum[fi] += v;
-                                        acc.count[fi] = acc.count[fi].saturating_add(1);
-                                    }
-                                }
-                                AggregateOp::Min => {
-                                    if v.is_finite() {
-                                        acc.min[fi] = acc.min[fi].min(v);
-                                    }
-                                }
-                                AggregateOp::Max => {
-                                    if v.is_finite() {
-                                        acc.max[fi] = acc.max[fi].max(v);
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    require_aggregate_fields(*input, frame, fields)?;
+                    let groups = build_aggregate_groups(frame, group_by, fields);
 
                     // Build output columns: group_by then each field.output.
                     let mut columns = Vec::with_capacity(group_by.len() + fields.len());
@@ -339,46 +333,19 @@ impl Program {
                     columns.extend(fields.iter().map(|f| f.output));
 
                     let mut data: Vec<Vec<f64>> = vec![Vec::new(); columns.len()];
-                    let mut row_keys: Vec<u64> = Vec::with_capacity(order.len());
+                    let mut row_keys: Vec<u64> = Vec::with_capacity(groups.len());
 
-                    for (gi, key) in order.iter().enumerate() {
-                        row_keys.push(hash_group_key(key));
-                        let acc = &accs[gi];
+                    for group in &groups {
+                        row_keys.push(hash_group_key(&group.key));
 
                         // Group-by columns.
-                        for (i, v) in acc.group_vals.iter().copied().enumerate() {
+                        for (i, v) in group.group_vals.iter().copied().enumerate() {
                             data[i].push(v);
                         }
 
                         // Aggregate columns.
                         for (fi, f) in fields.iter().enumerate() {
-                            let v = match f.op {
-                                AggregateOp::Count => acc.count[fi] as f64,
-                                AggregateOp::Sum => acc.sum[fi],
-                                AggregateOp::Min => {
-                                    if acc.min[fi].is_finite() {
-                                        acc.min[fi]
-                                    } else {
-                                        f64::NAN
-                                    }
-                                }
-                                AggregateOp::Max => {
-                                    if acc.max[fi].is_finite() {
-                                        acc.max[fi]
-                                    } else {
-                                        f64::NAN
-                                    }
-                                }
-                                AggregateOp::Mean => {
-                                    let c = acc.count[fi];
-                                    if c == 0 {
-                                        f64::NAN
-                                    } else {
-                                        acc.sum[fi] / c as f64
-                                    }
-                                }
-                            };
-                            data[group_by.len() + fi].push(v);
+                            data[group_by.len() + fi].push(aggregate_field_value(group, fi, f));
                         }
                     }
 
@@ -434,6 +401,104 @@ impl Program {
                         binned.push(bin0);
                     }
                     out_data.push(binned);
+
+                    out.tables.insert(
+                        *output,
+                        TableFrame {
+                            row_keys: frame.row_keys.clone(),
+                            columns: out_columns,
+                            data: out_data,
+                        },
+                    );
+                }
+                Transform::Window {
+                    input,
+                    output,
+                    group_by,
+                    sort_by,
+                    sort_order,
+                    fields,
+                    columns,
+                } => {
+                    let frame = get_frame(*input, inputs, &out.tables)?;
+                    if columns.is_empty() || fields.is_empty() {
+                        return Err(ExecutionError::InvalidTransform);
+                    }
+                    require_columns(*input, frame, columns)?;
+                    if !group_by.is_empty() {
+                        require_columns(*input, frame, group_by)?;
+                    }
+                    require_columns(*input, frame, core::slice::from_ref(sort_by))?;
+                    validate_derived_output_columns(
+                        columns,
+                        fields.iter().map(|field| field.output),
+                    )?;
+
+                    let mut partitions: HashMap<Vec<u64>, Vec<usize>> = HashMap::new();
+                    let mut partition_order: Vec<Vec<u64>> = Vec::new();
+                    for row in 0..frame.row_count() {
+                        let key = frame_group_key(frame, row, group_by);
+                        if !partitions.contains_key(&key) {
+                            partition_order.push(key.clone());
+                        }
+                        partitions.entry(key).or_default().push(row);
+                    }
+
+                    let sort_idx = frame.column_index(*sort_by).expect("validated");
+                    let sort_col = &frame.data[sort_idx];
+                    let mut derived_values: Vec<Vec<f64>> =
+                        vec![vec![f64::NAN; frame.row_count()]; fields.len()];
+
+                    for key in partition_order {
+                        let rows = partitions
+                            .get_mut(&key)
+                            .ok_or(ExecutionError::InvalidTransform)?;
+                        rows.sort_by(|&a, &b| {
+                            let av = sort_col[a];
+                            let bv = sort_col[b];
+                            let ord = av.partial_cmp(&bv).unwrap_or(core::cmp::Ordering::Greater);
+                            let ord = match sort_order {
+                                SortOrder::Asc => ord,
+                                SortOrder::Desc => ord.reverse(),
+                            };
+                            ord.then_with(|| frame.row_keys[a].cmp(&frame.row_keys[b]))
+                        });
+
+                        let mut current_rank = 1_u64;
+                        for (position, &row) in rows.iter().enumerate() {
+                            if position > 0 {
+                                let prev = rows[position - 1];
+                                let av = sort_col[prev];
+                                let bv = sort_col[row];
+                                let same_value = match av.partial_cmp(&bv) {
+                                    Some(core::cmp::Ordering::Equal) => true,
+                                    None => av.is_nan() && bv.is_nan(),
+                                    _ => false,
+                                };
+                                if !same_value {
+                                    current_rank = (position + 1) as u64;
+                                }
+                            }
+
+                            for (fi, field) in fields.iter().enumerate() {
+                                derived_values[fi][row] = match field.op {
+                                    WindowOp::RowNumber => (position + 1) as f64,
+                                    WindowOp::Rank => current_rank as f64,
+                                };
+                            }
+                        }
+                    }
+
+                    let mut out_columns = Vec::with_capacity(columns.len() + fields.len());
+                    out_columns.extend(columns.iter().copied());
+                    out_columns.extend(fields.iter().map(|field| field.output));
+
+                    let mut out_data: Vec<Vec<f64>> = Vec::with_capacity(out_columns.len());
+                    for &col in columns {
+                        let ci = frame.column_index(col).expect("validated");
+                        out_data.push(frame.data[ci].clone());
+                    }
+                    out_data.extend(derived_values);
 
                     out.tables.insert(
                         *output,
@@ -750,6 +815,16 @@ impl Program {
     }
 }
 
+#[derive(Debug, Clone)]
+struct AggregateGroup {
+    key: Vec<u64>,
+    group_vals: Vec<f64>,
+    sum: Vec<f64>,
+    count: Vec<u64>,
+    min: Vec<f64>,
+    max: Vec<f64>,
+}
+
 fn hash_group_key(bits: &[u64]) -> u64 {
     // FNV-1a 64-bit: deterministic and cheap.
     let mut h = 0xcbf29ce484222325_u64;
@@ -824,6 +899,144 @@ fn require_calculate_expr_columns(
         }
     }
     Ok(())
+}
+
+fn require_aggregate_fields(
+    table: TableId,
+    frame: &TableFrame,
+    fields: &[AggregateField],
+) -> Result<(), ExecutionError> {
+    for field in fields {
+        require_columns(table, frame, core::slice::from_ref(&field.input))?;
+    }
+    Ok(())
+}
+
+fn validate_derived_output_columns(
+    columns: &[ColumnId],
+    outputs: impl IntoIterator<Item = ColumnId>,
+) -> Result<(), ExecutionError> {
+    let mut seen: Vec<ColumnId> = columns.to_vec();
+    for output in outputs {
+        if seen.contains(&output) {
+            return Err(ExecutionError::InvalidTransform);
+        }
+        seen.push(output);
+    }
+    Ok(())
+}
+
+fn frame_group_key(frame: &TableFrame, row: usize, group_by: &[ColumnId]) -> Vec<u64> {
+    let mut key = Vec::with_capacity(group_by.len());
+    for &col in group_by {
+        key.push(frame.f64(row, col).unwrap_or(f64::NAN).to_bits());
+    }
+    key
+}
+
+fn build_aggregate_groups(
+    frame: &TableFrame,
+    group_by: &[ColumnId],
+    fields: &[AggregateField],
+) -> Vec<AggregateGroup> {
+    let mut groups: HashMap<Vec<u64>, usize> = HashMap::new();
+    let mut order: Vec<Vec<u64>> = Vec::new();
+    let mut accs: Vec<AggregateGroup> = Vec::new();
+
+    for row in 0..frame.row_count() {
+        let key = frame_group_key(frame, row, group_by);
+        let mut group_vals: Vec<f64> = Vec::with_capacity(group_by.len());
+        for &col in group_by {
+            group_vals.push(frame.f64(row, col).unwrap_or(f64::NAN));
+        }
+
+        let idx = match groups.get(&key).copied() {
+            Some(i) => i,
+            None => {
+                let i = accs.len();
+                order.push(key.clone());
+                groups.insert(key.clone(), i);
+                accs.push(AggregateGroup {
+                    key,
+                    group_vals,
+                    sum: vec![0.0; fields.len()],
+                    count: vec![0; fields.len()],
+                    min: vec![f64::INFINITY; fields.len()],
+                    max: vec![f64::NEG_INFINITY; fields.len()],
+                });
+                i
+            }
+        };
+
+        let acc = &mut accs[idx];
+        for (fi, field) in fields.iter().enumerate() {
+            let value = frame.f64(row, field.input).unwrap_or(f64::NAN);
+            match field.op {
+                AggregateOp::Count => {
+                    acc.count[fi] = acc.count[fi].saturating_add(1);
+                }
+                AggregateOp::Sum | AggregateOp::Mean => {
+                    if value.is_finite() {
+                        acc.sum[fi] += value;
+                        acc.count[fi] = acc.count[fi].saturating_add(1);
+                    }
+                }
+                AggregateOp::Min => {
+                    if value.is_finite() {
+                        acc.min[fi] = acc.min[fi].min(value);
+                    }
+                }
+                AggregateOp::Max => {
+                    if value.is_finite() {
+                        acc.max[fi] = acc.max[fi].max(value);
+                    }
+                }
+            }
+        }
+    }
+
+    order
+        .into_iter()
+        .map(|key| {
+            let idx = *groups
+                .get(&key)
+                .expect("group order is derived from known keys");
+            accs[idx].clone()
+        })
+        .collect()
+}
+
+fn aggregate_field_value(
+    group: &AggregateGroup,
+    field_index: usize,
+    field: &AggregateField,
+) -> f64 {
+    match field.op {
+        AggregateOp::Count => group.count[field_index] as f64,
+        AggregateOp::Sum => group.sum[field_index],
+        AggregateOp::Min => {
+            if group.min[field_index].is_finite() {
+                group.min[field_index]
+            } else {
+                f64::NAN
+            }
+        }
+        AggregateOp::Max => {
+            if group.max[field_index].is_finite() {
+                group.max[field_index]
+            } else {
+                f64::NAN
+            }
+        }
+        AggregateOp::Mean => {
+            let count = group.count[field_index];
+            if count == 0 {
+                f64::NAN
+            } else {
+                group.sum[field_index] / count as f64
+            }
+        }
+    }
 }
 
 fn evaluate_calculate_operand(frame: &TableFrame, row: usize, operand: CalculateOperand) -> f64 {
@@ -994,6 +1207,89 @@ mod tests {
         assert_eq!(t.columns, vec![ColumnId(0), ColumnId(1), ColumnId(2)]);
         assert_eq!(t.data[2], vec![2.0, 4.0, 6.0, 8.0]);
         assert_eq!(t.row_keys, vec![10, 11, 12, 13]);
+    }
+
+    #[test]
+    fn joinaggregate_writes_group_means_back_per_row() {
+        let mut p = Program::new();
+        p.push(Transform::JoinAggregate {
+            input: TableId(1),
+            output: TableId(2),
+            group_by: vec![ColumnId(0)],
+            fields: vec![AggregateField {
+                op: AggregateOp::Mean,
+                input: ColumnId(1),
+                output: ColumnId(2),
+            }],
+            columns: vec![ColumnId(0), ColumnId(1)],
+        });
+
+        let inputs: HashMap<_, _> = [(
+            TableId(1),
+            TableFrame {
+                row_keys: vec![1, 2, 3, 4, 5],
+                columns: vec![ColumnId(0), ColumnId(1)],
+                data: vec![vec![0.0, 0.0, 1.0, 1.0, 1.0], vec![1.0, 3.0, 2.0, 4.0, 8.0]],
+            },
+        )]
+        .into_iter()
+        .collect();
+
+        let out = p.execute(&inputs).unwrap();
+        let t = out.tables.get(&TableId(2)).unwrap();
+        assert_eq!(t.columns, vec![ColumnId(0), ColumnId(1), ColumnId(2)]);
+        assert_eq!(
+            t.data[2],
+            vec![2.0, 2.0, 14.0 / 3.0, 14.0 / 3.0, 14.0 / 3.0]
+        );
+        assert_eq!(t.row_keys, vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn window_row_number_and_rank_respect_grouped_sort_order() {
+        let mut p = Program::new();
+        p.push(Transform::Window {
+            input: TableId(1),
+            output: TableId(2),
+            group_by: vec![ColumnId(0)],
+            sort_by: ColumnId(1),
+            sort_order: SortOrder::Desc,
+            fields: vec![
+                crate::transform::WindowField {
+                    op: WindowOp::RowNumber,
+                    output: ColumnId(2),
+                },
+                crate::transform::WindowField {
+                    op: WindowOp::Rank,
+                    output: ColumnId(3),
+                },
+            ],
+            columns: vec![ColumnId(0), ColumnId(1)],
+        });
+
+        let inputs: HashMap<_, _> = [(
+            TableId(1),
+            TableFrame {
+                row_keys: vec![10, 11, 12, 13, 14, 15],
+                columns: vec![ColumnId(0), ColumnId(1)],
+                data: vec![
+                    vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                    vec![5.0, 5.0, 2.0, 7.0, 4.0, 4.0],
+                ],
+            },
+        )]
+        .into_iter()
+        .collect();
+
+        let out = p.execute(&inputs).unwrap();
+        let t = out.tables.get(&TableId(2)).unwrap();
+        assert_eq!(
+            t.columns,
+            vec![ColumnId(0), ColumnId(1), ColumnId(2), ColumnId(3)]
+        );
+        assert_eq!(t.data[2], vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+        assert_eq!(t.data[3], vec![1.0, 1.0, 3.0, 1.0, 2.0, 2.0]);
+        assert_eq!(t.row_keys, vec![10, 11, 12, 13, 14, 15]);
     }
 
     #[test]

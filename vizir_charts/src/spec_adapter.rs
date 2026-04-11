@@ -16,7 +16,7 @@ use peniko::Brush;
 use vizir_core::{ColumnId, TableId};
 use vizir_transforms::{
     AggregateField, AggregateOp, CalculateExpr, CalculateOp, CalculateOperand, CompareOp,
-    Predicate, SortOrder, StackOffset,
+    Predicate, SortOrder, StackOffset, WindowField, WindowOp,
 };
 
 use crate::{
@@ -382,6 +382,25 @@ impl ParsedCalculateExpr {
     }
 }
 
+/// One derived output field in a parsed narrow window transform.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParsedWindowField {
+    /// Window operation to compute.
+    pub op: WindowOp,
+    /// Output field name.
+    pub as_field: String,
+}
+
+impl ParsedWindowField {
+    /// Creates a parsed window field.
+    pub fn new(op: WindowOp, as_field: impl Into<String>) -> Self {
+        Self {
+            op,
+            as_field: as_field.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 enum ParsedTransformKind {
     Filter {
@@ -398,6 +417,11 @@ enum ParsedTransformKind {
         as_field: String,
         columns: Vec<String>,
     },
+    JoinAggregate {
+        group_by: Vec<String>,
+        fields: Vec<ParsedAggregateField>,
+        columns: Vec<String>,
+    },
     Aggregate {
         group_by: Vec<String>,
         fields: Vec<ParsedAggregateField>,
@@ -406,6 +430,13 @@ enum ParsedTransformKind {
         field: String,
         as_start: String,
         step: f64,
+        columns: Vec<String>,
+    },
+    Window {
+        group_by: Vec<String>,
+        sort_by: String,
+        sort_order: SortOrder,
+        fields: Vec<ParsedWindowField>,
         columns: Vec<String>,
     },
     Stack {
@@ -470,6 +501,21 @@ impl ParsedTransformSpec {
         }
     }
 
+    /// Creates a parsed joinaggregate transform.
+    pub fn joinaggregate(
+        group_by: impl IntoIterator<Item = impl Into<String>>,
+        fields: Vec<ParsedAggregateField>,
+        columns: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            kind: ParsedTransformKind::JoinAggregate {
+                group_by: collect_names(group_by),
+                fields,
+                columns: collect_names(columns),
+            },
+        }
+    }
+
     /// Creates a parsed aggregate transform.
     pub fn aggregate(
         group_by: impl IntoIterator<Item = impl Into<String>>,
@@ -479,6 +525,25 @@ impl ParsedTransformSpec {
             kind: ParsedTransformKind::Aggregate {
                 group_by: collect_names(group_by),
                 fields,
+            },
+        }
+    }
+
+    /// Creates a parsed narrow window transform.
+    pub fn window(
+        group_by: impl IntoIterator<Item = impl Into<String>>,
+        sort_by: impl Into<String>,
+        sort_order: SortOrder,
+        fields: Vec<ParsedWindowField>,
+        columns: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            kind: ParsedTransformKind::Window {
+                group_by: collect_names(group_by),
+                sort_by: sort_by.into(),
+                sort_order,
+                fields,
+                columns: collect_names(columns),
             },
         }
     }
@@ -1406,6 +1471,23 @@ fn adapt_transform(
             fields.allocate_output(as_field)?,
             resolve_columns(fields, columns, "calculate carry-through")?,
         )),
+        ParsedTransformKind::JoinAggregate {
+            group_by,
+            fields: agg,
+            columns,
+        } => Ok(TransformSpec::joinaggregate(
+            resolve_columns(fields, group_by, "joinaggregate group_by")?,
+            agg.iter()
+                .map(|field| {
+                    Ok(AggregateField {
+                        op: field.op,
+                        input: fields.resolve_input(&field.field, "joinaggregate input")?,
+                        output: fields.allocate_output(&field.as_field)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            resolve_columns(fields, columns, "joinaggregate carry-through")?,
+        )),
         ParsedTransformKind::Aggregate {
             group_by,
             fields: agg,
@@ -1431,6 +1513,27 @@ fn adapt_transform(
             fields.allocate_output(as_start)?,
             *step,
             resolve_columns(fields, columns, "bin carry-through")?,
+        )),
+        ParsedTransformKind::Window {
+            group_by,
+            sort_by,
+            sort_order,
+            fields: window_fields,
+            columns,
+        } => Ok(TransformSpec::window(
+            resolve_columns(fields, group_by, "window group_by")?,
+            fields.resolve_input(sort_by, "window sort")?,
+            *sort_order,
+            window_fields
+                .iter()
+                .map(|field| {
+                    Ok(WindowField {
+                        op: field.op,
+                        output: fields.allocate_output(&field.as_field)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            resolve_columns(fields, columns, "window carry-through")?,
         )),
         ParsedTransformKind::Stack {
             group_by,
@@ -1750,6 +1853,123 @@ mod tests {
         assert_eq!(data.f64(0, ColumnId(3)), Some(2.5));
         assert_eq!(data.f64(1, ColumnId(3)), Some(5.0));
         assert_eq!(data.f64(2, ColumnId(3)), Some(7.5));
+    }
+
+    #[test]
+    fn parsed_joinaggregate_transform_allocates_alias_and_lowers() {
+        let parsed = ParsedUnitSpec::new(ParsedMarkDef::Point)
+            .with_transform(ParsedTransformSpec::joinaggregate(
+                ["series"],
+                vec![ParsedAggregateField::new(
+                    AggregateOp::Mean,
+                    "value",
+                    "mean_value",
+                )],
+                ["x", "value", "series"],
+            ))
+            .with_x(ParsedChannelDef::quantitative("x"))
+            .with_y(ParsedChannelDef::quantitative("mean_value"))
+            .with_color(ParsedChannelDef::nominal("series"));
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "value",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "series",
+                column: ColumnId(2),
+            },
+        ]);
+
+        let mut scene = Scene::new();
+        let table_id = TableId(202);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![220, 221, 222, 223];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0, 2.0, 3.0],
+            b: vec![2.0, 4.0, 3.0, 5.0],
+            c: vec![0.0, 0.0, 1.0, 1.0],
+            d: vec![0.0, 0.0, 0.0, 0.0],
+        }));
+        scene.insert_table(table);
+
+        let unit = parsed
+            .adapt(&resolver, context(table_id))
+            .expect("adapt joinaggregate spec");
+        let lowered = unit
+            .lower_into_scene(&mut scene)
+            .expect("lower joinaggregate spec");
+        let joined = scene
+            .tables
+            .get(&lowered.output_table())
+            .expect("joinaggregate output");
+        let data = joined.data.as_deref().expect("joinaggregate data");
+        assert_eq!(data.f64(0, ColumnId(3)), Some(3.0));
+        assert_eq!(data.f64(1, ColumnId(3)), Some(3.0));
+        assert_eq!(data.f64(2, ColumnId(3)), Some(4.0));
+        assert_eq!(data.f64(3, ColumnId(3)), Some(4.0));
+    }
+
+    #[test]
+    fn parsed_window_transform_allocates_rank_alias_and_lowers() {
+        let parsed = ParsedUnitSpec::new(ParsedMarkDef::Line)
+            .with_transform(ParsedTransformSpec::window(
+                ["series"],
+                "value",
+                SortOrder::Desc,
+                vec![ParsedWindowField::new(WindowOp::Rank, "value_rank")],
+                ["value", "series"],
+            ))
+            .with_transform(ParsedTransformSpec::sort(
+                "value_rank",
+                SortOrder::Asc,
+                ["value", "series", "value_rank"],
+            ))
+            .with_x(ParsedChannelDef::quantitative("value_rank"))
+            .with_y(ParsedChannelDef::quantitative("value"))
+            .with_color(ParsedChannelDef::nominal("series"));
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "value",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "series",
+                column: ColumnId(1),
+            },
+        ]);
+
+        let mut scene = Scene::new();
+        let table_id = TableId(203);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![230, 231, 232, 233, 234, 235];
+        table.data = Some(Box::new(TwoCols {
+            a: vec![9.0, 5.0, 1.0, 8.0, 4.0, 2.0],
+            b: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        }));
+        scene.insert_table(table);
+
+        let unit = parsed
+            .adapt(&resolver, context(table_id))
+            .expect("adapt window spec");
+        let lowered = unit
+            .lower_into_scene(&mut scene)
+            .expect("lower window spec");
+        let ranked = scene
+            .tables
+            .get(&lowered.output_table())
+            .expect("window output");
+        let data = ranked.data.as_deref().expect("window data");
+        let ranks = (0..data.row_count())
+            .map(|row| data.f64(row, ColumnId(2)).expect("rank value"))
+            .collect::<Vec<_>>();
+        assert_eq!(ranks, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
     }
 
     #[test]

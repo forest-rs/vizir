@@ -1,0 +1,18 @@
+{
+  "mark": "point",
+  "title": "Joined Means",
+  "transform": [
+    {
+      "joinaggregate": [
+        { "op": "mean", "field": "value", "as": "mean_value" }
+      ],
+      "groupby": ["series"],
+      "columns": ["x", "value", "series"]
+    }
+  ],
+  "encoding": {
+    "x": { "field": "x", "type": "quantitative", "title": "x" },
+    "y": { "field": "mean_value", "type": "quantitative", "title": "mean(value)" },
+    "color": { "field": "series", "type": "nominal", "title": "series" }
+  }
+}

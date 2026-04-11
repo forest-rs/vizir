@@ -152,6 +152,27 @@ fn required_input_columns(transforms: &[Transform]) -> HashMap<TableId, HashSet<
                 }
                 produced.insert(*output);
             }
+            Transform::JoinAggregate {
+                input,
+                output,
+                group_by,
+                fields,
+                columns,
+            } => {
+                if !produced.contains(input) {
+                    let set = out.entry(*input).or_default();
+                    for &c in columns {
+                        set.insert(c);
+                    }
+                    for &c in group_by {
+                        set.insert(c);
+                    }
+                    for field in fields {
+                        set.insert(field.input);
+                    }
+                }
+                produced.insert(*output);
+            }
             Transform::Aggregate {
                 input,
                 output,
@@ -182,6 +203,26 @@ fn required_input_columns(transforms: &[Transform]) -> HashMap<TableId, HashSet<
                         set.insert(c);
                     }
                     set.insert(*input_col);
+                }
+                produced.insert(*output);
+            }
+            Transform::Window {
+                input,
+                output,
+                group_by,
+                sort_by,
+                columns,
+                ..
+            } => {
+                if !produced.contains(input) {
+                    let set = out.entry(*input).or_default();
+                    for &c in columns {
+                        set.insert(c);
+                    }
+                    for &c in group_by {
+                        set.insert(c);
+                    }
+                    set.insert(*sort_by);
                 }
                 produced.insert(*output);
             }

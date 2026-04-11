@@ -34,6 +34,7 @@ use vizir_core::{
 use vizir_transforms::{
     AggregateField, AggregateOp, CalculateExpr, CalculateOperand, Predicate, Program,
     SceneExecutionError, SortOrder, StackOffset, TableFrame, TableFrameError, Transform,
+    WindowField,
 };
 
 #[cfg(not(feature = "std"))]
@@ -334,6 +335,11 @@ enum TransformSpecKind {
         output_col: ColumnId,
         columns: Vec<ColumnId>,
     },
+    JoinAggregate {
+        group_by: Vec<ColumnId>,
+        fields: Vec<AggregateField>,
+        columns: Vec<ColumnId>,
+    },
     Aggregate {
         group_by: Vec<ColumnId>,
         fields: Vec<AggregateField>,
@@ -342,6 +348,13 @@ enum TransformSpecKind {
         input_col: ColumnId,
         output_start: ColumnId,
         step: f64,
+        columns: Vec<ColumnId>,
+    },
+    Window {
+        group_by: Vec<ColumnId>,
+        sort_by: ColumnId,
+        sort_order: SortOrder,
+        fields: Vec<WindowField>,
         columns: Vec<ColumnId>,
     },
     Stack {
@@ -388,6 +401,21 @@ impl TransformSpec {
         }
     }
 
+    /// Creates a joinaggregate transform that writes grouped aggregates back per row.
+    pub fn joinaggregate(
+        group_by: Vec<ColumnId>,
+        fields: Vec<AggregateField>,
+        columns: Vec<ColumnId>,
+    ) -> Self {
+        Self {
+            kind: TransformSpecKind::JoinAggregate {
+                group_by,
+                fields,
+                columns,
+            },
+        }
+    }
+
     /// Creates an aggregate transform.
     pub fn aggregate(group_by: Vec<ColumnId>, fields: Vec<AggregateField>) -> Self {
         Self {
@@ -407,6 +435,25 @@ impl TransformSpec {
                 input_col,
                 output_start,
                 step,
+                columns,
+            },
+        }
+    }
+
+    /// Creates a narrow window transform.
+    pub fn window(
+        group_by: Vec<ColumnId>,
+        sort_by: ColumnId,
+        sort_order: SortOrder,
+        fields: Vec<WindowField>,
+        columns: Vec<ColumnId>,
+    ) -> Self {
+        Self {
+            kind: TransformSpecKind::Window {
+                group_by,
+                sort_by,
+                sort_order,
+                fields,
                 columns,
             },
         }
@@ -3425,6 +3472,17 @@ fn lower_authored_transform(
             output_col: *output_col,
             columns: columns.clone(),
         }),
+        TransformSpecKind::JoinAggregate {
+            group_by,
+            fields,
+            columns,
+        } => program.push(Transform::JoinAggregate {
+            input,
+            output,
+            group_by: group_by.clone(),
+            fields: fields.clone(),
+            columns: columns.clone(),
+        }),
         TransformSpecKind::Aggregate { group_by, fields } => program.push(Transform::Aggregate {
             input,
             output,
@@ -3442,6 +3500,21 @@ fn lower_authored_transform(
             input_col: *input_col,
             output_start: *output_start,
             step: *step,
+            columns: columns.clone(),
+        }),
+        TransformSpecKind::Window {
+            group_by,
+            sort_by,
+            sort_order,
+            fields,
+            columns,
+        } => program.push(Transform::Window {
+            input,
+            output,
+            group_by: group_by.clone(),
+            sort_by: *sort_by,
+            sort_order: *sort_order,
+            fields: fields.clone(),
             columns: columns.clone(),
         }),
         TransformSpecKind::Stack {
@@ -3910,6 +3983,21 @@ fn extend_transform_input_columns(out: &mut Vec<ColumnId>, transform: &Transform
                 push_unique_col(out, col);
             }
         }
+        TransformSpecKind::JoinAggregate {
+            group_by,
+            fields,
+            columns,
+        } => {
+            for &col in group_by {
+                push_unique_col(out, col);
+            }
+            for field in fields {
+                push_unique_col(out, field.input);
+            }
+            for &col in columns {
+                push_unique_col(out, col);
+            }
+        }
         TransformSpecKind::Aggregate { group_by, fields } => {
             for &col in group_by {
                 push_unique_col(out, col);
@@ -3922,6 +4010,21 @@ fn extend_transform_input_columns(out: &mut Vec<ColumnId>, transform: &Transform
             input_col, columns, ..
         } => {
             push_unique_col(out, *input_col);
+            for &col in columns {
+                push_unique_col(out, col);
+            }
+        }
+        TransformSpecKind::Window {
+            group_by,
+            sort_by,
+            fields: _,
+            columns,
+            ..
+        } => {
+            for &col in group_by {
+                push_unique_col(out, col);
+            }
+            push_unique_col(out, *sort_by);
             for &col in columns {
                 push_unique_col(out, col);
             }
@@ -4413,6 +4516,21 @@ fn next_derived_col(spec: &UnitSpec) -> u32 {
                     max_col = max_col.max(col.0);
                 }
             }
+            TransformSpecKind::JoinAggregate {
+                group_by,
+                fields,
+                columns,
+            } => {
+                for col in group_by {
+                    max_col = max_col.max(col.0);
+                }
+                for field in fields {
+                    max_col = max_col.max(field.input.0).max(field.output.0);
+                }
+                for col in columns {
+                    max_col = max_col.max(col.0);
+                }
+            }
             TransformSpecKind::Aggregate { group_by, fields } => {
                 for col in group_by {
                     max_col = max_col.max(col.0);
@@ -4428,6 +4546,24 @@ fn next_derived_col(spec: &UnitSpec) -> u32 {
                 ..
             } => {
                 max_col = max_col.max(input_col.0).max(output_start.0);
+                for col in columns {
+                    max_col = max_col.max(col.0);
+                }
+            }
+            TransformSpecKind::Window {
+                group_by,
+                sort_by,
+                fields,
+                columns,
+                ..
+            } => {
+                max_col = max_col.max(sort_by.0);
+                for col in group_by {
+                    max_col = max_col.max(col.0);
+                }
+                for field in fields {
+                    max_col = max_col.max(field.output.0);
+                }
                 for col in columns {
                     max_col = max_col.max(col.0);
                 }
@@ -4473,6 +4609,7 @@ mod tests {
     use super::*;
     use crate::HeuristicTextMeasurer;
     use vizir_core::{MarkKind, Table, TableData};
+    use vizir_transforms::WindowOp;
 
     #[derive(Debug)]
     struct TwoCols {
@@ -4631,6 +4768,104 @@ mod tests {
             .filter(|mark| matches!(mark.kind, MarkKind::Path | MarkKind::Rect))
             .count();
         assert!(point_like >= 3);
+    }
+
+    #[test]
+    fn joinaggregate_point_lowering_derives_group_means_per_row() {
+        let mut scene = Scene::new();
+        let table_id = TableId(1012);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![10, 11, 12, 13, 14, 15];
+        table.data = Some(Box::new(ThreeCols {
+            a: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+            b: vec![2.0, 4.0, 6.0, 3.0, 5.0, 7.0],
+            c: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xAA90,
+            TableId(1013),
+            DataRef::Table(table_id),
+            MarkDef::Point,
+        )
+        .with_transform(TransformSpec::joinaggregate(
+            vec![ColumnId(2)],
+            vec![AggregateField {
+                op: AggregateOp::Mean,
+                input: ColumnId(1),
+                output: ColumnId(10),
+            }],
+            vec![ColumnId(0), ColumnId(1), ColumnId(2)],
+        ))
+        .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+        .with_y(ChannelDef::quantitative(ColumnId(10)).with_title("mean(value)"))
+        .with_color(ChannelDef::nominal(ColumnId(2)).with_title("series"));
+
+        let lowered = spec
+            .lower_into_scene(&mut scene)
+            .expect("lower joinaggregate points");
+        let joined = scene
+            .tables
+            .get(&lowered.output_table())
+            .expect("joinaggregate output table");
+        let data = joined.data.as_deref().expect("joinaggregate table data");
+        assert_eq!(data.f64(0, ColumnId(10)), Some(4.0));
+        assert_eq!(data.f64(2, ColumnId(10)), Some(4.0));
+        assert_eq!(data.f64(3, ColumnId(10)), Some(5.0));
+        assert_eq!(data.f64(5, ColumnId(10)), Some(5.0));
+    }
+
+    #[test]
+    fn window_line_lowering_derives_rank_column_before_series_building() {
+        let mut scene = Scene::new();
+        let table_id = TableId(1014);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![20, 21, 22, 23, 24, 25];
+        table.data = Some(Box::new(ThreeCols {
+            a: vec![9.0, 5.0, 1.0, 8.0, 4.0, 2.0],
+            b: vec![9.0, 5.0, 1.0, 8.0, 4.0, 2.0],
+            c: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xAAA0,
+            TableId(1015),
+            DataRef::Table(table_id),
+            MarkDef::Line,
+        )
+        .with_transform(TransformSpec::window(
+            vec![ColumnId(2)],
+            ColumnId(1),
+            SortOrder::Desc,
+            vec![WindowField {
+                op: WindowOp::Rank,
+                output: ColumnId(10),
+            }],
+            vec![ColumnId(1), ColumnId(2)],
+        ))
+        .with_transform(TransformSpec::sort(
+            ColumnId(10),
+            SortOrder::Asc,
+            vec![ColumnId(1), ColumnId(2), ColumnId(10)],
+        ))
+        .with_x(ChannelDef::quantitative(ColumnId(10)).with_title("rank"))
+        .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("value"))
+        .with_color(ChannelDef::nominal(ColumnId(2)).with_title("series"));
+
+        let lowered = spec
+            .lower_into_scene(&mut scene)
+            .expect("lower ranked line");
+        let ranked = scene
+            .tables
+            .get(&lowered.output_table())
+            .expect("window output table");
+        let data = ranked.data.as_deref().expect("window table data");
+        let ranks = (0..data.row_count())
+            .map(|row| data.f64(row, ColumnId(10)).expect("rank value"))
+            .collect::<Vec<_>>();
+        assert_eq!(ranks, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
     }
 
     #[test]

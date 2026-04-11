@@ -121,6 +121,24 @@ pub struct CalculateExpr {
     pub right: CalculateOperand,
 }
 
+/// Window operation for [`Transform::Window`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowOp {
+    /// 1-based row number within the sorted window partition.
+    RowNumber,
+    /// 1-based rank within the sorted window partition, with gaps for peer groups.
+    Rank,
+}
+
+/// One derived output field for [`Transform::Window`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowField {
+    /// Window operation to evaluate.
+    pub op: WindowOp,
+    /// Output column id.
+    pub output: ColumnId,
+}
+
 /// A row predicate used by [`Transform::Filter`].
 ///
 /// This is intentionally tiny at v0: it supports a single numeric comparison.
@@ -199,6 +217,21 @@ pub enum Transform {
         /// Columns to carry through to the output table.
         columns: Vec<ColumnId>,
     },
+    /// Group rows by one or more keys, compute aggregates, and write the results back per row.
+    ///
+    /// Output columns are `columns` (in order) followed by the `fields` outputs (in order).
+    JoinAggregate {
+        /// Input table.
+        input: TableId,
+        /// Output table.
+        output: TableId,
+        /// Group-by key columns.
+        group_by: Vec<ColumnId>,
+        /// Aggregated fields to join back per input row.
+        fields: Vec<AggregateField>,
+        /// Columns to carry through to the output table.
+        columns: Vec<ColumnId>,
+    },
     /// Group rows by one or more key columns and compute aggregates.
     ///
     /// Output columns are `group_by` (in order) followed by the `fields` outputs (in order).
@@ -226,6 +259,25 @@ pub enum Transform {
         output_start: ColumnId,
         /// Bin step size in data units.
         step: f64,
+        /// Columns to carry through to the output table.
+        columns: Vec<ColumnId>,
+    },
+    /// Compute simple window values over sorted row partitions and write them per row.
+    ///
+    /// Output columns are `columns` (in order) followed by the `fields` outputs (in order).
+    Window {
+        /// Input table.
+        input: TableId,
+        /// Output table.
+        output: TableId,
+        /// Group-by key columns defining independent window partitions.
+        group_by: Vec<ColumnId>,
+        /// Column used to sort rows within each partition.
+        sort_by: ColumnId,
+        /// Sort order within each partition.
+        sort_order: SortOrder,
+        /// Window fields to compute per row.
+        fields: Vec<WindowField>,
         /// Columns to carry through to the output table.
         columns: Vec<ColumnId>,
     },

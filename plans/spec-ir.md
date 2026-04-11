@@ -124,8 +124,10 @@ Support only the transform variants we already execute well:
 - `Filter`
 - `Sort`
 - `Calculate`
+- `JoinAggregate`
 - `Aggregate`
 - `Bin`
+- `Window`
 - `Stack`
 
 The authored transform IR can be one of:

@@ -15,12 +15,13 @@ use alloc::vec::Vec;
 use peniko::{Brush, Color};
 use serde::Deserialize;
 use serde_json::Value;
-use vizir_transforms::{AggregateOp, CalculateOp, CompareOp, SortOrder, StackOffset};
+use vizir_transforms::{AggregateOp, CalculateOp, CompareOp, SortOrder, StackOffset, WindowOp};
 
 use crate::{
     ParsedAggregateField, ParsedCalculateExpr, ParsedCalculateOperand, ParsedChannelDef,
     ParsedEncodingSet, ParsedFacetSpec, ParsedFieldKind, ParsedLayerChildSpec, ParsedLayerSpec,
-    ParsedMarkDef, ParsedPredicate, ParsedTransformSpec, ParsedUnitSpec, StrokeStyle,
+    ParsedMarkDef, ParsedPredicate, ParsedTransformSpec, ParsedUnitSpec, ParsedWindowField,
+    StrokeStyle,
 };
 
 /// Errors returned while parsing a narrow JSON unit spec.
@@ -309,6 +310,16 @@ enum JsonCalculateOperand {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct JsonJoinAggregateTransform {
+    joinaggregate: Vec<JsonAggregateField>,
+    #[serde(default)]
+    groupby: Vec<String>,
+    #[serde(default)]
+    columns: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct JsonAggregateField {
     op: String,
     field: String,
@@ -339,6 +350,25 @@ struct JsonBinBody {
     #[serde(rename = "as")]
     as_field: String,
     step: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JsonWindowTransform {
+    window: Vec<JsonWindowField>,
+    #[serde(default)]
+    groupby: Vec<String>,
+    sort: JsonSortField,
+    #[serde(default)]
+    columns: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JsonWindowField {
+    op: String,
+    #[serde(rename = "as")]
+    as_field: String,
 }
 
 #[derive(Deserialize)]
@@ -480,20 +510,6 @@ fn parse_transform(value: Value) -> Result<ParsedTransformSpec, JsonSpecError> {
         ));
     }
 
-    if object.contains_key("sort") {
-        let raw: JsonSortTransform = serde_json::from_value(value)?;
-        if raw.columns.is_empty() {
-            return Err(JsonSpecError::Invalid(String::from(
-                "sort transforms currently require a `columns` array",
-            )));
-        }
-        return Ok(ParsedTransformSpec::sort(
-            raw.sort.field,
-            parse_sort_order(raw.sort.order.as_deref().unwrap_or("ascending"))?,
-            raw.columns,
-        ));
-    }
-
     if object.contains_key("calculate") {
         let raw: JsonCalculateTransform = serde_json::from_value(value)?;
         if raw.columns.is_empty() {
@@ -508,6 +524,31 @@ fn parse_transform(value: Value) -> Result<ParsedTransformSpec, JsonSpecError> {
                 parse_calculate_operand(raw.calculate.right),
             ),
             raw.calculate.as_field,
+            raw.columns,
+        ));
+    }
+
+    if object.contains_key("joinaggregate") {
+        let raw: JsonJoinAggregateTransform = serde_json::from_value(value)?;
+        if raw.columns.is_empty() {
+            return Err(JsonSpecError::Invalid(String::from(
+                "joinaggregate transforms currently require a `columns` array",
+            )));
+        }
+        let fields = raw
+            .joinaggregate
+            .into_iter()
+            .map(|field| {
+                Ok(ParsedAggregateField::new(
+                    parse_aggregate_op(&field.op)?,
+                    field.field,
+                    field.as_field,
+                ))
+            })
+            .collect::<Result<Vec<_>, JsonSpecError>>()?;
+        return Ok(ParsedTransformSpec::joinaggregate(
+            raw.groupby,
+            fields,
             raw.columns,
         ));
     }
@@ -539,6 +580,46 @@ fn parse_transform(value: Value) -> Result<ParsedTransformSpec, JsonSpecError> {
             raw.bin.field,
             raw.bin.as_field,
             raw.bin.step,
+            raw.columns,
+        ));
+    }
+
+    if object.contains_key("window") {
+        let raw: JsonWindowTransform = serde_json::from_value(value)?;
+        if raw.columns.is_empty() {
+            return Err(JsonSpecError::Invalid(String::from(
+                "window transforms currently require a `columns` array",
+            )));
+        }
+        let fields = raw
+            .window
+            .into_iter()
+            .map(|field| {
+                Ok(ParsedWindowField::new(
+                    parse_window_op(&field.op)?,
+                    field.as_field,
+                ))
+            })
+            .collect::<Result<Vec<_>, JsonSpecError>>()?;
+        return Ok(ParsedTransformSpec::window(
+            raw.groupby,
+            raw.sort.field,
+            parse_sort_order(raw.sort.order.as_deref().unwrap_or("ascending"))?,
+            fields,
+            raw.columns,
+        ));
+    }
+
+    if object.contains_key("sort") {
+        let raw: JsonSortTransform = serde_json::from_value(value)?;
+        if raw.columns.is_empty() {
+            return Err(JsonSpecError::Invalid(String::from(
+                "sort transforms currently require a `columns` array",
+            )));
+        }
+        return Ok(ParsedTransformSpec::sort(
+            raw.sort.field,
+            parse_sort_order(raw.sort.order.as_deref().unwrap_or("ascending"))?,
             raw.columns,
         ));
     }
@@ -642,6 +723,16 @@ fn parse_calculate_op(op: &str) -> Result<CalculateOp, JsonSpecError> {
         "div" => Ok(CalculateOp::Div),
         other => Err(JsonSpecError::Invalid(format!(
             "unsupported calculate op `{other}`"
+        ))),
+    }
+}
+
+fn parse_window_op(op: &str) -> Result<WindowOp, JsonSpecError> {
+    match op {
+        "row_number" | "rowNumber" => Ok(WindowOp::RowNumber),
+        "rank" => Ok(WindowOp::Rank),
+        other => Err(JsonSpecError::Invalid(format!(
+            "unsupported window op `{other}`"
         ))),
     }
 }
@@ -863,6 +954,66 @@ mod tests {
                 },
             )
             .expect("adapt calculate fixture");
+    }
+
+    #[test]
+    fn parses_joinaggregate_fixture() {
+        let spec = parse_unit_spec_json(include_str!(
+            "../../fixtures/specs/unit_joinaggregate_point.json"
+        ))
+        .expect("parse joinaggregate spec");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "value",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "series",
+                column: ColumnId(2),
+            },
+        ]);
+        let _unit = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xB0_060,
+                    derived_table_base: TableId(202),
+                    data: DataRef::Table(TableId(21)),
+                },
+            )
+            .expect("adapt joinaggregate fixture");
+    }
+
+    #[test]
+    fn parses_window_fixture() {
+        let spec = parse_unit_spec_json(include_str!("../../fixtures/specs/unit_window_line.json"))
+            .expect("parse window spec");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "value",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "series",
+                column: ColumnId(1),
+            },
+        ]);
+        let _unit = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xB0_070,
+                    derived_table_base: TableId(203),
+                    data: DataRef::Table(TableId(22)),
+                },
+            )
+            .expect("adapt window fixture");
     }
 
     #[test]

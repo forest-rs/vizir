@@ -1,0 +1,23 @@
+{
+  "mark": "line",
+  "title": "Series Ranks",
+  "transform": [
+    {
+      "window": [
+        { "op": "rank", "as": "value_rank" }
+      ],
+      "groupby": ["series"],
+      "sort": { "field": "value", "order": "descending" },
+      "columns": ["value", "series"]
+    },
+    {
+      "sort": { "field": "value_rank", "order": "ascending" },
+      "columns": ["value", "series", "value_rank"]
+    }
+  ],
+  "encoding": {
+    "x": { "field": "value_rank", "type": "quantitative", "title": "rank" },
+    "y": { "field": "value", "type": "quantitative", "title": "value" },
+    "color": { "field": "series", "type": "nominal", "title": "series" }
+  }
+}
