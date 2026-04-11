@@ -354,6 +354,16 @@ struct JsonBinBody {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct JsonFoldTransform {
+    fold: Vec<String>,
+    #[serde(rename = "as")]
+    as_fields: [String; 2],
+    #[serde(default)]
+    columns: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct JsonWindowTransform {
     window: Vec<JsonWindowField>,
     #[serde(default)]
@@ -580,6 +590,26 @@ fn parse_transform(value: Value) -> Result<ParsedTransformSpec, JsonSpecError> {
             raw.bin.field,
             raw.bin.as_field,
             raw.bin.step,
+            raw.columns,
+        ));
+    }
+
+    if object.contains_key("fold") {
+        let raw: JsonFoldTransform = serde_json::from_value(value)?;
+        if raw.columns.is_empty() {
+            return Err(JsonSpecError::Invalid(String::from(
+                "fold transforms currently require a `columns` array",
+            )));
+        }
+        if raw.fold.is_empty() {
+            return Err(JsonSpecError::Invalid(String::from(
+                "fold transforms currently require at least one folded field",
+            )));
+        }
+        return Ok(ParsedTransformSpec::fold(
+            raw.fold,
+            raw.as_fields[0].clone(),
+            raw.as_fields[1].clone(),
             raw.columns,
         ));
     }
@@ -987,6 +1017,41 @@ mod tests {
                 },
             )
             .expect("adapt joinaggregate fixture");
+    }
+
+    #[test]
+    fn parses_fold_fixture() {
+        let spec = parse_unit_spec_json(include_str!("../../fixtures/specs/unit_fold_bar.json"))
+            .expect("parse fold spec");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "category",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "q1",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "q2",
+                column: ColumnId(2),
+            },
+            SchemaField {
+                name: "q3",
+                column: ColumnId(3),
+            },
+        ]);
+        let _unit = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xB0_065,
+                    derived_table_base: TableId(202),
+                    data: DataRef::Table(TableId(21)),
+                },
+            )
+            .expect("adapt fold fixture");
     }
 
     #[test]

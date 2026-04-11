@@ -411,6 +411,69 @@ impl Program {
                         },
                     );
                 }
+                Transform::Fold {
+                    input,
+                    output,
+                    fields,
+                    output_key,
+                    output_value,
+                    columns,
+                } => {
+                    let frame = get_frame(*input, inputs, &out.tables)?;
+                    if columns.is_empty() || fields.is_empty() {
+                        return Err(ExecutionError::InvalidTransform);
+                    }
+                    if columns.contains(output_key)
+                        || columns.contains(output_value)
+                        || output_key == output_value
+                    {
+                        return Err(ExecutionError::InvalidTransform);
+                    }
+
+                    require_columns(*input, frame, columns)?;
+                    require_columns(*input, frame, fields)?;
+
+                    let mut out_columns = Vec::with_capacity(columns.len() + 2);
+                    out_columns.extend(columns.iter().copied());
+                    out_columns.push(*output_key);
+                    out_columns.push(*output_value);
+
+                    let row_count = frame.row_count() * fields.len();
+                    let mut out_data: Vec<Vec<f64>> = Vec::with_capacity(out_columns.len());
+                    for &col in columns {
+                        let ci = frame.column_index(col).expect("validated");
+                        let src = &frame.data[ci];
+                        let mut dst = Vec::with_capacity(row_count);
+                        for &value in src.iter().take(frame.row_count()) {
+                            for _ in fields {
+                                dst.push(value);
+                            }
+                        }
+                        out_data.push(dst);
+                    }
+
+                    let mut folded_key = Vec::with_capacity(row_count);
+                    let mut folded_value = Vec::with_capacity(row_count);
+                    let mut row_keys = Vec::with_capacity(row_count);
+                    for row in 0..frame.row_count() {
+                        for (slot, &field) in fields.iter().enumerate() {
+                            folded_key.push(slot as f64);
+                            folded_value.push(frame.f64(row, field).unwrap_or(f64::NAN));
+                            row_keys.push(hash_group_key(&[frame.row_keys[row], slot as u64]));
+                        }
+                    }
+                    out_data.push(folded_key);
+                    out_data.push(folded_value);
+
+                    out.tables.insert(
+                        *output,
+                        TableFrame {
+                            row_keys,
+                            columns: out_columns,
+                            data: out_data,
+                        },
+                    );
+                }
                 Transform::Window {
                     input,
                     output,
@@ -1321,6 +1384,38 @@ mod tests {
         assert_eq!(t.data[0], vec![3.7, 6.2, 5.9, 8.0]);
         assert_eq!(t.data[1], vec![2.0, 6.0, 4.0, 8.0]);
         assert_eq!(t.row_keys, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn fold_repeats_rows_for_each_folded_field() {
+        let mut p = Program::new();
+        p.push(Transform::Fold {
+            input: TableId(1),
+            output: TableId(2),
+            fields: vec![ColumnId(1), ColumnId(2)],
+            output_key: ColumnId(3),
+            output_value: ColumnId(4),
+            columns: vec![ColumnId(0)],
+        });
+
+        let inputs: HashMap<_, _> = [(
+            TableId(1),
+            TableFrame {
+                row_keys: vec![10, 11],
+                columns: vec![ColumnId(0), ColumnId(1), ColumnId(2)],
+                data: vec![vec![0.0, 1.0], vec![2.0, 4.0], vec![3.0, 5.0]],
+            },
+        )]
+        .into_iter()
+        .collect();
+
+        let out = p.execute(&inputs).unwrap();
+        let t = out.tables.get(&TableId(2)).unwrap();
+        assert_eq!(t.columns, vec![ColumnId(0), ColumnId(3), ColumnId(4)]);
+        assert_eq!(t.data[0], vec![0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(t.data[1], vec![0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(t.data[2], vec![2.0, 3.0, 4.0, 5.0]);
+        assert_eq!(t.row_count(), 4);
     }
 
     #[test]

@@ -262,6 +262,23 @@ pub enum Transform {
         /// Columns to carry through to the output table.
         columns: Vec<ColumnId>,
     },
+    /// Fold several numeric columns into repeated rows with a numeric slot id and folded value.
+    ///
+    /// Output columns are `columns` (in order) followed by `output_key`, `output_value`.
+    Fold {
+        /// Input table.
+        input: TableId,
+        /// Output table.
+        output: TableId,
+        /// Input columns to fold in the provided order.
+        fields: Vec<ColumnId>,
+        /// Output column containing the 0-based field slot index.
+        output_key: ColumnId,
+        /// Output column containing the folded numeric value.
+        output_value: ColumnId,
+        /// Columns to carry through to the output table.
+        columns: Vec<ColumnId>,
+    },
     /// Compute simple window values over sorted row partitions and write them per row.
     ///
     /// Output columns are `columns` (in order) followed by the `fields` outputs (in order).

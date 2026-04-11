@@ -127,6 +127,7 @@ Support only the transform variants we already execute well:
 - `JoinAggregate`
 - `Aggregate`
 - `Bin`
+- `Fold`
 - `Window`
 - `Stack`
 

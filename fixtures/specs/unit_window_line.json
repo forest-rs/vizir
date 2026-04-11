@@ -1,6 +1,6 @@
 {
-  "mark": "line",
-  "title": "Series Ranks",
+  "mark": "point",
+  "title": "Per-Series Ranks",
   "transform": [
     {
       "window": [
@@ -16,7 +16,7 @@
     }
   ],
   "encoding": {
-    "x": { "field": "value_rank", "type": "quantitative", "title": "rank" },
+    "x": { "field": "value_rank", "type": "quantitative", "title": "rank within series" },
     "y": { "field": "value", "type": "quantitative", "title": "value" },
     "color": { "field": "series", "type": "nominal", "title": "series" }
   }

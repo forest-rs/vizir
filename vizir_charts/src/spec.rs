@@ -350,6 +350,12 @@ enum TransformSpecKind {
         step: f64,
         columns: Vec<ColumnId>,
     },
+    Fold {
+        fields: Vec<ColumnId>,
+        output_key: ColumnId,
+        output_value: ColumnId,
+        columns: Vec<ColumnId>,
+    },
     Window {
         group_by: Vec<ColumnId>,
         sort_by: ColumnId,
@@ -435,6 +441,23 @@ impl TransformSpec {
                 input_col,
                 output_start,
                 step,
+                columns,
+            },
+        }
+    }
+
+    /// Creates a narrow numeric fold transform.
+    pub fn fold(
+        fields: Vec<ColumnId>,
+        output_key: ColumnId,
+        output_value: ColumnId,
+        columns: Vec<ColumnId>,
+    ) -> Self {
+        Self {
+            kind: TransformSpecKind::Fold {
+                fields,
+                output_key,
+                output_value,
                 columns,
             },
         }
@@ -3502,6 +3525,19 @@ fn lower_authored_transform(
             step: *step,
             columns: columns.clone(),
         }),
+        TransformSpecKind::Fold {
+            fields,
+            output_key,
+            output_value,
+            columns,
+        } => program.push(Transform::Fold {
+            input,
+            output,
+            fields: fields.clone(),
+            output_key: *output_key,
+            output_value: *output_value,
+            columns: columns.clone(),
+        }),
         TransformSpecKind::Window {
             group_by,
             sort_by,
@@ -4010,6 +4046,16 @@ fn extend_transform_input_columns(out: &mut Vec<ColumnId>, transform: &Transform
             input_col, columns, ..
         } => {
             push_unique_col(out, *input_col);
+            for &col in columns {
+                push_unique_col(out, col);
+            }
+        }
+        TransformSpecKind::Fold {
+            fields, columns, ..
+        } => {
+            for &col in fields {
+                push_unique_col(out, col);
+            }
             for &col in columns {
                 push_unique_col(out, col);
             }
@@ -4550,6 +4596,20 @@ fn next_derived_col(spec: &UnitSpec) -> u32 {
                     max_col = max_col.max(col.0);
                 }
             }
+            TransformSpecKind::Fold {
+                fields,
+                output_key,
+                output_value,
+                columns,
+            } => {
+                max_col = max_col.max(output_key.0).max(output_value.0);
+                for col in fields {
+                    max_col = max_col.max(col.0);
+                }
+                for col in columns {
+                    max_col = max_col.max(col.0);
+                }
+            }
             TransformSpecKind::Window {
                 group_by,
                 sort_by,
@@ -4814,6 +4874,47 @@ mod tests {
         assert_eq!(data.f64(2, ColumnId(10)), Some(4.0));
         assert_eq!(data.f64(3, ColumnId(10)), Some(5.0));
         assert_eq!(data.f64(5, ColumnId(10)), Some(5.0));
+    }
+
+    #[test]
+    fn fold_bar_lowering_expands_wide_rows_into_grouped_series() {
+        let mut scene = Scene::new();
+        let table_id = TableId(1016);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![30, 31];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0],
+            b: vec![2.0, 4.0],
+            c: vec![3.0, 5.0],
+            d: vec![4.0, 6.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xAAB0,
+            TableId(1017),
+            DataRef::Table(table_id),
+            MarkDef::Bar,
+        )
+        .with_transform(TransformSpec::fold(
+            vec![ColumnId(1), ColumnId(2), ColumnId(3)],
+            ColumnId(10),
+            ColumnId(11),
+            vec![ColumnId(0)],
+        ))
+        .with_x(ChannelDef::ordinal(ColumnId(0)).with_title("category"))
+        .with_y(ChannelDef::quantitative(ColumnId(11)).with_title("value"))
+        .with_color(ChannelDef::nominal(ColumnId(10)).with_title("measure slot"));
+
+        let lowered = spec
+            .lower_into_scene(&mut scene)
+            .expect("lower folded bars");
+        let folded = scene
+            .tables
+            .get(&lowered.output_table())
+            .expect("folded output table");
+        assert_eq!(folded.row_keys.len(), 6);
+        assert!(lowered.chart().legend.is_some());
     }
 
     #[test]

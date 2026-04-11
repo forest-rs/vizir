@@ -206,6 +206,24 @@ fn required_input_columns(transforms: &[Transform]) -> HashMap<TableId, HashSet<
                 }
                 produced.insert(*output);
             }
+            Transform::Fold {
+                input,
+                output,
+                fields,
+                columns,
+                ..
+            } => {
+                if !produced.contains(input) {
+                    let set = out.entry(*input).or_default();
+                    for &c in columns {
+                        set.insert(c);
+                    }
+                    for &c in fields {
+                        set.insert(c);
+                    }
+                }
+                produced.insert(*output);
+            }
             Transform::Window {
                 input,
                 output,

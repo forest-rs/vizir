@@ -1,0 +1,16 @@
+{
+  "mark": "bar",
+  "title": "Folded Measures",
+  "transform": [
+    {
+      "fold": ["q1", "q2", "q3"],
+      "as": ["measure_slot", "measure_value"],
+      "columns": ["category"]
+    }
+  ],
+  "encoding": {
+    "x": { "field": "category", "type": "ordinal", "title": "category" },
+    "y": { "field": "measure_value", "type": "quantitative", "title": "value" },
+    "color": { "field": "measure_slot", "type": "nominal", "title": "measure slot" }
+  }
+}

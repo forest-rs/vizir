@@ -432,6 +432,12 @@ enum ParsedTransformKind {
         step: f64,
         columns: Vec<String>,
     },
+    Fold {
+        fields: Vec<String>,
+        as_key: String,
+        as_value: String,
+        columns: Vec<String>,
+    },
     Window {
         group_by: Vec<String>,
         sort_by: String,
@@ -525,6 +531,23 @@ impl ParsedTransformSpec {
             kind: ParsedTransformKind::Aggregate {
                 group_by: collect_names(group_by),
                 fields,
+            },
+        }
+    }
+
+    /// Creates a parsed narrow fold transform.
+    pub fn fold(
+        fields: impl IntoIterator<Item = impl Into<String>>,
+        as_key: impl Into<String>,
+        as_value: impl Into<String>,
+        columns: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            kind: ParsedTransformKind::Fold {
+                fields: collect_names(fields),
+                as_key: as_key.into(),
+                as_value: as_value.into(),
+                columns: collect_names(columns),
             },
         }
     }
@@ -1514,6 +1537,17 @@ fn adapt_transform(
             *step,
             resolve_columns(fields, columns, "bin carry-through")?,
         )),
+        ParsedTransformKind::Fold {
+            fields: folded_fields,
+            as_key,
+            as_value,
+            columns,
+        } => Ok(TransformSpec::fold(
+            resolve_columns(fields, folded_fields, "fold fields")?,
+            fields.allocate_output(as_key)?,
+            fields.allocate_output(as_value)?,
+            resolve_columns(fields, columns, "fold carry-through")?,
+        )),
         ParsedTransformKind::Window {
             group_by,
             sort_by,
@@ -1913,6 +1947,61 @@ mod tests {
         assert_eq!(data.f64(1, ColumnId(3)), Some(3.0));
         assert_eq!(data.f64(2, ColumnId(3)), Some(4.0));
         assert_eq!(data.f64(3, ColumnId(3)), Some(4.0));
+    }
+
+    #[test]
+    fn parsed_fold_transform_allocates_slot_and_value_aliases() {
+        let parsed = ParsedUnitSpec::new(ParsedMarkDef::Bar)
+            .with_transform(ParsedTransformSpec::fold(
+                ["q1", "q2", "q3"],
+                "measure_slot",
+                "measure_value",
+                ["category"],
+            ))
+            .with_x(ParsedChannelDef::ordinal("category"))
+            .with_y(ParsedChannelDef::quantitative("measure_value"))
+            .with_color(ParsedChannelDef::nominal("measure_slot"));
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "category",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "q1",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "q2",
+                column: ColumnId(2),
+            },
+            SchemaField {
+                name: "q3",
+                column: ColumnId(3),
+            },
+        ]);
+
+        let mut scene = Scene::new();
+        let table_id = TableId(204);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![240, 241];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0],
+            b: vec![2.0, 4.0],
+            c: vec![3.0, 5.0],
+            d: vec![4.0, 6.0],
+        }));
+        scene.insert_table(table);
+
+        let unit = parsed
+            .adapt(&resolver, context(table_id))
+            .expect("adapt fold spec");
+        let lowered = unit.lower_into_scene(&mut scene).expect("lower fold spec");
+        let folded = scene
+            .tables
+            .get(&lowered.output_table())
+            .expect("fold output");
+        assert_eq!(folded.row_keys.len(), 6);
     }
 
     #[test]

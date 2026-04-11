@@ -68,9 +68,10 @@ Status meanings:
 | `joinaggregate` | partial | Reuses aggregate ops, writes grouped values back per row, and currently requires explicit `columns` plus derived aliases |
 | `aggregate` | supported | Derived output aliases supported via adapter/json path |
 | `bin` | partial | Requires explicit `columns` carry-through list |
+| `fold` | partial | Numeric-only today: repeats each row per folded field and emits a numeric slot id plus folded numeric value, with explicit `columns` |
 | `window` | partial | Narrow slice only: `row_number` and `rank` over one required sort key, optional `group_by`, and explicit `columns` |
 | `stack` | partial | Requires explicit `columns`; output aliases supported |
-| `fold`, `pivot`, `flatten`, `lookup`, `density`, `regression`, etc. | missing | Not in authored seam today |
+| `pivot`, `flatten`, `lookup`, `density`, `regression`, etc. | missing | Not in authored seam today |
 
 ### Parser-facing layers
 
@@ -108,6 +109,9 @@ Status meanings:
   explicit carry-through `columns` list in the parsed/JSON path.
 - `joinaggregate` currently reuses the existing aggregate ops, writes grouped values back per row,
   and requires an explicit carry-through `columns` list in the parsed/JSON path.
+- `fold` currently means numeric-only wide-to-long lowering: each folded input field becomes a
+  repeated row, the folded key is emitted as a 0-based numeric slot id, and the folded value is
+  numeric. String field-name outputs are not in the runtime yet.
 - `window` currently means one required sort key, optional `group_by`, and only the
   `row_number` / `rank` operations, with an explicit carry-through `columns` list in the
   parsed/JSON path.

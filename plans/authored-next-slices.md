@@ -18,6 +18,7 @@ Current state:
 - Styling channels now include point-local `opacity`, `stroke`, and `strokeWidth`.
 - Narrow arithmetic `calculate` now lowers through the runtime, authored, parsed, and JSON seams.
 - Narrow `joinaggregate` and `window` transforms now lower through the same end-to-end seam.
+- Narrow numeric-only `fold` now lowers from wide rows into repeated series slots.
 - The parser-facing adapter and feature-gated JSON path target the same seam through checked-in
   fixtures.
 
@@ -37,8 +38,8 @@ Planned slices:
    - Do not let narrow composition slices read as full Vega-Lite resolve semantics.
 2. Broader transform support
    - Continue with the next useful dataflow slices after `calculate` / `joinaggregate` /
-     `window`: likely `fold`, then a calmer `lookup` or richer window surface if the runtime
-     still feels stable.
+     `window` / `fold`: likely `lookup`, then either richer window semantics or a calmer
+     `pivot`, depending on whether the numeric-only runtime fence still feels right.
 3. Fixture-driven expansion
    - Keep shared data and shared plot guides.
    - Add new checked-in JSON fixtures only for slices that are fully tested and documented.

@@ -52,6 +52,7 @@ fn main() {
         lowered_json_spec_demo(),
         lowered_json_calculate_demo(),
         lowered_json_joinaggregate_demo(),
+        lowered_json_fold_demo(),
         lowered_json_window_demo(),
         lowered_json_grouped_bar_demo(),
         lowered_json_stacked_bar_demo(),
@@ -699,6 +700,58 @@ fn lowered_json_joinaggregate_demo() -> html::HtmlSection {
     }
 }
 
+fn lowered_json_fold_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(137055);
+    let mut table = Table::new(source_id);
+    table.row_keys = vec![0, 1, 2];
+    table.data = Some(Box::new(FoldValues {
+        category: vec![0.0, 1.0, 2.0],
+        q1: vec![2.0, 4.0, 3.0],
+        q2: vec![3.0, 5.0, 4.0],
+        q3: vec![4.0, 6.0, 5.0],
+    }));
+    scene.insert_table(table);
+
+    let parsed = parse_unit_spec_json(include_str!("../../fixtures/specs/unit_fold_bar.json"))
+        .expect("parse fold bar spec");
+
+    let resolver = SliceFieldResolver::new(&[
+        SchemaField {
+            name: "category",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "q1",
+            column: ColumnId(1),
+        },
+        SchemaField {
+            name: "q2",
+            column: ColumnId(2),
+        },
+        SchemaField {
+            name: "q3",
+            column: ColumnId(3),
+        },
+    ]);
+    let spec = parsed
+        .adapt(
+            &resolver,
+            AdaptContext {
+                id_base: 0xD0_855,
+                derived_table_base: TableId(13735),
+                data: DataRef::Table(source_id),
+            },
+        )
+        .expect("adapt fold bar spec");
+
+    html::HtmlSection {
+        title: "Lowered JSON Fold",
+        description: "A grouped bar chart built from JSON text, proving numeric-only `fold` lowering from wide rows into repeated series slots.",
+        svg: render_lowered_unit_spec(&mut scene, spec),
+    }
+}
+
 fn lowered_json_window_demo() -> html::HtmlSection {
     let mut scene = Scene::new();
     let source_id = TableId(13706);
@@ -736,7 +789,7 @@ fn lowered_json_window_demo() -> html::HtmlSection {
 
     html::HtmlSection {
         title: "Lowered JSON Window",
-        description: "A ranked line chart built from JSON text, proving narrow `window` lowering for per-series rank values.",
+        description: "A per-series ranked point chart built from JSON text, proving narrow `window` lowering for rank values without implying richer frame semantics.",
         svg: render_lowered_unit_spec(&mut scene, spec),
     }
 }
@@ -1261,6 +1314,14 @@ struct SeriesPointValues {
 }
 
 #[derive(Debug)]
+struct FoldValues {
+    category: Vec<f64>,
+    q1: Vec<f64>,
+    q2: Vec<f64>,
+    q3: Vec<f64>,
+}
+
+#[derive(Debug)]
 struct RankSeriesValues {
     value: Vec<f64>,
     series: Vec<f64>,
@@ -1355,6 +1416,26 @@ impl TableData for SeriesPointValues {
             ColumnId(0) => self.x.get(row).copied(),
             ColumnId(1) => self.value.get(row).copied(),
             ColumnId(2) => self.series.get(row).copied(),
+            _ => None,
+        }
+    }
+}
+
+impl TableData for FoldValues {
+    fn row_count(&self) -> usize {
+        self.category
+            .len()
+            .min(self.q1.len())
+            .min(self.q2.len())
+            .min(self.q3.len())
+    }
+
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        match col {
+            ColumnId(0) => self.category.get(row).copied(),
+            ColumnId(1) => self.q1.get(row).copied(),
+            ColumnId(2) => self.q2.get(row).copied(),
+            ColumnId(3) => self.q3.get(row).copied(),
             _ => None,
         }
     }
