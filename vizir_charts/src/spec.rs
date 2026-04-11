@@ -962,6 +962,7 @@ impl UnitSpec {
         let mut current_table = input_table;
 
         for authored in &self.transforms {
+            validate_authored_transform(authored)?;
             let output = alloc_table(&mut next_table);
             lower_authored_transform(&mut base_program, authored, current_table, output);
             derived_tables.push(output);
@@ -1470,6 +1471,7 @@ impl UnitSpec {
         let mut current_table = input_table;
 
         for authored in &self.transforms {
+            validate_authored_transform(authored)?;
             let output = alloc_table(&mut next_table);
             lower_authored_transform(&mut base_program, authored, current_table, output);
             derived_tables.push(output);
@@ -2155,6 +2157,7 @@ impl LayerSpec {
                 &self.children[index].style,
             )?;
             let mut lowered = child.lower(scene)?;
+            validate_layer_child_shared_domains(&base_lowered, &lowered)?;
             apply_layer_child_style(&mut lowered.series_layers, &self.children[index].style)?;
             series_layers.extend(lowered.series_layers);
             extend_unique_tables(&mut derived_tables, &lowered.derived_tables);
@@ -2226,6 +2229,34 @@ pub enum LoweringError {
     /// Failed while executing the lowered transform program.
     TransformExecution(SceneExecutionError),
 }
+
+impl core::fmt::Display for LoweringError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::MissingTable(table) => write!(f, "missing table {:?} in scene", table),
+            Self::MissingTableData(table) => write!(f, "table {:?} has no data accessor", table),
+            Self::FrameError { table, err } => {
+                write!(
+                    f,
+                    "failed to extract numeric frame from table {:?}: {err}",
+                    table
+                )
+            }
+            Self::MissingChannel(role) => write!(f, "missing required `{role}` channel"),
+            Self::Unsupported(message) => write!(f, "{message}"),
+            Self::MissingDomain { field, role } => {
+                write!(
+                    f,
+                    "could not infer a finite `{role}` domain from field {:?}",
+                    field
+                )
+            }
+            Self::TransformExecution(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl core::error::Error for LoweringError {}
 
 impl From<SceneExecutionError> for LoweringError {
     fn from(value: SceneExecutionError) -> Self {
@@ -3516,6 +3547,54 @@ fn ensure_table_exists(scene: &Scene, table: TableId) -> Result<(), LoweringErro
     }
 }
 
+fn validate_authored_transform(authored: &TransformSpec) -> Result<(), LoweringError> {
+    match &authored.kind {
+        TransformSpecKind::Lookup {
+            fields, columns, ..
+        } => {
+            if fields.is_empty() {
+                return Err(LoweringError::Unsupported(
+                    "lookup transforms require at least one output field",
+                ));
+            }
+            let mut outputs = columns.clone();
+            for field in fields {
+                if outputs.contains(&field.output) {
+                    return Err(LoweringError::Unsupported(
+                        "lookup transforms cannot write the same output column more than once",
+                    ));
+                }
+                outputs.push(field.output);
+            }
+        }
+        TransformSpecKind::Pivot { values, .. } => {
+            if values.is_empty() {
+                return Err(LoweringError::Unsupported(
+                    "pivot transforms require at least one explicit pivot slot",
+                ));
+            }
+            let mut slot_values = Vec::with_capacity(values.len());
+            let mut outputs = Vec::with_capacity(values.len());
+            for slot in values {
+                if slot_values.contains(&slot.value.to_bits()) {
+                    return Err(LoweringError::Unsupported(
+                        "pivot transforms cannot declare the same pivot slot value more than once",
+                    ));
+                }
+                if outputs.contains(&slot.output) {
+                    return Err(LoweringError::Unsupported(
+                        "pivot transforms cannot write the same output column more than once",
+                    ));
+                }
+                slot_values.push(slot.value.to_bits());
+                outputs.push(slot.output);
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn lower_authored_transform(
     program: &mut Program,
     authored: &TransformSpec,
@@ -4362,6 +4441,28 @@ fn validate_layer_child_shared_channels(
     Ok(())
 }
 
+fn validate_layer_child_shared_domains(
+    base: &LoweredUnit,
+    child: &LoweredUnit,
+) -> Result<(), LoweringError> {
+    let measurer = crate::HeuristicTextMeasurer;
+    let base_layout = base.chart.layout(&measurer);
+    let child_layout = child.chart.layout(&measurer);
+
+    if let (Some(base_y), Some(child_y)) = (
+        base.chart.y_scale_continuous(base_layout.data),
+        child.chart.y_scale_continuous(child_layout.data),
+    ) && (child_y.domain_min() < base_y.domain_min()
+        || child_y.domain_max() > base_y.domain_max())
+    {
+        return Err(LoweringError::Unsupported(
+            "layer child y domain extends outside the base child's shared y domain; pick a base child that spans every layered series or keep child domains inside the shared plot",
+        ));
+    }
+
+    Ok(())
+}
+
 fn validate_layer_child_literal_style(
     mark: MarkDef,
     encoding: &EncodingSet,
@@ -5155,6 +5256,54 @@ mod tests {
         assert_eq!(data.f64(2, ColumnId(10)), Some(4.0));
         assert_eq!(data.f64(0, ColumnId(11)), Some(4.0));
         assert_eq!(data.f64(2, ColumnId(11)), Some(6.0));
+    }
+
+    #[test]
+    fn pivot_lowering_rejects_duplicate_slot_values() {
+        let mut scene = Scene::new();
+        let table_id = TableId(1023);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![70, 71];
+        table.data = Some(Box::new(ThreeCols {
+            a: vec![0.0, 0.0],
+            b: vec![2.0, 4.0],
+            c: vec![0.0, 0.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xAAD0,
+            TableId(1024),
+            DataRef::Table(table_id),
+            MarkDef::Line,
+        )
+        .with_transform(TransformSpec::pivot(
+            vec![ColumnId(0)],
+            ColumnId(2),
+            ColumnId(1),
+            AggregateOp::Sum,
+            vec![
+                PivotValue {
+                    value: 0.0,
+                    output: ColumnId(10),
+                },
+                PivotValue {
+                    value: 0.0,
+                    output: ColumnId(11),
+                },
+            ],
+        ))
+        .with_x(ChannelDef::quantitative(ColumnId(0)))
+        .with_y(ChannelDef::quantitative(ColumnId(10)));
+
+        let err = spec
+            .lower(&scene)
+            .expect_err("duplicate pivot slot should fail");
+        assert!(matches!(
+            err,
+            LoweringError::Unsupported(message)
+                if message.contains("same pivot slot value")
+        ));
     }
 
     #[test]
@@ -6106,7 +6255,7 @@ mod tests {
     }
 
     #[test]
-    fn layered_domains_follow_the_base_child() {
+    fn layer_lowering_rejects_children_that_need_wider_y_domains() {
         let mut scene = Scene::new();
         let table_id = TableId(84);
         let mut table = Table::new(table_id);
@@ -6131,14 +6280,14 @@ mod tests {
                     .with_y(ChannelDef::quantitative(ColumnId(3)).with_title("line")),
             );
 
-        let lowered = spec.lower(&scene).expect("lower layered domains");
-        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
-        let y_scale = lowered
-            .chart()
-            .y_scale_continuous(layout.data)
-            .expect("y scale");
-        assert_eq!(y_scale.domain_min(), 1.0);
-        assert_eq!(y_scale.domain_max(), 5.0);
+        let err = spec
+            .lower(&scene)
+            .expect_err("child y domain outside base domain should fail");
+        assert!(matches!(
+            err,
+            LoweringError::Unsupported(message)
+                if message.contains("shared y domain")
+        ));
     }
 
     #[test]

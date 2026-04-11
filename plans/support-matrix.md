@@ -70,7 +70,7 @@ Status meanings:
 | `bin` | partial | Requires explicit `columns` carry-through list |
 | `fold` | partial | Numeric-only today: repeats each row per folded field and emits a numeric slot id plus folded numeric value, with explicit `columns` |
 | `lookup` | partial | One-key table enrichment today: reads from one explicit scene table, appends numeric lookup fields, rejects duplicate lookup keys, and uses `NaN` for misses |
-| `pivot` | partial | Numeric-only today: groups by explicit key fields, widens one numeric pivot key into explicit output slots, and aggregates with an explicit op |
+| `pivot` | partial | Numeric-only today: groups by explicit key fields, widens one numeric pivot key into explicit output slots, aggregates with an explicit op, and rejects duplicate slot values |
 | `window` | partial | Narrow slice only: `row_number` and `rank` over one required sort key, optional `group_by`, and explicit `columns` |
 | `stack` | partial | Requires explicit `columns`; output aliases supported |
 | `flatten`, `density`, `regression`, etc. | missing | Not in authored seam today |
@@ -96,7 +96,9 @@ Status meanings:
 - Shared `layer` currently keeps one shared plot shell. Child entries can be fully specified with
   their own mark, transforms, and encoding block, and later children can inherit
   positional/grouping defaults from the base child, but the base child still owns the shared x/y
-  domains and color/legend shell. Independent per-child domain resolution is not modeled yet.
+  domains and color/legend shell. Children that need a wider y-domain are rejected instead of
+  silently drawing outside the shared plot. Independent per-child domain resolution is not modeled
+  yet.
 - `facet` currently means one ordinal/nominal partition field over a unit-shaped child chart. It
   uses a fixed grid with per-cell inferred domains and no shared legend resolution; child legends
   are suppressed in the current slice.
@@ -120,7 +122,8 @@ Status meanings:
   names through the same shared field resolver as the base table.
 - `pivot` currently means one numeric pivot-key column widened into an explicit list of output
   slots. The runtime does not create dynamic field names: each slot must declare its numeric pivot
-  value and output alias up front, and the result is grouped by explicit `group_by` columns.
+  value and output alias up front, the parser rejects duplicate slot values and aliases, and the
+  result is grouped by explicit `group_by` columns.
 - `window` currently means one required sort key, optional `group_by`, and only the
   `row_number` / `rank` operations, with an explicit carry-through `columns` list in the
   parsed/JSON path.

@@ -19,6 +19,17 @@ pub enum TableFrameError {
     MissingData,
 }
 
+impl core::fmt::Display for TableFrameError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::EmptyColumns => write!(f, "table frame extraction requires at least one column"),
+            Self::MissingData => write!(f, "table has no data accessor"),
+        }
+    }
+}
+
+impl core::error::Error for TableFrameError {}
+
 /// An owned numeric table used as input/output of transform execution.
 ///
 /// This is a deliberately small representation:

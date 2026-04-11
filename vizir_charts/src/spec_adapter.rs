@@ -52,6 +52,24 @@ pub enum AdaptError {
     },
 }
 
+impl core::fmt::Display for AdaptError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::UnknownField { field, role } => {
+                write!(f, "unknown field `{field}` while resolving {role}")
+            }
+            Self::DerivedFieldConflict { field } => {
+                write!(
+                    f,
+                    "derived field `{field}` conflicts with an existing field binding"
+                )
+            }
+        }
+    }
+}
+
+impl core::error::Error for AdaptError {}
+
 /// Resolves authored field names to concrete [`ColumnId`]s.
 pub trait FieldResolver {
     /// Returns the column id for the given field name.
@@ -2815,14 +2833,85 @@ mod tests {
         }));
         scene.insert_table(table);
 
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "y",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "y2",
+                column: ColumnId(2),
+            },
+        ]);
         let layer = parsed
-            .adapt(&resolver(), context(table_id))
+            .adapt(&resolver, context(table_id))
             .expect("adapt overridden layer");
         let lowered = layer.lower(&scene).expect("lower overridden layer");
         let (_layout, marks) = lowered
             .marks(&scene, &HeuristicTextMeasurer)
             .expect("layer marks");
         assert!(marks.len() >= 2);
+    }
+
+    #[test]
+    fn parsed_layer_child_outside_base_y_domain_is_rejected() {
+        let parsed = ParsedLayerSpec::new()
+            .with_x(ParsedChannelDef::quantitative("x"))
+            .with_child(
+                ParsedLayerChildSpec::new(ParsedMarkDef::Area)
+                    .with_y(ParsedChannelDef::quantitative("y"))
+                    .with_y2(ParsedChannelDef::quantitative("band_low")),
+            )
+            .with_child(
+                ParsedLayerChildSpec::new(ParsedMarkDef::Line)
+                    .with_y(ParsedChannelDef::quantitative("outside_line")),
+            );
+
+        let mut scene = Scene::new();
+        let table_id = TableId(711);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![120, 121, 122];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![3.0, 4.0, 5.0],
+            c: vec![1.0, 1.5, 2.0],
+            d: vec![6.0, 7.0, 8.0],
+        }));
+        scene.insert_table(table);
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "y",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "band_low",
+                column: ColumnId(2),
+            },
+            SchemaField {
+                name: "outside_line",
+                column: ColumnId(3),
+            },
+        ]);
+        let layer = parsed
+            .adapt(&resolver, context(table_id))
+            .expect("adapt parsed layer");
+        let err = layer
+            .lower(&scene)
+            .expect_err("child outside base y domain should fail");
+        assert!(matches!(
+            err,
+            LoweringError::Unsupported(message)
+                if message.contains("shared y domain")
+        ));
     }
 
     #[test]

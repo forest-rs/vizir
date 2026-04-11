@@ -21,6 +21,8 @@ Current state:
 - Narrow numeric-only `fold` now lowers from wide rows into repeated series slots.
 - Narrow one-key `lookup` now lowers from a base scene table into one explicit secondary table.
 - Narrow numeric-only `pivot` now lowers from long rows into explicit wide output slots.
+- Shared-layer diagnostics now reject child series that would require a wider y-domain than the
+  base child owns.
 - The parser-facing adapter and feature-gated JSON path target the same seam through checked-in
   fixtures.
 

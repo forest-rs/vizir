@@ -37,6 +37,25 @@ pub enum SceneExecutionError {
     Execution(ExecutionError),
 }
 
+impl core::fmt::Display for SceneExecutionError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::MissingInput(table) => write!(f, "missing input table {:?} in scene", table),
+            Self::MissingData(table) => write!(f, "table {:?} has no data accessor", table),
+            Self::FrameError { table, err } => {
+                write!(
+                    f,
+                    "failed to extract numeric frame from table {:?}: {err}",
+                    table
+                )
+            }
+            Self::Execution(err) => write!(f, "failed to execute transform program: {err}"),
+        }
+    }
+}
+
+impl core::error::Error for SceneExecutionError {}
+
 impl Program {
     /// Execute this program using tables from the given scene.
     ///

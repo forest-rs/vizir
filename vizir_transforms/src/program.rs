@@ -35,6 +35,23 @@ pub enum ExecutionError {
     Unimplemented(&'static str),
 }
 
+impl core::fmt::Display for ExecutionError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::MissingInput(table) => write!(f, "missing input table {:?}", table),
+            Self::MissingColumn { table, col } => {
+                write!(f, "missing column {:?} in table {:?}", col, table)
+            }
+            Self::InvalidTransform => {
+                write!(f, "invalid transform shape for the current executor slice")
+            }
+            Self::Unimplemented(name) => write!(f, "unimplemented transform `{name}`"),
+        }
+    }
+}
+
+impl core::error::Error for ExecutionError {}
+
 /// Outputs of executing a program.
 #[derive(Debug, Default)]
 pub struct ProgramOutput {

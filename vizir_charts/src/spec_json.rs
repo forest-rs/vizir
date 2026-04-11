@@ -698,6 +698,25 @@ fn parse_transform(value: Value) -> Result<ParsedTransformSpec, JsonSpecError> {
                 "pivot transforms currently require at least one explicit pivot slot",
             )));
         }
+        let mut seen_values = Vec::with_capacity(raw.pivot.values.len());
+        let mut seen_aliases = Vec::with_capacity(raw.pivot.values.len());
+        for slot in &raw.pivot.values {
+            if seen_values.contains(&slot.value.to_bits()) {
+                return Err(JsonSpecError::Invalid(String::from(
+                    "pivot transforms cannot declare the same pivot slot value more than once",
+                )));
+            }
+            if seen_aliases
+                .iter()
+                .any(|alias: &String| alias == &slot.as_field)
+            {
+                return Err(JsonSpecError::Invalid(String::from(
+                    "pivot transforms cannot declare the same output alias more than once",
+                )));
+            }
+            seen_values.push(slot.value.to_bits());
+            seen_aliases.push(slot.as_field.clone());
+        }
         return Ok(ParsedTransformSpec::pivot(
             raw.pivot.groupby,
             raw.pivot.field,
@@ -1275,6 +1294,38 @@ mod tests {
         )
         .expect_err("filter without columns should fail");
         assert!(matches!(err, JsonSpecError::Invalid(message) if message.contains("columns")));
+    }
+
+    #[test]
+    fn rejects_pivot_with_duplicate_slot_values() {
+        let err = parse_unit_spec_json(
+            r#"{
+                "mark": "line",
+                "transform": [
+                    {
+                        "pivot": {
+                            "field": "series",
+                            "value": "value",
+                            "op": "sum",
+                            "groupby": ["category"],
+                            "values": [
+                                { "value": 0, "as": "series_a" },
+                                { "value": 0, "as": "series_b" }
+                            ]
+                        }
+                    }
+                ],
+                "encoding": {
+                    "x": { "field": "category", "type": "quantitative" },
+                    "y": { "field": "series_a", "type": "quantitative" }
+                }
+            }"#,
+        )
+        .expect_err("duplicate pivot slot values should fail");
+        assert!(matches!(
+            err,
+            JsonSpecError::Invalid(message) if message.contains("same pivot slot value")
+        ));
     }
 
     #[test]
