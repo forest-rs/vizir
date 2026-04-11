@@ -1,5 +1,5 @@
 {
-  "title": "Pivoted Series",
+  "title": "Long-to-Wide Pivot Table",
   "width": 320,
   "height": 140,
   "transform": [
@@ -23,7 +23,7 @@
     {
       "mark": "area",
       "encoding": {
-        "y": { "field": "series_b", "type": "quantitative", "title": "pivoted value" },
+        "y": { "field": "series_b", "type": "quantitative", "title": "pivot-table value" },
         "y2": { "field": "series_a", "type": "quantitative" }
       },
       "style": {

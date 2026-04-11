@@ -870,8 +870,8 @@ fn lowered_json_pivot_demo() -> html::HtmlSection {
         .expect("adapt pivot layer spec");
 
     html::HtmlSection {
-        title: "Lowered JSON Pivot",
-        description: "A pivoted band plus styled line overlays built from JSON text, proving narrow `pivot` lowering from long rows into explicit wide series columns without violating the shared-domain layer fence.",
+        title: "Lowered JSON Pivot Table",
+        description: "A long-to-wide pivot-table transform built from JSON text, then rendered as a band plus styled line overlays through the shared-domain layer seam.",
         svg: render_lowered_layer_spec(&mut scene, spec),
     }
 }
