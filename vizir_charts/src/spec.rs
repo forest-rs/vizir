@@ -32,8 +32,8 @@ use vizir_core::{
     RectEncodings, Scene, TableId, TextAnchor, TextBaseline, TextEncodings,
 };
 use vizir_transforms::{
-    AggregateField, AggregateOp, Predicate, Program, SceneExecutionError, SortOrder, StackOffset,
-    TableFrame, TableFrameError, Transform,
+    AggregateField, AggregateOp, CalculateExpr, CalculateOperand, Predicate, Program,
+    SceneExecutionError, SortOrder, StackOffset, TableFrame, TableFrameError, Transform,
 };
 
 #[cfg(not(feature = "std"))]
@@ -329,6 +329,11 @@ enum TransformSpecKind {
         order: SortOrder,
         columns: Vec<ColumnId>,
     },
+    Calculate {
+        expr: CalculateExpr,
+        output_col: ColumnId,
+        columns: Vec<ColumnId>,
+    },
     Aggregate {
         group_by: Vec<ColumnId>,
         fields: Vec<AggregateField>,
@@ -369,6 +374,17 @@ impl TransformSpec {
     pub fn sort(by: ColumnId, order: SortOrder, columns: Vec<ColumnId>) -> Self {
         Self {
             kind: TransformSpecKind::Sort { by, order, columns },
+        }
+    }
+
+    /// Creates a narrow arithmetic calculate transform.
+    pub fn calculate(expr: CalculateExpr, output_col: ColumnId, columns: Vec<ColumnId>) -> Self {
+        Self {
+            kind: TransformSpecKind::Calculate {
+                expr,
+                output_col,
+                columns,
+            },
         }
     }
 
@@ -3398,6 +3414,17 @@ fn lower_authored_transform(
             order: *order,
             columns: columns.clone(),
         }),
+        TransformSpecKind::Calculate {
+            expr,
+            output_col,
+            columns,
+        } => program.push(Transform::Calculate {
+            input,
+            output,
+            expr: *expr,
+            output_col: *output_col,
+            columns: columns.clone(),
+        }),
         TransformSpecKind::Aggregate { group_by, fields } => program.push(Transform::Aggregate {
             input,
             output,
@@ -3865,6 +3892,20 @@ fn extend_transform_input_columns(out: &mut Vec<ColumnId>, transform: &Transform
         }
         TransformSpecKind::Sort { by, columns, .. } => {
             push_unique_col(out, *by);
+            for &col in columns {
+                push_unique_col(out, col);
+            }
+        }
+        TransformSpecKind::Calculate {
+            expr,
+            output_col: _,
+            columns,
+        } => {
+            for operand in [expr.left, expr.right] {
+                if let CalculateOperand::Column(col) = operand {
+                    push_unique_col(out, col);
+                }
+            }
             for &col in columns {
                 push_unique_col(out, col);
             }
@@ -4357,6 +4398,21 @@ fn next_derived_col(spec: &UnitSpec) -> u32 {
                     max_col = max_col.max(col.0);
                 }
             }
+            TransformSpecKind::Calculate {
+                expr,
+                output_col,
+                columns,
+            } => {
+                max_col = max_col.max(output_col.0);
+                for operand in [expr.left, expr.right] {
+                    if let CalculateOperand::Column(col) = operand {
+                        max_col = max_col.max(col.0);
+                    }
+                }
+                for col in columns {
+                    max_col = max_col.max(col.0);
+                }
+            }
             TransformSpecKind::Aggregate { group_by, fields } => {
                 for col in group_by {
                     max_col = max_col.max(col.0);
@@ -4522,6 +4578,59 @@ mod tests {
             .filter(|mark| matches!(mark.encodings, MarkEncodings::Rect(_)))
             .count();
         assert_eq!(rect_count, 3);
+    }
+
+    #[test]
+    fn calculate_point_lowering_derives_alias_column_before_mark_building() {
+        let mut scene = Scene::new();
+        let table_id = TableId(1010);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![1, 2, 3];
+        table.data = Some(Box::new(ThreeCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![2.0, 4.0, 6.0],
+            c: vec![0.5, 1.0, 1.5],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xAA80,
+            TableId(1011),
+            DataRef::Table(table_id),
+            MarkDef::Point,
+        )
+        .with_transform(TransformSpec::calculate(
+            CalculateExpr {
+                left: CalculateOperand::Column(ColumnId(1)),
+                op: vizir_transforms::CalculateOp::Add,
+                right: CalculateOperand::Column(ColumnId(2)),
+            },
+            ColumnId(10),
+            vec![ColumnId(0), ColumnId(1), ColumnId(2)],
+        ))
+        .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+        .with_y(ChannelDef::quantitative(ColumnId(10)).with_title("base + delta"));
+
+        let lowered = spec
+            .lower_into_scene(&mut scene)
+            .expect("lower calculated points");
+        let calculated = scene
+            .tables
+            .get(&lowered.output_table())
+            .expect("calculated output table");
+        let data = calculated.data.as_deref().expect("calculated table data");
+        assert_eq!(data.f64(0, ColumnId(10)), Some(2.5));
+        assert_eq!(data.f64(1, ColumnId(10)), Some(5.0));
+        assert_eq!(data.f64(2, ColumnId(10)), Some(7.5));
+
+        let (_layout, marks) = lowered
+            .marks(&scene, &HeuristicTextMeasurer)
+            .expect("point marks");
+        let point_like = marks
+            .iter()
+            .filter(|mark| matches!(mark.kind, MarkKind::Path | MarkKind::Rect))
+            .count();
+        assert!(point_like >= 3);
     }
 
     #[test]

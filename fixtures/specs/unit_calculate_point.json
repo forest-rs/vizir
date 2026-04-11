@@ -1,0 +1,19 @@
+{
+  "mark": "point",
+  "title": "Calculated Points",
+  "transform": [
+    {
+      "calculate": {
+        "op": "add",
+        "left": { "field": "base" },
+        "right": { "field": "delta" },
+        "as": "total"
+      },
+      "columns": ["x", "base", "delta"]
+    }
+  ],
+  "encoding": {
+    "x": { "field": "x", "type": "quantitative", "title": "x" },
+    "y": { "field": "total", "type": "quantitative", "title": "base + delta" }
+  }
+}

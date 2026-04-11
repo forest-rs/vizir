@@ -17,7 +17,7 @@ use vizir_core::{ColumnId, Scene, Table, TableId};
 use crate::Program;
 use crate::program::{ExecutionError, ProgramOutput};
 use crate::table::{TableFrame, TableFrameError};
-use crate::transform::Transform;
+use crate::transform::{CalculateOperand, Transform};
 
 /// Errors returned when executing a [`Program`] against a [`Scene`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,6 +129,26 @@ fn required_input_columns(transforms: &[Transform]) -> HashMap<TableId, HashSet<
                         set.insert(c);
                     }
                     set.insert(*by);
+                }
+                produced.insert(*output);
+            }
+            Transform::Calculate {
+                input,
+                output,
+                expr,
+                columns,
+                ..
+            } => {
+                if !produced.contains(input) {
+                    let set = out.entry(*input).or_default();
+                    for &c in columns {
+                        set.insert(c);
+                    }
+                    for operand in [expr.left, expr.right] {
+                        if let CalculateOperand::Column(col) = operand {
+                            set.insert(col);
+                        }
+                    }
                 }
                 produced.insert(*output);
             }

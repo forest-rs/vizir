@@ -15,12 +15,12 @@ use alloc::vec::Vec;
 use peniko::{Brush, Color};
 use serde::Deserialize;
 use serde_json::Value;
-use vizir_transforms::{AggregateOp, CompareOp, SortOrder, StackOffset};
+use vizir_transforms::{AggregateOp, CalculateOp, CompareOp, SortOrder, StackOffset};
 
 use crate::{
-    ParsedAggregateField, ParsedChannelDef, ParsedEncodingSet, ParsedFacetSpec, ParsedFieldKind,
-    ParsedLayerChildSpec, ParsedLayerSpec, ParsedMarkDef, ParsedPredicate, ParsedTransformSpec,
-    ParsedUnitSpec, StrokeStyle,
+    ParsedAggregateField, ParsedCalculateExpr, ParsedCalculateOperand, ParsedChannelDef,
+    ParsedEncodingSet, ParsedFacetSpec, ParsedFieldKind, ParsedLayerChildSpec, ParsedLayerSpec,
+    ParsedMarkDef, ParsedPredicate, ParsedTransformSpec, ParsedUnitSpec, StrokeStyle,
 };
 
 /// Errors returned while parsing a narrow JSON unit spec.
@@ -284,6 +284,31 @@ struct JsonSortTransform {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct JsonCalculateTransform {
+    calculate: JsonCalculateExpr,
+    #[serde(default)]
+    columns: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JsonCalculateExpr {
+    op: String,
+    left: JsonCalculateOperand,
+    right: JsonCalculateOperand,
+    #[serde(rename = "as")]
+    as_field: String,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum JsonCalculateOperand {
+    Field { field: String },
+    Constant { value: f64 },
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct JsonAggregateField {
     op: String,
     field: String,
@@ -469,6 +494,24 @@ fn parse_transform(value: Value) -> Result<ParsedTransformSpec, JsonSpecError> {
         ));
     }
 
+    if object.contains_key("calculate") {
+        let raw: JsonCalculateTransform = serde_json::from_value(value)?;
+        if raw.columns.is_empty() {
+            return Err(JsonSpecError::Invalid(String::from(
+                "calculate transforms currently require a `columns` array",
+            )));
+        }
+        return Ok(ParsedTransformSpec::calculate(
+            ParsedCalculateExpr::new(
+                parse_calculate_operand(raw.calculate.left),
+                parse_calculate_op(&raw.calculate.op)?,
+                parse_calculate_operand(raw.calculate.right),
+            ),
+            raw.calculate.as_field,
+            raw.columns,
+        ));
+    }
+
     if object.contains_key("aggregate") {
         let raw: JsonAggregateTransform = serde_json::from_value(value)?;
         let fields = raw
@@ -507,6 +550,13 @@ fn parse_transform(value: Value) -> Result<ParsedTransformSpec, JsonSpecError> {
 
 fn parse_brush(raw: &str) -> Result<Brush, JsonSpecError> {
     Ok(Brush::Solid(parse_color(raw)?))
+}
+
+fn parse_calculate_operand(raw: JsonCalculateOperand) -> ParsedCalculateOperand {
+    match raw {
+        JsonCalculateOperand::Field { field } => ParsedCalculateOperand::field(field),
+        JsonCalculateOperand::Constant { value } => ParsedCalculateOperand::constant(value),
+    }
 }
 
 fn parse_color(raw: &str) -> Result<Color, JsonSpecError> {
@@ -580,6 +630,18 @@ fn parse_compare_op(op: &str) -> Result<CompareOp, JsonSpecError> {
         "ne" | "!=" => Ok(CompareOp::Ne),
         _ => Err(JsonSpecError::Invalid(format!(
             "unsupported filter op `{op}`"
+        ))),
+    }
+}
+
+fn parse_calculate_op(op: &str) -> Result<CalculateOp, JsonSpecError> {
+    match op {
+        "add" => Ok(CalculateOp::Add),
+        "sub" => Ok(CalculateOp::Sub),
+        "mul" => Ok(CalculateOp::Mul),
+        "div" => Ok(CalculateOp::Div),
+        other => Err(JsonSpecError::Invalid(format!(
+            "unsupported calculate op `{other}`"
         ))),
     }
 }
@@ -768,6 +830,39 @@ mod tests {
         .expect("parse aggregate transform spec");
 
         let _ = spec;
+    }
+
+    #[test]
+    fn parses_calculate_fixture() {
+        let spec = parse_unit_spec_json(include_str!(
+            "../../fixtures/specs/unit_calculate_point.json"
+        ))
+        .expect("parse calculate spec");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "base",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "delta",
+                column: ColumnId(2),
+            },
+        ]);
+        let _unit = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xB0_050,
+                    derived_table_base: TableId(201),
+                    data: DataRef::Table(TableId(20)),
+                },
+            )
+            .expect("adapt calculate fixture");
     }
 
     #[test]

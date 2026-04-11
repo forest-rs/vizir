@@ -16,6 +16,7 @@ Current state:
 - One-field categorical `facet` now lowers a unit-shaped child chart into a fixed grid.
 - Structural `order` and `detail` channels lower for line/area marks.
 - Styling channels now include point-local `opacity`, `stroke`, and `strokeWidth`.
+- Narrow arithmetic `calculate` now lowers through the runtime, authored, parsed, and JSON seams.
 - The parser-facing adapter and feature-gated JSON path target the same seam through checked-in
   fixtures.
 
@@ -34,7 +35,7 @@ Planned slices:
    - Make facet domain/legend fences and layer shared-shell fences explicit in tests and docs.
    - Do not let narrow composition slices read as full Vega-Lite resolve semantics.
 2. Broader transform support
-   - Start with the most useful derived-field/dataflow slices after composition: `calculate`,
+   - Continue with the next useful derived-field/dataflow slices after `calculate`:
      `joinaggregate`, then a narrow `window`.
 3. Fixture-driven expansion
    - Keep shared data and shared plot guides.

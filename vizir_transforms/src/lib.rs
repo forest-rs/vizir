@@ -24,5 +24,6 @@ pub use program::{ExecutionError, Program, ProgramOutput};
 pub use scene::SceneExecutionError;
 pub use table::{TableFrame, TableFrameError};
 pub use transform::{
-    AggregateField, AggregateOp, CompareOp, Predicate, SortOrder, StackOffset, Transform,
+    AggregateField, AggregateOp, CalculateExpr, CalculateOp, CalculateOperand, CompareOp,
+    Predicate, SortOrder, StackOffset, Transform,
 };

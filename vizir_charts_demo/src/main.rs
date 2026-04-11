@@ -50,6 +50,7 @@ fn main() {
         aggregate_demo(),
         lowered_spec_demo(),
         lowered_json_spec_demo(),
+        lowered_json_calculate_demo(),
         lowered_json_grouped_bar_demo(),
         lowered_json_stacked_bar_demo(),
         lowered_json_facet_demo(),
@@ -598,6 +599,55 @@ fn lowered_json_spec_demo() -> html::HtmlSection {
     }
 }
 
+fn lowered_json_calculate_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(1370);
+    let mut table = Table::new(source_id);
+    table.row_keys = vec![0, 1, 2, 3];
+    table.data = Some(Box::new(CalculateValues {
+        x: vec![0.0, 1.0, 2.0, 3.0],
+        base: vec![2.0, 3.0, 4.0, 5.0],
+        delta: vec![0.5, 1.0, 1.5, 2.0],
+    }));
+    scene.insert_table(table);
+
+    let parsed = parse_unit_spec_json(include_str!(
+        "../../fixtures/specs/unit_calculate_point.json"
+    ))
+    .expect("parse calculate point spec");
+
+    let resolver = SliceFieldResolver::new(&[
+        SchemaField {
+            name: "x",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "base",
+            column: ColumnId(1),
+        },
+        SchemaField {
+            name: "delta",
+            column: ColumnId(2),
+        },
+    ]);
+    let spec = parsed
+        .adapt(
+            &resolver,
+            AdaptContext {
+                id_base: 0xD0_840,
+                derived_table_base: TableId(1372),
+                data: DataRef::Table(source_id),
+            },
+        )
+        .expect("adapt calculate point spec");
+
+    html::HtmlSection {
+        title: "Lowered JSON Calculate",
+        description: "A point chart built from JSON text, proving narrow arithmetic `calculate` lowering into a derived field alias before chart construction.",
+        svg: render_lowered_unit_spec(&mut scene, spec),
+    }
+}
+
 fn lowered_json_grouped_bar_demo() -> html::HtmlSection {
     let mut scene = Scene::new();
     let source_id = TableId(1371);
@@ -1104,6 +1154,13 @@ struct PointOpacityValues {
 }
 
 #[derive(Debug)]
+struct CalculateValues {
+    x: Vec<f64>,
+    base: Vec<f64>,
+    delta: Vec<f64>,
+}
+
+#[derive(Debug)]
 struct PointStrokeValues {
     x: Vec<f64>,
     y: Vec<f64>,
@@ -1162,6 +1219,21 @@ impl TableData for PointOpacityValues {
             ColumnId(0) => self.x.get(row).copied(),
             ColumnId(1) => self.y.get(row).copied(),
             ColumnId(2) => self.opacity.get(row).copied(),
+            _ => None,
+        }
+    }
+}
+
+impl TableData for CalculateValues {
+    fn row_count(&self) -> usize {
+        self.x.len().min(self.base.len()).min(self.delta.len())
+    }
+
+    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        match col {
+            ColumnId(0) => self.x.get(row).copied(),
+            ColumnId(1) => self.base.get(row).copied(),
+            ColumnId(2) => self.delta.get(row).copied(),
             _ => None,
         }
     }

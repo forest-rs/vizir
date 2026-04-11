@@ -123,6 +123,7 @@ This keeps the first slice focused on lowering, not on parsing/loading.
 Support only the transform variants we already execute well:
 - `Filter`
 - `Sort`
+- `Calculate`
 - `Aggregate`
 - `Bin`
 - `Stack`

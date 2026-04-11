@@ -88,6 +88,39 @@ pub enum CompareOp {
     Ne,
 }
 
+/// Arithmetic operator for [`Transform::Calculate`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CalculateOp {
+    /// `left + right`
+    Add,
+    /// `left - right`
+    Sub,
+    /// `left * right`
+    Mul,
+    /// `left / right`
+    Div,
+}
+
+/// One operand in a narrow calculate expression.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CalculateOperand {
+    /// Read a value from the given input column.
+    Column(ColumnId),
+    /// Use a numeric literal.
+    Constant(f64),
+}
+
+/// A narrow calculate expression producing one derived numeric column.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CalculateExpr {
+    /// Left operand.
+    pub left: CalculateOperand,
+    /// Arithmetic operator.
+    pub op: CalculateOp,
+    /// Right operand.
+    pub right: CalculateOperand,
+}
+
 /// A row predicate used by [`Transform::Filter`].
 ///
 /// This is intentionally tiny at v0: it supports a single numeric comparison.
@@ -148,6 +181,21 @@ pub enum Transform {
         by: ColumnId,
         /// Sort order.
         order: SortOrder,
+        /// Columns to carry through to the output table.
+        columns: Vec<ColumnId>,
+    },
+    /// Compute one derived numeric column from a narrow arithmetic expression.
+    ///
+    /// Output columns are `columns` (in order) followed by `output`.
+    Calculate {
+        /// Input table.
+        input: TableId,
+        /// Output table.
+        output: TableId,
+        /// Arithmetic expression to evaluate per row.
+        expr: CalculateExpr,
+        /// Output column id for the derived values.
+        output_col: ColumnId,
         /// Columns to carry through to the output table.
         columns: Vec<ColumnId>,
     },

@@ -14,7 +14,10 @@ use alloc::vec::Vec;
 
 use peniko::Brush;
 use vizir_core::{ColumnId, TableId};
-use vizir_transforms::{AggregateField, AggregateOp, CompareOp, Predicate, SortOrder, StackOffset};
+use vizir_transforms::{
+    AggregateField, AggregateOp, CalculateExpr, CalculateOp, CalculateOperand, CompareOp,
+    Predicate, SortOrder, StackOffset,
+};
 
 use crate::{
     ChannelDef, DataRef, FacetSpec, FieldKind, LayerChildSpec, LayerSpec, MarkDef, StrokeStyle,
@@ -336,6 +339,49 @@ impl ParsedPredicate {
     }
 }
 
+/// One operand in a parsed narrow calculate expression.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ParsedCalculateOperand {
+    /// Read from the named field.
+    Field(String),
+    /// Use a numeric literal.
+    Constant(f64),
+}
+
+impl ParsedCalculateOperand {
+    /// Creates a field operand.
+    pub fn field(field: impl Into<String>) -> Self {
+        Self::Field(field.into())
+    }
+
+    /// Creates a numeric literal operand.
+    pub fn constant(value: f64) -> Self {
+        Self::Constant(value)
+    }
+}
+
+/// A parsed narrow arithmetic expression that still refers to field names.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParsedCalculateExpr {
+    /// Left operand.
+    pub left: ParsedCalculateOperand,
+    /// Arithmetic operator.
+    pub op: CalculateOp,
+    /// Right operand.
+    pub right: ParsedCalculateOperand,
+}
+
+impl ParsedCalculateExpr {
+    /// Creates a parsed calculate expression.
+    pub fn new(
+        left: ParsedCalculateOperand,
+        op: CalculateOp,
+        right: ParsedCalculateOperand,
+    ) -> Self {
+        Self { left, op, right }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 enum ParsedTransformKind {
     Filter {
@@ -345,6 +391,11 @@ enum ParsedTransformKind {
     Sort {
         by: String,
         order: SortOrder,
+        columns: Vec<String>,
+    },
+    Calculate {
+        expr: ParsedCalculateExpr,
+        as_field: String,
         columns: Vec<String>,
     },
     Aggregate {
@@ -399,6 +450,21 @@ impl ParsedTransformSpec {
             kind: ParsedTransformKind::Sort {
                 by: by.into(),
                 order,
+                columns: collect_names(columns),
+            },
+        }
+    }
+
+    /// Creates a parsed narrow arithmetic calculate transform.
+    pub fn calculate(
+        expr: ParsedCalculateExpr,
+        as_field: impl Into<String>,
+        columns: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            kind: ParsedTransformKind::Calculate {
+                expr,
+                as_field: as_field.into(),
                 columns: collect_names(columns),
             },
         }
@@ -1327,6 +1393,19 @@ fn adapt_transform(
             *order,
             resolve_columns(fields, columns, "sort carry-through")?,
         )),
+        ParsedTransformKind::Calculate {
+            expr,
+            as_field,
+            columns,
+        } => Ok(TransformSpec::calculate(
+            CalculateExpr {
+                left: resolve_calculate_operand(fields, &expr.left)?,
+                op: expr.op,
+                right: resolve_calculate_operand(fields, &expr.right)?,
+            },
+            fields.allocate_output(as_field)?,
+            resolve_columns(fields, columns, "calculate carry-through")?,
+        )),
         ParsedTransformKind::Aggregate {
             group_by,
             fields: agg,
@@ -1387,6 +1466,18 @@ fn resolve_columns(
         .iter()
         .map(|field| fields.resolve_input(field, role))
         .collect()
+}
+
+fn resolve_calculate_operand(
+    fields: &mut FieldBindings<'_>,
+    operand: &ParsedCalculateOperand,
+) -> Result<CalculateOperand, AdaptError> {
+    match operand {
+        ParsedCalculateOperand::Field(field) => Ok(CalculateOperand::Column(
+            fields.resolve_input(field, "calculate operand")?,
+        )),
+        ParsedCalculateOperand::Constant(value) => Ok(CalculateOperand::Constant(*value)),
+    }
 }
 
 #[derive(Clone)]
@@ -1601,6 +1692,64 @@ mod tests {
         assert_eq!(data.f64(0, ColumnId(0)), Some(0.0));
         assert_eq!(data.f64(1, ColumnId(0)), Some(1.0));
         assert_eq!(data.f64(2, ColumnId(0)), Some(2.0));
+    }
+
+    #[test]
+    fn parsed_calculate_transform_allocates_alias_and_lowers() {
+        let parsed = ParsedUnitSpec::new(ParsedMarkDef::Point)
+            .with_transform(ParsedTransformSpec::calculate(
+                ParsedCalculateExpr::new(
+                    ParsedCalculateOperand::field("base"),
+                    CalculateOp::Add,
+                    ParsedCalculateOperand::field("delta"),
+                ),
+                "total",
+                ["x", "base", "delta"],
+            ))
+            .with_x(ParsedChannelDef::quantitative("x"))
+            .with_y(ParsedChannelDef::quantitative("total"));
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "base",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "delta",
+                column: ColumnId(2),
+            },
+        ]);
+
+        let mut scene = Scene::new();
+        let table_id = TableId(201);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![210, 211, 212];
+        table.data = Some(Box::new(FourCols {
+            a: vec![0.0, 1.0, 2.0],
+            b: vec![2.0, 4.0, 6.0],
+            c: vec![0.5, 1.0, 1.5],
+            d: vec![0.0, 0.0, 0.0],
+        }));
+        scene.insert_table(table);
+
+        let unit = parsed
+            .adapt(&resolver, context(table_id))
+            .expect("adapt calculate spec");
+        let lowered = unit
+            .lower_into_scene(&mut scene)
+            .expect("lower calculate spec");
+        let calculated = scene
+            .tables
+            .get(&lowered.output_table())
+            .expect("calculated output");
+        let data = calculated.data.as_deref().expect("calculated data");
+        assert_eq!(data.f64(0, ColumnId(3)), Some(2.5));
+        assert_eq!(data.f64(1, ColumnId(3)), Some(5.0));
+        assert_eq!(data.f64(2, ColumnId(3)), Some(7.5));
     }
 
     #[test]

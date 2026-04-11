@@ -74,10 +74,10 @@ pub use spec::{
     LoweredFacet, LoweredLayer, LoweredUnit, LoweringError, MarkDef, TransformSpec, UnitSpec,
 };
 pub use spec_adapter::{
-    AdaptContext, AdaptError, FieldResolver, ParsedAggregateField, ParsedChannelDef,
-    ParsedEncodingSet, ParsedFacetSpec, ParsedFieldKind, ParsedLayerChildSpec, ParsedLayerSpec,
-    ParsedMarkDef, ParsedPredicate, ParsedTransformSpec, ParsedUnitSpec, SchemaField,
-    SliceFieldResolver,
+    AdaptContext, AdaptError, FieldResolver, ParsedAggregateField, ParsedCalculateExpr,
+    ParsedCalculateOperand, ParsedChannelDef, ParsedEncodingSet, ParsedFacetSpec, ParsedFieldKind,
+    ParsedLayerChildSpec, ParsedLayerSpec, ParsedMarkDef, ParsedPredicate, ParsedTransformSpec,
+    ParsedUnitSpec, SchemaField, SliceFieldResolver,
 };
 #[cfg(feature = "json")]
 pub use spec_json::{

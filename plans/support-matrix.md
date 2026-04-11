@@ -64,10 +64,11 @@ Status meanings:
 |---|---|---|
 | `filter` | partial | Requires explicit `columns` carry-through list in adapter/json layer |
 | `sort` | partial | Requires explicit `columns` carry-through list in adapter/json layer |
+| `calculate` | partial | Narrow arithmetic-only expressions today: two numeric operands (`field` or constant), one derived alias, and an explicit `columns` carry-through list |
 | `aggregate` | supported | Derived output aliases supported via adapter/json path |
 | `bin` | partial | Requires explicit `columns` carry-through list |
 | `stack` | partial | Requires explicit `columns`; output aliases supported |
-| Calculate/formula, joinaggregate, window, fold, pivot, flatten, lookup, density, regression, etc. | missing | Not in authored seam today |
+| `joinaggregate`, `window`, `fold`, `pivot`, `flatten`, `lookup`, `density`, `regression`, etc. | missing | Not in authored seam today |
 
 ### Parser-facing layers
 
@@ -100,6 +101,9 @@ Status meanings:
 - Literal child styles currently support constant `fill`, `stroke`, and `opacity` through the
   layer seam, but they may not be combined with conflicting data-driven channels like shared
   `color`, child `stroke`, or child `opacity`.
+- `calculate` currently means a narrow arithmetic expression only: two numeric operands
+  (`field` or constant), one of `add`/`sub`/`mul`/`div`, one derived output alias, and an
+  explicit carry-through `columns` list in the parsed/JSON path.
 - `aggregate` on `x`, `x2`, `color`, `y2`, `opacity`, `stroke`, `strokeWidth`, `order`, `detail`, and `text` is rejected.
 - `x2` is currently only supported on `area`.
 - `y2` is currently supported on `area` and `bar`.

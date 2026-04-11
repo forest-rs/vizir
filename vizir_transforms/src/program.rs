@@ -12,7 +12,9 @@ use hashbrown::HashMap;
 use vizir_core::{ColumnId, TableId};
 
 use crate::table::TableFrame;
-use crate::transform::{AggregateOp, SortOrder, StackOffset, Transform};
+use crate::transform::{
+    AggregateOp, CalculateExpr, CalculateOp, CalculateOperand, SortOrder, StackOffset, Transform,
+};
 
 /// Errors returned when executing a transform [`Program`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -203,6 +205,48 @@ impl Program {
                             row_keys: new_row_keys,
                             columns: columns.clone(),
                             data: new_data,
+                        },
+                    );
+                }
+                Transform::Calculate {
+                    input,
+                    output,
+                    expr,
+                    output_col,
+                    columns,
+                } => {
+                    let frame = get_frame(*input, inputs, &out.tables)?;
+                    if columns.is_empty() || columns.contains(output_col) {
+                        return Err(ExecutionError::InvalidTransform);
+                    }
+
+                    require_columns(*input, frame, columns)?;
+                    require_calculate_expr_columns(*input, frame, expr)?;
+
+                    let mut out_columns = Vec::with_capacity(columns.len() + 1);
+                    out_columns.extend(columns.iter().copied());
+                    out_columns.push(*output_col);
+
+                    let mut out_data: Vec<Vec<f64>> = Vec::with_capacity(out_columns.len());
+                    for &col in columns {
+                        let ci = frame.column_index(col).expect("validated");
+                        out_data.push(frame.data[ci].clone());
+                    }
+
+                    let mut derived = Vec::with_capacity(frame.row_count());
+                    for row in 0..frame.row_count() {
+                        let left = evaluate_calculate_operand(frame, row, expr.left);
+                        let right = evaluate_calculate_operand(frame, row, expr.right);
+                        derived.push(evaluate_calculate(expr.op, left, right));
+                    }
+                    out_data.push(derived);
+
+                    out.tables.insert(
+                        *output,
+                        TableFrame {
+                            row_keys: frame.row_keys.clone(),
+                            columns: out_columns,
+                            data: out_data,
                         },
                     );
                 }
@@ -769,6 +813,35 @@ fn require_columns(
     Ok(())
 }
 
+fn require_calculate_expr_columns(
+    table: TableId,
+    frame: &TableFrame,
+    expr: &CalculateExpr,
+) -> Result<(), ExecutionError> {
+    for operand in [expr.left, expr.right] {
+        if let CalculateOperand::Column(col) = operand {
+            require_columns(table, frame, core::slice::from_ref(&col))?;
+        }
+    }
+    Ok(())
+}
+
+fn evaluate_calculate_operand(frame: &TableFrame, row: usize, operand: CalculateOperand) -> f64 {
+    match operand {
+        CalculateOperand::Column(col) => frame.f64(row, col).unwrap_or(f64::NAN),
+        CalculateOperand::Constant(value) => value,
+    }
+}
+
+fn evaluate_calculate(op: CalculateOp, left: f64, right: f64) -> f64 {
+    match op {
+        CalculateOp::Add => left + right,
+        CalculateOp::Sub => left - right,
+        CalculateOp::Mul => left * right,
+        CalculateOp::Div => left / right,
+    }
+}
+
 #[cfg(not(any(feature = "std", feature = "libm")))]
 compile_error!(
     "vizir_transforms requires either the `std` or `libm` feature for floating-point math"
@@ -797,7 +870,10 @@ mod tests {
     use alloc::vec;
 
     use super::*;
-    use crate::transform::{AggregateField, AggregateOp, CompareOp, Predicate};
+    use crate::transform::{
+        AggregateField, AggregateOp, CalculateExpr, CalculateOp, CalculateOperand, CompareOp,
+        Predicate,
+    };
 
     fn frame() -> TableFrame {
         TableFrame {
@@ -895,6 +971,29 @@ mod tests {
         assert_eq!(t.data.len(), 2);
         assert_eq!(t.data[0], vec![0.0, 1.0]);
         assert_eq!(t.data[1], vec![3.0, 12.0]);
+    }
+
+    #[test]
+    fn calculate_derives_a_new_numeric_column() {
+        let mut p = Program::new();
+        p.push(Transform::Calculate {
+            input: TableId(1),
+            output: TableId(2),
+            expr: CalculateExpr {
+                left: CalculateOperand::Column(ColumnId(0)),
+                op: CalculateOp::Mul,
+                right: CalculateOperand::Constant(2.0),
+            },
+            output_col: ColumnId(2),
+            columns: vec![ColumnId(0), ColumnId(1)],
+        });
+
+        let inputs: HashMap<_, _> = [(TableId(1), frame())].into_iter().collect();
+        let out = p.execute(&inputs).unwrap();
+        let t = out.tables.get(&TableId(2)).unwrap();
+        assert_eq!(t.columns, vec![ColumnId(0), ColumnId(1), ColumnId(2)]);
+        assert_eq!(t.data[2], vec![2.0, 4.0, 6.0, 8.0]);
+        assert_eq!(t.row_keys, vec![10, 11, 12, 13]);
     }
 
     #[test]
