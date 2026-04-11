@@ -76,8 +76,9 @@ pub use spec::{
 pub use spec_adapter::{
     AdaptContext, AdaptError, FieldResolver, ParsedAggregateField, ParsedCalculateExpr,
     ParsedCalculateOperand, ParsedChannelDef, ParsedEncodingSet, ParsedFacetSpec, ParsedFieldKind,
-    ParsedLayerChildSpec, ParsedLayerSpec, ParsedLookupField, ParsedMarkDef, ParsedPredicate,
-    ParsedTransformSpec, ParsedUnitSpec, ParsedWindowField, SchemaField, SliceFieldResolver,
+    ParsedLayerChildSpec, ParsedLayerSpec, ParsedLookupField, ParsedMarkDef, ParsedPivotValue,
+    ParsedPredicate, ParsedTransformSpec, ParsedUnitSpec, ParsedWindowField, SchemaField,
+    SliceFieldResolver,
 };
 #[cfg(feature = "json")]
 pub use spec_json::{

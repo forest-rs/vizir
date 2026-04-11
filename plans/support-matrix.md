@@ -70,9 +70,10 @@ Status meanings:
 | `bin` | partial | Requires explicit `columns` carry-through list |
 | `fold` | partial | Numeric-only today: repeats each row per folded field and emits a numeric slot id plus folded numeric value, with explicit `columns` |
 | `lookup` | partial | One-key table enrichment today: reads from one explicit scene table, appends numeric lookup fields, rejects duplicate lookup keys, and uses `NaN` for misses |
+| `pivot` | partial | Numeric-only today: groups by explicit key fields, widens one numeric pivot key into explicit output slots, and aggregates with an explicit op |
 | `window` | partial | Narrow slice only: `row_number` and `rank` over one required sort key, optional `group_by`, and explicit `columns` |
 | `stack` | partial | Requires explicit `columns`; output aliases supported |
-| `pivot`, `flatten`, `density`, `regression`, etc. | missing | Not in authored seam today |
+| `flatten`, `density`, `regression`, etc. | missing | Not in authored seam today |
 
 ### Parser-facing layers
 
@@ -117,6 +118,9 @@ Status meanings:
   second explicit scene table. It appends numeric lookup fields, rejects duplicate lookup keys,
   and uses `NaN` when no match exists. The parsed/JSON path currently resolves lookup-side field
   names through the same shared field resolver as the base table.
+- `pivot` currently means one numeric pivot-key column widened into an explicit list of output
+  slots. The runtime does not create dynamic field names: each slot must declare its numeric pivot
+  value and output alias up front, and the result is grouped by explicit `group_by` columns.
 - `window` currently means one required sort key, optional `group_by`, and only the
   `row_number` / `rank` operations, with an explicit carry-through `columns` list in the
   parsed/JSON path.

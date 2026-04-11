@@ -1,0 +1,62 @@
+{
+  "title": "Pivoted Series",
+  "width": 220,
+  "height": 120,
+  "transform": [
+    {
+      "pivot": {
+        "field": "series",
+        "value": "value",
+        "op": "sum",
+        "groupby": ["category"],
+        "values": [
+          { "value": 0, "as": "series_a" },
+          { "value": 1, "as": "series_b" }
+        ]
+      }
+    }
+  ],
+  "encoding": {
+    "x": { "field": "category", "type": "quantitative", "title": "category" }
+  },
+  "layer": [
+    {
+      "mark": "line",
+      "encoding": {
+        "y": { "field": "series_a", "type": "quantitative", "title": "pivoted value" }
+      },
+      "style": {
+        "stroke": "#2563EB",
+        "strokeWidth": 2
+      }
+    },
+    {
+      "mark": "point",
+      "encoding": {
+        "y": { "field": "series_a", "type": "quantitative" }
+      },
+      "style": {
+        "fill": "#2563EB"
+      }
+    },
+    {
+      "mark": "line",
+      "encoding": {
+        "y": { "field": "series_b", "type": "quantitative" }
+      },
+      "style": {
+        "stroke": "#D97706",
+        "strokeWidth": 2
+      }
+    },
+    {
+      "mark": "point",
+      "encoding": {
+        "y": { "field": "series_b", "type": "quantitative" }
+      },
+      "style": {
+        "fill": "#D97706"
+      }
+    }
+  ]
+}

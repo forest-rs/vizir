@@ -32,9 +32,9 @@ use vizir_core::{
     RectEncodings, Scene, TableId, TextAnchor, TextBaseline, TextEncodings,
 };
 use vizir_transforms::{
-    AggregateField, AggregateOp, CalculateExpr, CalculateOperand, LookupField, Predicate, Program,
-    SceneExecutionError, SortOrder, StackOffset, TableFrame, TableFrameError, Transform,
-    WindowField,
+    AggregateField, AggregateOp, CalculateExpr, CalculateOperand, LookupField, PivotValue,
+    Predicate, Program, SceneExecutionError, SortOrder, StackOffset, TableFrame, TableFrameError,
+    Transform, WindowField,
 };
 
 #[cfg(not(feature = "std"))]
@@ -363,6 +363,13 @@ enum TransformSpecKind {
         fields: Vec<LookupField>,
         columns: Vec<ColumnId>,
     },
+    Pivot {
+        group_by: Vec<ColumnId>,
+        pivot: ColumnId,
+        value: ColumnId,
+        op: AggregateOp,
+        values: Vec<PivotValue>,
+    },
     Window {
         group_by: Vec<ColumnId>,
         sort_by: ColumnId,
@@ -485,6 +492,25 @@ impl TransformSpec {
                 from_key,
                 fields,
                 columns,
+            },
+        }
+    }
+
+    /// Creates a narrow pivot transform with explicit numeric pivot slots.
+    pub fn pivot(
+        group_by: Vec<ColumnId>,
+        pivot: ColumnId,
+        value: ColumnId,
+        op: AggregateOp,
+        values: Vec<PivotValue>,
+    ) -> Self {
+        Self {
+            kind: TransformSpecKind::Pivot {
+                group_by,
+                pivot,
+                value,
+                op,
+                values,
             },
         }
     }
@@ -3579,6 +3605,21 @@ fn lower_authored_transform(
             fields: fields.clone(),
             columns: columns.clone(),
         }),
+        TransformSpecKind::Pivot {
+            group_by,
+            pivot,
+            value,
+            op,
+            values,
+        } => program.push(Transform::Pivot {
+            input,
+            output,
+            group_by: group_by.clone(),
+            pivot: *pivot,
+            value: *value,
+            op: *op,
+            values: values.clone(),
+        }),
         TransformSpecKind::Window {
             group_by,
             sort_by,
@@ -4106,6 +4147,18 @@ fn extend_transform_input_columns(out: &mut Vec<ColumnId>, transform: &Transform
             for &col in columns {
                 push_unique_col(out, col);
             }
+        }
+        TransformSpecKind::Pivot {
+            group_by,
+            pivot,
+            value,
+            ..
+        } => {
+            for &col in group_by {
+                push_unique_col(out, col);
+            }
+            push_unique_col(out, *pivot);
+            push_unique_col(out, *value);
         }
         TransformSpecKind::Window {
             group_by,
@@ -4672,6 +4725,21 @@ fn next_derived_col(spec: &UnitSpec) -> u32 {
                     max_col = max_col.max(col.0);
                 }
             }
+            TransformSpecKind::Pivot {
+                group_by,
+                pivot,
+                value,
+                values,
+                ..
+            } => {
+                max_col = max_col.max(pivot.0).max(value.0);
+                for col in group_by {
+                    max_col = max_col.max(col.0);
+                }
+                for slot in values {
+                    max_col = max_col.max(slot.output.0);
+                }
+            }
             TransformSpecKind::Window {
                 group_by,
                 sort_by,
@@ -5034,6 +5102,59 @@ mod tests {
                 .is_nan()
         );
         assert_eq!(data.f64(2, ColumnId(10)), Some(6.0));
+    }
+
+    #[test]
+    fn pivot_line_lowering_widens_long_rows_into_explicit_series_columns() {
+        let mut scene = Scene::new();
+        let table_id = TableId(1021);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![60, 61, 62, 63, 64, 65];
+        table.data = Some(Box::new(ThreeCols {
+            a: vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0],
+            b: vec![2.0, 4.0, 3.0, 5.0, 4.0, 6.0],
+            c: vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xAAC8,
+            TableId(1022),
+            DataRef::Table(table_id),
+            MarkDef::Line,
+        )
+        .with_transform(TransformSpec::pivot(
+            vec![ColumnId(0)],
+            ColumnId(2),
+            ColumnId(1),
+            AggregateOp::Sum,
+            vec![
+                PivotValue {
+                    value: 0.0,
+                    output: ColumnId(10),
+                },
+                PivotValue {
+                    value: 1.0,
+                    output: ColumnId(11),
+                },
+            ],
+        ))
+        .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("category"))
+        .with_y(ChannelDef::quantitative(ColumnId(10)).with_title("series 0"));
+
+        let lowered = spec
+            .lower_into_scene(&mut scene)
+            .expect("lower pivoted line");
+        let pivoted = scene
+            .tables
+            .get(&lowered.output_table())
+            .expect("pivot output table");
+        let data = pivoted.data.as_deref().expect("pivot table data");
+        assert_eq!(pivoted.row_keys.len(), 3);
+        assert_eq!(data.f64(0, ColumnId(10)), Some(2.0));
+        assert_eq!(data.f64(2, ColumnId(10)), Some(4.0));
+        assert_eq!(data.f64(0, ColumnId(11)), Some(4.0));
+        assert_eq!(data.f64(2, ColumnId(11)), Some(6.0));
     }
 
     #[test]

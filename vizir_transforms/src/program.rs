@@ -14,7 +14,7 @@ use vizir_core::{ColumnId, TableId};
 use crate::table::TableFrame;
 use crate::transform::{
     AggregateField, AggregateOp, CalculateExpr, CalculateOp, CalculateOperand, LookupField,
-    SortOrder, StackOffset, Transform, WindowOp,
+    PivotValue, SortOrder, StackOffset, Transform, WindowOp,
 };
 
 /// Errors returned when executing a transform [`Program`].
@@ -537,6 +537,60 @@ impl Program {
                         },
                     );
                 }
+                Transform::Pivot {
+                    input,
+                    output,
+                    group_by,
+                    pivot,
+                    value,
+                    op,
+                    values,
+                } => {
+                    let frame = get_frame(*input, inputs, &out.tables)?;
+                    if values.is_empty() {
+                        return Err(ExecutionError::InvalidTransform);
+                    }
+                    if !group_by.is_empty() {
+                        require_columns(*input, frame, group_by)?;
+                    }
+                    require_columns(*input, frame, core::slice::from_ref(pivot))?;
+                    require_columns(*input, frame, core::slice::from_ref(value))?;
+                    validate_derived_output_columns(
+                        group_by,
+                        values.iter().map(|slot| slot.output),
+                    )?;
+                    validate_pivot_values(values)?;
+
+                    let groups = build_pivot_groups(frame, group_by, *pivot, *value, *op, values);
+
+                    let mut columns = Vec::with_capacity(group_by.len() + values.len());
+                    columns.extend(group_by.iter().copied());
+                    columns.extend(values.iter().map(|slot| slot.output));
+
+                    let mut data: Vec<Vec<f64>> = vec![Vec::new(); columns.len()];
+                    let mut row_keys: Vec<u64> = Vec::with_capacity(groups.len());
+
+                    for group in &groups {
+                        row_keys.push(hash_group_key(&group.key));
+
+                        for (i, v) in group.group_vals.iter().copied().enumerate() {
+                            data[i].push(v);
+                        }
+                        for (slot, _) in values.iter().enumerate() {
+                            data[group_by.len() + slot]
+                                .push(pivot_slot_value(&group.accumulators[slot], *op));
+                        }
+                    }
+
+                    out.tables.insert(
+                        *output,
+                        TableFrame {
+                            row_keys,
+                            columns,
+                            data,
+                        },
+                    );
+                }
                 Transform::Window {
                     input,
                     output,
@@ -951,6 +1005,21 @@ struct AggregateGroup {
     max: Vec<f64>,
 }
 
+#[derive(Debug, Clone)]
+struct PivotAccumulator {
+    sum: f64,
+    count: u64,
+    min: f64,
+    max: f64,
+}
+
+#[derive(Debug, Clone)]
+struct PivotGroup {
+    key: Vec<u64>,
+    group_vals: Vec<f64>,
+    accumulators: Vec<PivotAccumulator>,
+}
+
 fn hash_group_key(bits: &[u64]) -> u64 {
     // FNV-1a 64-bit: deterministic and cheap.
     let mut h = 0xcbf29ce484222325_u64;
@@ -1049,6 +1118,19 @@ fn require_lookup_fields(
     Ok(())
 }
 
+fn validate_pivot_values(values: &[PivotValue]) -> Result<(), ExecutionError> {
+    let mut outputs = Vec::with_capacity(values.len());
+    let mut keys = Vec::with_capacity(values.len());
+    for value in values {
+        if outputs.contains(&value.output) || keys.contains(&value.value.to_bits()) {
+            return Err(ExecutionError::InvalidTransform);
+        }
+        outputs.push(value.output);
+        keys.push(value.value.to_bits());
+    }
+    Ok(())
+}
+
 fn validate_derived_output_columns(
     columns: &[ColumnId],
     outputs: impl IntoIterator<Item = ColumnId>,
@@ -1143,6 +1225,75 @@ fn build_aggregate_groups(
         .collect()
 }
 
+fn build_pivot_groups(
+    frame: &TableFrame,
+    group_by: &[ColumnId],
+    pivot: ColumnId,
+    value: ColumnId,
+    op: AggregateOp,
+    values: &[PivotValue],
+) -> Vec<PivotGroup> {
+    let mut slot_index: HashMap<u64, usize> = HashMap::new();
+    for (slot, value) in values.iter().enumerate() {
+        slot_index.insert(value.value.to_bits(), slot);
+    }
+
+    let mut groups: HashMap<Vec<u64>, usize> = HashMap::new();
+    let mut order: Vec<Vec<u64>> = Vec::new();
+    let mut accs: Vec<PivotGroup> = Vec::new();
+
+    for row in 0..frame.row_count() {
+        let key = frame_group_key(frame, row, group_by);
+        let idx = match groups.get(&key).copied() {
+            Some(i) => i,
+            None => {
+                let mut group_vals = Vec::with_capacity(group_by.len());
+                for &col in group_by {
+                    group_vals.push(frame.f64(row, col).unwrap_or(f64::NAN));
+                }
+
+                let i = accs.len();
+                order.push(key.clone());
+                groups.insert(key.clone(), i);
+                accs.push(PivotGroup {
+                    key,
+                    group_vals,
+                    accumulators: vec![
+                        PivotAccumulator {
+                            sum: 0.0,
+                            count: 0,
+                            min: f64::INFINITY,
+                            max: f64::NEG_INFINITY,
+                        };
+                        values.len()
+                    ],
+                });
+                i
+            }
+        };
+
+        let pivot_bits = frame.f64(row, pivot).unwrap_or(f64::NAN).to_bits();
+        let Some(&slot) = slot_index.get(&pivot_bits) else {
+            continue;
+        };
+        accumulate_pivot_value(
+            &mut accs[idx].accumulators[slot],
+            op,
+            frame.f64(row, value).unwrap_or(f64::NAN),
+        );
+    }
+
+    order
+        .into_iter()
+        .map(|key| {
+            let idx = *groups
+                .get(&key)
+                .expect("group order is derived from known keys");
+            accs[idx].clone()
+        })
+        .collect()
+}
+
 fn aggregate_field_value(
     group: &AggregateGroup,
     field_index: usize,
@@ -1171,6 +1322,58 @@ fn aggregate_field_value(
                 f64::NAN
             } else {
                 group.sum[field_index] / count as f64
+            }
+        }
+    }
+}
+
+fn accumulate_pivot_value(acc: &mut PivotAccumulator, op: AggregateOp, value: f64) {
+    match op {
+        AggregateOp::Count => {
+            acc.count = acc.count.saturating_add(1);
+        }
+        AggregateOp::Sum | AggregateOp::Mean => {
+            if value.is_finite() {
+                acc.sum += value;
+                acc.count = acc.count.saturating_add(1);
+            }
+        }
+        AggregateOp::Min => {
+            if value.is_finite() {
+                acc.min = acc.min.min(value);
+            }
+        }
+        AggregateOp::Max => {
+            if value.is_finite() {
+                acc.max = acc.max.max(value);
+            }
+        }
+    }
+}
+
+fn pivot_slot_value(acc: &PivotAccumulator, op: AggregateOp) -> f64 {
+    match op {
+        AggregateOp::Count => acc.count as f64,
+        AggregateOp::Sum => acc.sum,
+        AggregateOp::Min => {
+            if acc.min.is_finite() {
+                acc.min
+            } else {
+                f64::NAN
+            }
+        }
+        AggregateOp::Max => {
+            if acc.max.is_finite() {
+                acc.max
+            } else {
+                f64::NAN
+            }
+        }
+        AggregateOp::Mean => {
+            if acc.count == 0 {
+                f64::NAN
+            } else {
+                acc.sum / acc.count as f64
             }
         }
     }
@@ -1536,6 +1739,51 @@ mod tests {
         assert!(t.data[1][1].is_nan());
         assert_eq!(t.data[1][2], 6.0);
         assert_eq!(t.row_keys, vec![10, 11, 12]);
+    }
+
+    #[test]
+    fn pivot_groups_rows_into_explicit_wide_slots() {
+        let mut p = Program::new();
+        p.push(Transform::Pivot {
+            input: TableId(1),
+            output: TableId(2),
+            group_by: vec![ColumnId(0)],
+            pivot: ColumnId(1),
+            value: ColumnId(2),
+            op: AggregateOp::Sum,
+            values: vec![
+                PivotValue {
+                    value: 0.0,
+                    output: ColumnId(3),
+                },
+                PivotValue {
+                    value: 1.0,
+                    output: ColumnId(4),
+                },
+            ],
+        });
+
+        let inputs: HashMap<_, _> = [(
+            TableId(1),
+            TableFrame {
+                row_keys: vec![10, 11, 12, 13, 14],
+                columns: vec![ColumnId(0), ColumnId(1), ColumnId(2)],
+                data: vec![
+                    vec![0.0, 0.0, 1.0, 1.0, 1.0],
+                    vec![0.0, 1.0, 0.0, 1.0, 1.0],
+                    vec![2.0, 3.0, 4.0, 5.0, 1.0],
+                ],
+            },
+        )]
+        .into_iter()
+        .collect();
+
+        let out = p.execute(&inputs).unwrap();
+        let t = out.tables.get(&TableId(2)).unwrap();
+        assert_eq!(t.columns, vec![ColumnId(0), ColumnId(3), ColumnId(4)]);
+        assert_eq!(t.data[0], vec![0.0, 1.0]);
+        assert_eq!(t.data[1], vec![2.0, 4.0]);
+        assert_eq!(t.data[2], vec![3.0, 6.0]);
     }
 
     #[test]

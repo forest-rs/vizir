@@ -21,8 +21,8 @@ use vizir_transforms::{AggregateOp, CalculateOp, CompareOp, SortOrder, StackOffs
 use crate::{
     ParsedAggregateField, ParsedCalculateExpr, ParsedCalculateOperand, ParsedChannelDef,
     ParsedEncodingSet, ParsedFacetSpec, ParsedFieldKind, ParsedLayerChildSpec, ParsedLayerSpec,
-    ParsedLookupField, ParsedMarkDef, ParsedPredicate, ParsedTransformSpec, ParsedUnitSpec,
-    ParsedWindowField, StrokeStyle,
+    ParsedLookupField, ParsedMarkDef, ParsedPivotValue, ParsedPredicate, ParsedTransformSpec,
+    ParsedUnitSpec, ParsedWindowField, StrokeStyle,
 };
 
 /// Errors returned while parsing a narrow JSON unit spec.
@@ -391,6 +391,31 @@ struct JsonLookupField {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct JsonPivotTransform {
+    pivot: JsonPivotBody,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JsonPivotBody {
+    field: String,
+    value: String,
+    op: String,
+    #[serde(default)]
+    groupby: Vec<String>,
+    values: Vec<JsonPivotValue>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JsonPivotValue {
+    value: f64,
+    #[serde(rename = "as")]
+    as_field: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct JsonWindowTransform {
     window: Vec<JsonWindowField>,
     #[serde(default)]
@@ -663,6 +688,26 @@ fn parse_transform(value: Value) -> Result<ParsedTransformSpec, JsonSpecError> {
                 .map(|field| ParsedLookupField::new(field.field, field.as_field))
                 .collect(),
             raw.columns,
+        ));
+    }
+
+    if object.contains_key("pivot") {
+        let raw: JsonPivotTransform = serde_json::from_value(value)?;
+        if raw.pivot.values.is_empty() {
+            return Err(JsonSpecError::Invalid(String::from(
+                "pivot transforms currently require at least one explicit pivot slot",
+            )));
+        }
+        return Ok(ParsedTransformSpec::pivot(
+            raw.pivot.groupby,
+            raw.pivot.field,
+            raw.pivot.value,
+            parse_aggregate_op(&raw.pivot.op)?,
+            raw.pivot
+                .values
+                .into_iter()
+                .map(|slot| ParsedPivotValue::new(slot.value, slot.as_field))
+                .collect(),
         ));
     }
 
@@ -1577,6 +1622,38 @@ mod tests {
                 },
             )
             .expect("adapt parsed nested child units layer");
+    }
+
+    #[test]
+    fn parses_pivot_layer_fixture() {
+        let spec =
+            parse_layer_spec_json(include_str!("../../fixtures/specs/layer_pivot_lines.json"))
+                .expect("parse pivot layer");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "category",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "value",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "series",
+                column: ColumnId(2),
+            },
+        ]);
+        let _layer = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xC2_250,
+                    derived_table_base: TableId(308),
+                    data: DataRef::Table(TableId(10)),
+                },
+            )
+            .expect("adapt parsed pivot layer");
     }
 
     #[test]

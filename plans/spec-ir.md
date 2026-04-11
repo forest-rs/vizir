@@ -129,6 +129,7 @@ Support only the transform variants we already execute well:
 - `Bin`
 - `Fold`
 - `Lookup`
+- `Pivot`
 - `Window`
 - `Stack`
 

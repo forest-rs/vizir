@@ -74,6 +74,7 @@ fn main() {
         lowered_json_joinaggregate_demo(),
         lowered_json_fold_demo(),
         lowered_json_lookup_demo(),
+        lowered_json_pivot_demo(),
         lowered_json_window_demo(),
         lowered_json_grouped_bar_demo(),
         lowered_json_stacked_bar_demo(),
@@ -825,6 +826,53 @@ fn lowered_json_lookup_demo() -> html::HtmlSection {
         title: "Lowered JSON Lookup",
         description: "A bar chart built from JSON text, proving narrow one-key `lookup` enrichment from a second scene table.",
         svg: render_lowered_unit_spec(&mut scene, spec),
+    }
+}
+
+fn lowered_json_pivot_demo() -> html::HtmlSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(137057);
+    let mut table = Table::new(source_id);
+    table.row_keys = (0..6_u64).collect();
+    table.data = Some(Box::new(GroupedBarValues {
+        category: vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0],
+        value: vec![2.0, 4.0, 3.0, 5.0, 4.0, 6.0],
+        series: vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+    }));
+    scene.insert_table(table);
+
+    let parsed = parse_layer_spec_json(include_str!("../../fixtures/specs/layer_pivot_lines.json"))
+        .expect("parse pivot layer spec");
+
+    let resolver = SliceFieldResolver::new(&[
+        SchemaField {
+            name: "category",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "value",
+            column: ColumnId(1),
+        },
+        SchemaField {
+            name: "series",
+            column: ColumnId(2),
+        },
+    ]);
+    let spec = parsed
+        .adapt(
+            &resolver,
+            AdaptContext {
+                id_base: 0xD0_859,
+                derived_table_base: TableId(13737),
+                data: DataRef::Table(source_id),
+            },
+        )
+        .expect("adapt pivot layer spec");
+
+    html::HtmlSection {
+        title: "Lowered JSON Pivot",
+        description: "A styled line + point overlay built from JSON text, proving narrow `pivot` lowering from long rows into explicit wide series columns.",
+        svg: render_lowered_layer_spec(&mut scene, spec),
     }
 }
 

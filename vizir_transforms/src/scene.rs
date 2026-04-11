@@ -249,6 +249,24 @@ fn required_input_columns(transforms: &[Transform]) -> HashMap<TableId, HashSet<
                 }
                 produced.insert(*output);
             }
+            Transform::Pivot {
+                input,
+                output,
+                group_by,
+                pivot,
+                value,
+                ..
+            } => {
+                if !produced.contains(input) {
+                    let set = out.entry(*input).or_default();
+                    for &c in group_by {
+                        set.insert(c);
+                    }
+                    set.insert(*pivot);
+                    set.insert(*value);
+                }
+                produced.insert(*output);
+            }
             Transform::Window {
                 input,
                 output,

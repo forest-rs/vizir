@@ -148,6 +148,15 @@ pub struct LookupField {
     pub output: ColumnId,
 }
 
+/// One explicit pivot slot for [`Transform::Pivot`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PivotValue {
+    /// Numeric pivot-key value to match.
+    pub value: f64,
+    /// Output column id for the aggregated values in this slot.
+    pub output: ColumnId,
+}
+
 /// A row predicate used by [`Transform::Filter`].
 ///
 /// This is intentionally tiny at v0: it supports a single numeric comparison.
@@ -306,6 +315,25 @@ pub enum Transform {
         fields: Vec<LookupField>,
         /// Columns to carry through to the output table.
         columns: Vec<ColumnId>,
+    },
+    /// Group rows and widen a numeric pivot key into explicit output columns.
+    ///
+    /// Output columns are `group_by` (in order) followed by the `values` outputs (in order).
+    Pivot {
+        /// Input table.
+        input: TableId,
+        /// Output table.
+        output: TableId,
+        /// Group-by key columns.
+        group_by: Vec<ColumnId>,
+        /// Numeric pivot key column.
+        pivot: ColumnId,
+        /// Numeric value column to aggregate into each pivot slot.
+        value: ColumnId,
+        /// Aggregation operation to apply within each `(group_by, pivot)` bucket.
+        op: AggregateOp,
+        /// Explicit pivot slots to materialize.
+        values: Vec<PivotValue>,
     },
     /// Compute simple window values over sorted row partitions and write them per row.
     ///

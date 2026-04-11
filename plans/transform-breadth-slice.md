@@ -6,6 +6,7 @@ Goals:
 - Add a narrow `window` transform through the same path.
 - Add a narrow numeric-only `fold` transform through the same path.
 - Add a narrow one-key `lookup` transform through the same path.
+- Add a narrow numeric-only `pivot` transform through the same path.
 - Keep the `window` proof calm enough that the demo reads like a capability, not a trick.
 - Prove all slices with fixture-backed demos and tests.
 
@@ -31,6 +32,10 @@ Planned slices:
    - Start with one numeric key in the base table matched to one numeric key in a second scene table.
    - Append numeric lookup fields, reject duplicate lookup keys, and use `NaN` for misses.
    - Keep the parsed/JSON shape explicit about the secondary table id.
+5. `pivot`
+   - Start with one numeric pivot-key column and one numeric value column.
+   - Materialize only an explicit list of output slots instead of dynamic field names.
+   - Group by explicit key columns and aggregate with one explicit op.
 
 Risks:
 - Derived output alias allocation can drift between authored and parsed seams if tests are weak.
@@ -38,6 +43,8 @@ Risks:
 - `fold` can over-promise if the numeric slot output looks like a real string field-name channel.
 - `lookup` can over-promise if the second-table reference or shared field resolver reads like a
   full Vega-Lite data-source system.
+- `pivot` can over-promise if explicit numeric output slots read like a general dynamic-schema
+  pivot implementation.
 - These transforms can make demos look more general than the supported parser slice really is.
 
 Acceptance bar:

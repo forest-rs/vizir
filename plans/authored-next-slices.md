@@ -20,6 +20,7 @@ Current state:
 - Narrow `joinaggregate` and `window` transforms now lower through the same end-to-end seam.
 - Narrow numeric-only `fold` now lowers from wide rows into repeated series slots.
 - Narrow one-key `lookup` now lowers from a base scene table into one explicit secondary table.
+- Narrow numeric-only `pivot` now lowers from long rows into explicit wide output slots.
 - The parser-facing adapter and feature-gated JSON path target the same seam through checked-in
   fixtures.
 
@@ -39,7 +40,7 @@ Planned slices:
    - Do not let narrow composition slices read as full Vega-Lite resolve semantics.
 2. Broader transform support
    - Continue with the next useful dataflow slices after `calculate` / `joinaggregate` /
-     `window` / `fold` / `lookup`: likely `pivot`, then either richer window semantics or calmer
+     `window` / `fold` / `lookup` / `pivot`: likely richer window semantics or calmer
      diagnostics around the multi-table and numeric-only fences.
 3. Fixture-driven expansion
    - Keep shared data and shared plot guides.

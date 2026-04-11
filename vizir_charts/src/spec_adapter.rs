@@ -16,7 +16,7 @@ use peniko::Brush;
 use vizir_core::{ColumnId, TableId};
 use vizir_transforms::{
     AggregateField, AggregateOp, CalculateExpr, CalculateOp, CalculateOperand, CompareOp,
-    LookupField, Predicate, SortOrder, StackOffset, WindowField, WindowOp,
+    LookupField, PivotValue, Predicate, SortOrder, StackOffset, WindowField, WindowOp,
 };
 
 use crate::{
@@ -420,6 +420,25 @@ impl ParsedLookupField {
     }
 }
 
+/// One explicit output slot in a parsed narrow pivot transform.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParsedPivotValue {
+    /// Numeric pivot-key value to match.
+    pub value: f64,
+    /// Output field name for this slot.
+    pub as_field: String,
+}
+
+impl ParsedPivotValue {
+    /// Creates a parsed pivot slot.
+    pub fn new(value: f64, as_field: impl Into<String>) -> Self {
+        Self {
+            value,
+            as_field: as_field.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 enum ParsedTransformKind {
     Filter {
@@ -463,6 +482,13 @@ enum ParsedTransformKind {
         from_key: String,
         fields: Vec<ParsedLookupField>,
         columns: Vec<String>,
+    },
+    Pivot {
+        group_by: Vec<String>,
+        pivot: String,
+        value: String,
+        op: AggregateOp,
+        values: Vec<ParsedPivotValue>,
     },
     Window {
         group_by: Vec<String>,
@@ -593,6 +619,25 @@ impl ParsedTransformSpec {
                 from_key: from_key.into(),
                 fields,
                 columns: collect_names(columns),
+            },
+        }
+    }
+
+    /// Creates a parsed narrow pivot transform with explicit numeric pivot slots.
+    pub fn pivot(
+        group_by: impl IntoIterator<Item = impl Into<String>>,
+        pivot: impl Into<String>,
+        value: impl Into<String>,
+        op: AggregateOp,
+        values: Vec<ParsedPivotValue>,
+    ) -> Self {
+        Self {
+            kind: ParsedTransformKind::Pivot {
+                group_by: collect_names(group_by),
+                pivot: pivot.into(),
+                value: value.into(),
+                op,
+                values,
             },
         }
     }
@@ -1614,6 +1659,27 @@ fn adapt_transform(
                 .collect::<Result<Vec<_>, _>>()?,
             resolve_columns(fields, columns, "lookup carry-through")?,
         )),
+        ParsedTransformKind::Pivot {
+            group_by,
+            pivot,
+            value,
+            op,
+            values,
+        } => Ok(TransformSpec::pivot(
+            resolve_columns(fields, group_by, "pivot group_by")?,
+            fields.resolve_input(pivot, "pivot key")?,
+            fields.resolve_input(value, "pivot value")?,
+            *op,
+            values
+                .iter()
+                .map(|slot| {
+                    Ok(PivotValue {
+                        value: slot.value,
+                        output: fields.allocate_output(&slot.as_field)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
         ParsedTransformKind::Window {
             group_by,
             sort_by,
@@ -1755,6 +1821,28 @@ mod tests {
             match col {
                 ColumnId(0) => self.a.get(row).copied(),
                 ColumnId(1) => self.b.get(row).copied(),
+                _ => None,
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct ThreeCols {
+        a: Vec<f64>,
+        b: Vec<f64>,
+        c: Vec<f64>,
+    }
+
+    impl TableData for ThreeCols {
+        fn row_count(&self) -> usize {
+            self.a.len().min(self.b.len()).min(self.c.len())
+        }
+
+        fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+            match col {
+                ColumnId(0) => self.a.get(row).copied(),
+                ColumnId(1) => self.b.get(row).copied(),
+                ColumnId(2) => self.c.get(row).copied(),
                 _ => None,
             }
         }
@@ -2130,6 +2218,63 @@ mod tests {
         assert_eq!(data.f64(0, ColumnId(2)), Some(4.0));
         assert!(data.f64(1, ColumnId(2)).expect("lookup miss").is_nan());
         assert_eq!(data.f64(2, ColumnId(2)), Some(6.0));
+    }
+
+    #[test]
+    fn parsed_pivot_transform_allocates_explicit_series_aliases() {
+        let parsed = ParsedUnitSpec::new(ParsedMarkDef::Line)
+            .with_transform(ParsedTransformSpec::pivot(
+                ["category"],
+                "series",
+                "value",
+                AggregateOp::Sum,
+                vec![
+                    ParsedPivotValue::new(0.0, "series_a"),
+                    ParsedPivotValue::new(1.0, "series_b"),
+                ],
+            ))
+            .with_x(ParsedChannelDef::quantitative("category"))
+            .with_y(ParsedChannelDef::quantitative("series_a"));
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "category",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "value",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "series",
+                column: ColumnId(2),
+            },
+        ]);
+
+        let mut scene = Scene::new();
+        let table_id = TableId(206);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![270, 271, 272, 273, 274, 275];
+        table.data = Some(Box::new(ThreeCols {
+            a: vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0],
+            b: vec![2.0, 4.0, 3.0, 5.0, 4.0, 6.0],
+            c: vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        }));
+        scene.insert_table(table);
+
+        let unit = parsed
+            .adapt(&resolver, context(table_id))
+            .expect("adapt pivot spec");
+        let lowered = unit.lower_into_scene(&mut scene).expect("lower pivot spec");
+        let pivoted = scene
+            .tables
+            .get(&lowered.output_table())
+            .expect("pivot output");
+        let data = pivoted.data.as_deref().expect("pivot data");
+        assert_eq!(data.f64(0, ColumnId(3)), Some(2.0));
+        assert_eq!(data.f64(2, ColumnId(3)), Some(4.0));
+        assert_eq!(data.f64(0, ColumnId(4)), Some(4.0));
+        assert_eq!(data.f64(2, ColumnId(4)), Some(6.0));
     }
 
     #[test]

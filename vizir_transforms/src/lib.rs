@@ -25,5 +25,5 @@ pub use scene::SceneExecutionError;
 pub use table::{TableFrame, TableFrameError};
 pub use transform::{
     AggregateField, AggregateOp, CalculateExpr, CalculateOp, CalculateOperand, CompareOp,
-    LookupField, Predicate, SortOrder, StackOffset, Transform, WindowField, WindowOp,
+    LookupField, PivotValue, Predicate, SortOrder, StackOffset, Transform, WindowField, WindowOp,
 };
