@@ -1,7 +1,7 @@
 {
   "title": "Pivoted Series",
-  "width": 220,
-  "height": 120,
+  "width": 320,
+  "height": 140,
   "transform": [
     {
       "pivot": {
@@ -21,9 +21,20 @@
   },
   "layer": [
     {
+      "mark": "area",
+      "encoding": {
+        "y": { "field": "series_b", "type": "quantitative", "title": "pivoted value" },
+        "y2": { "field": "series_a", "type": "quantitative" }
+      },
+      "style": {
+        "fill": "#BFDBFE",
+        "opacity": 0.45
+      }
+    },
+    {
       "mark": "line",
       "encoding": {
-        "y": { "field": "series_a", "type": "quantitative", "title": "pivoted value" }
+        "y": { "field": "series_a", "type": "quantitative" }
       },
       "style": {
         "stroke": "#2563EB",
