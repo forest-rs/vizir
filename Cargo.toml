@@ -18,7 +18,7 @@ license = "Apache-2.0 OR MIT"
 repository = "https://github.com/forest-rs/vizir"
 
 [workspace.dependencies]
-hashbrown = { version = "0.16.1", default-features = false, features = [
+hashbrown = { version = "0.17.0", default-features = false, features = [
   "alloc",
   "default-hasher",
 ] }
