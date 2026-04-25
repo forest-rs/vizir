@@ -7,8 +7,6 @@
 //! In `VizIR`, titles participate in chart layout (reserve space in [`crate::ChartLayout`]) but are
 //! rendered as one or more [`vizir_core::Mark`] values.
 
-extern crate alloc;
-
 use alloc::string::String;
 use alloc::vec::Vec;
 

@@ -7,8 +7,6 @@
 //! `left`, or `right`. This module mirrors that shape: a single [`AxisSpec`]
 //! that can be measured (for layout) and arranged (to generate marks).
 
-extern crate alloc;
-
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;

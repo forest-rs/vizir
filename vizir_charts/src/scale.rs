@@ -6,8 +6,6 @@
 //! These types provide the core coordinate mapping behavior needed for the demos
 //! and as a future lowering target for Vega/Vega-Lite-like frontends.
 
-extern crate alloc;
-
 use alloc::vec::Vec;
 
 #[cfg(not(feature = "std"))]

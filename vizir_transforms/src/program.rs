@@ -3,8 +3,6 @@
 
 //! Transform program and executor.
 
-extern crate alloc;
-
 use alloc::vec;
 use alloc::vec::Vec;
 

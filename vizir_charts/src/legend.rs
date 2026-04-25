@@ -6,8 +6,6 @@
 //! In Vega, legends are guides that compile into mark groups. This module
 //! provides a tiny "swatches + labels" legend as a starting point.
 
-extern crate alloc;
-
 use alloc::string::String;
 use alloc::vec::Vec;
 

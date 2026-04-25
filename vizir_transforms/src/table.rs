@@ -3,8 +3,6 @@
 
 //! Owned table representation used by the transform executor.
 
-extern crate alloc;
-
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 

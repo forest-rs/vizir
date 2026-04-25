@@ -7,8 +7,6 @@
 //! identifiers such as [`vizir_core::ColumnId`]. This module adds a thin, schema-aware adapter
 //! layer that accepts field names and resolves them into a [`crate::UnitSpec`].
 
-extern crate alloc;
-
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 

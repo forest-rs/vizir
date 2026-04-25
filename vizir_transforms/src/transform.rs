@@ -3,8 +3,6 @@
 
 //! Transform IR types.
 
-extern crate alloc;
-
 use alloc::vec::Vec;
 
 use vizir_core::{ColumnId, TableId};

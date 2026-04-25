@@ -3,8 +3,6 @@
 
 //! Stacked bar mark generation (using `y0`/`y1` columns).
 
-extern crate alloc;
-
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 

@@ -6,8 +6,6 @@
 //! This is an ergonomics layer: chart/demo code shouldn't have to manually extract `TableFrame`s,
 //! run `Program::execute`, and then re-insert output tables.
 
-extern crate alloc;
-
 use alloc::vec::Vec;
 
 use hashbrown::hash_map::Entry;

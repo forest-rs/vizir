@@ -6,8 +6,6 @@
 //! This module intentionally parses only the small authored slice that `vizir_charts` can lower
 //! today. It is not a general Vega-Lite parser.
 
-extern crate alloc;
-
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;

@@ -3,8 +3,6 @@
 
 //! Text mark generation.
 
-extern crate alloc;
-
 use alloc::string::String;
 
 use kurbo::Point;

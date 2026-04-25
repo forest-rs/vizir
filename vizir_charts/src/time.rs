@@ -8,8 +8,6 @@
 //! - "nice" tick steps for seconds/minutes/hours
 //! - formatting for tick labels (e.g. `1:05`, `2:03:00`)
 
-extern crate alloc;
-
 use alloc::string::String;
 use alloc::vec::Vec;
 

@@ -3,8 +3,6 @@
 
 //! Ranged area mark generation using authored top and bottom edges.
 
-extern crate alloc;
-
 use alloc::vec::Vec;
 
 use kurbo::BezPath;

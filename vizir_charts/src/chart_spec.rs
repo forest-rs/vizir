@@ -10,8 +10,6 @@
 //! - guide components (axes, legends, titles)
 //! - a set of series/annotation marks.
 
-extern crate alloc;
-
 use alloc::vec::Vec;
 
 use kurbo::Rect;

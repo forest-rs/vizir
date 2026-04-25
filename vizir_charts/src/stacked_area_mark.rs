@@ -3,8 +3,6 @@
 
 //! Stacked area mark generation (using `y0`/`y1` columns).
 
-extern crate alloc;
-
 use alloc::vec::Vec;
 
 use kurbo::BezPath;

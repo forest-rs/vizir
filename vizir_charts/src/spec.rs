@@ -16,8 +16,6 @@
 //!
 //! It is not a JSON parser and not a full Vega/Vega-Lite implementation.
 
-extern crate alloc;
-
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;

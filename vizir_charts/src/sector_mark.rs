@@ -6,8 +6,6 @@
 //! Vega models pie/donut slices using the `arc` mark, typically driven by start/end angles and
 //! inner/outer radii. Swift Charts exposes a similar primitive as `SectorMark`.
 
-extern crate alloc;
-
 use alloc::vec::Vec;
 
 use kurbo::{Circle, Point, Shape};

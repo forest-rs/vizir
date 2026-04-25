@@ -3,8 +3,6 @@
 
 //! Line mark generation.
 
-extern crate alloc;
-
 use alloc::vec::Vec;
 
 use kurbo::BezPath;
