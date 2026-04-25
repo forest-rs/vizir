@@ -190,8 +190,14 @@ impl LegendSwatches {
                     let vizir_core::Encoding::Const(baseline) = enc.baseline else {
                         continue;
                     };
-                    let (w, h) = measurer.measure(text, font_size);
-                    text_bounds(x, y, (w, h), anchor, baseline)
+                    let metrics = measurer.measure(text, font_size);
+                    text_bounds(
+                        x,
+                        y,
+                        (metrics.advance_width, metrics.line_height),
+                        anchor,
+                        baseline,
+                    )
                 }
                 vizir_core::MarkEncodings::Path(_enc) => {
                     // This legend doesn't currently emit paths.

@@ -448,8 +448,8 @@ impl AxisSpec {
                     let cos = theta.cos().abs();
                     for v in ticks {
                         let label = self.format_tick(v, step);
-                        let (w, h) = measurer.measure(&label, self.style.label_font_size);
-                        let rotated_h = sin * w + cos * h;
+                        let metrics = measurer.measure(&label, self.style.label_font_size);
+                        let rotated_h = sin * metrics.advance_width + cos * metrics.line_height;
                         max_label_extent = max_label_extent.max(rotated_h);
                     }
                 }
@@ -461,8 +461,8 @@ impl AxisSpec {
                 };
                 let mut out = tick_extent + label_thickness;
                 if let Some(title) = &self.title {
-                    let (_tw, th) = measurer.measure(title, self.style.title_font_size);
-                    out += self.title_offset.max(0.0) + th;
+                    let metrics = measurer.measure(title, self.style.title_font_size);
+                    out += self.title_offset.max(0.0) + metrics.line_height;
                 }
                 out
             }
@@ -476,8 +476,8 @@ impl AxisSpec {
                     let cos = theta.cos().abs();
                     for v in ticks {
                         let label = self.format_tick(v, step);
-                        let (w, h) = measurer.measure(&label, self.style.label_font_size);
-                        let rotated_w = cos * w + sin * h;
+                        let metrics = measurer.measure(&label, self.style.label_font_size);
+                        let rotated_w = cos * metrics.advance_width + sin * metrics.line_height;
                         max_label_extent = max_label_extent.max(rotated_w);
                     }
                 }

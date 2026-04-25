@@ -58,7 +58,7 @@ pub use chart_spec::ChartSpec;
 pub use layout::{ChartLayout, ChartLayoutSpec, LegendOrient, LegendPlacement, Size};
 pub use legend::{LegendItem, LegendSwatches, LegendSwatchesSpec};
 pub use line_mark::LineMarkSpec;
-pub use measure::{HeuristicTextMeasurer, TextMeasurer};
+pub use measure::{HeuristicTextMeasurer, TextMeasurer, TextMetrics};
 pub use point_mark::PointMarkSpec;
 pub use range_area_mark::RangeAreaMarkSpec;
 pub use rect_mark::RectMarkSpec;
