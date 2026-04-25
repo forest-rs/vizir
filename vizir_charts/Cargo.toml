@@ -23,7 +23,7 @@ workspace = true
 
 [features]
 default = ["libm"]
-json = ["std", "dep:serde", "dep:serde_json"]
+json = ["dep:serde", "dep:serde_json"]
 std = ["vizir_core/std", "kurbo/std", "peniko/std", "vizir_transforms/std"]
 libm = [
   "dep:libm",
