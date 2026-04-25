@@ -352,7 +352,6 @@ fn upsert_frame_as_table(scene: &mut Scene, id: TableId, frame: TableFrame) {
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
 
     use alloc::boxed::Box;
     use alloc::vec;

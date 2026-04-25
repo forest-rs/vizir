@@ -127,7 +127,6 @@ pub fn format_time_seconds(v: f64, step: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
 
     use super::*;
 

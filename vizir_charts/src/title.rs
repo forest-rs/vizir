@@ -178,7 +178,6 @@ impl TitleSpec {
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
 
     use kurbo::Rect;
 

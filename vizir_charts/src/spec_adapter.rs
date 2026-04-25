@@ -1813,7 +1813,6 @@ impl<'a> FieldBindings<'a> {
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
 
     use alloc::boxed::Box;
     use alloc::vec;

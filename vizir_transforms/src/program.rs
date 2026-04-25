@@ -1433,7 +1433,6 @@ fn floor_f64(x: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
 
     use alloc::vec;
 

@@ -905,7 +905,6 @@ fn parse_stack_offset(offset: &str) -> Result<StackOffset, JsonSpecError> {
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
 
     use super::*;
     use crate::{

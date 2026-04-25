@@ -122,7 +122,6 @@ impl SectorMarkSpec {
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
 
     use peniko::Color;
     use peniko::color::palette::css;

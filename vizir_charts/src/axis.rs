@@ -1244,7 +1244,6 @@ fn push_if_missing(ticks: &mut Vec<f64>, v: f64) {
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
 
     use kurbo::Rect;
     use kurbo::Shape;

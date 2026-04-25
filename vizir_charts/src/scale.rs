@@ -626,7 +626,6 @@ pub fn infer_domain_f64(data: &dyn TableData, col: ColumnId) -> Option<(f64, f64
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
 
     use super::*;
 

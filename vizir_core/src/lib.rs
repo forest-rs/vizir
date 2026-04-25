@@ -1712,7 +1712,6 @@ fn update_payload_incremental(
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
 
     use super::*;
 

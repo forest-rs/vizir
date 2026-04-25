@@ -1,8 +1,6 @@
 // Copyright 2025 the VizIR Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-extern crate std;
-
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;

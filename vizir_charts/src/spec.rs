@@ -4890,7 +4890,6 @@ fn alloc_table(next_table: &mut u32) -> TableId {
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
 
     use alloc::boxed::Box;
     use alloc::vec;
