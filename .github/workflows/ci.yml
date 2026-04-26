@@ -261,6 +261,9 @@ jobs:
           toolchain: ${{ env.RUST_MIN_VER }}
           targets: x86_64-unknown-none
 
+      - name: select toolchain
+        run: echo "RUSTUP_TOOLCHAIN=${{ env.RUST_MIN_VER }}" >> $GITHUB_ENV
+
       - name: install cargo-hack
         uses: taiki-e/install-action@v2
         with:
@@ -288,6 +291,9 @@ jobs:
         with:
           toolchain: ${{ env.RUST_MIN_VER }}
           targets: wasm32-unknown-unknown
+
+      - name: select toolchain
+        run: echo "RUSTUP_TOOLCHAIN=${{ env.RUST_MIN_VER }}" >> $GITHUB_ENV
 
       - name: install cargo-hack
         uses: taiki-e/install-action@v2
