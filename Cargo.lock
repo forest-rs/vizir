@@ -260,6 +260,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "vizir_demo_scenarios"
+version = "0.1.0"
+dependencies = [
+ "kurbo",
+ "peniko",
+ "vizir_charts",
+ "vizir_core",
+]
+
+[[package]]
 name = "vizir_examples"
 version = "0.1.0"
 dependencies = [

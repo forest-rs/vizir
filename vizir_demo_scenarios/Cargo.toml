@@ -1,0 +1,30 @@
+[package]
+name = "vizir_demo_scenarios"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared chart scenarios for VizIR renderer demos."
+readme = "README.md"
+keywords = ["visualization", "charts", "examples"]
+categories = ["graphics", "no-std"]
+publish = false
+
+[dependencies]
+kurbo.workspace = true
+peniko.workspace = true
+vizir_charts.workspace = true
+vizir_core.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["libm"]
+std = ["kurbo/std", "peniko/std", "vizir_charts/std", "vizir_core/std"]
+libm = ["kurbo/libm", "peniko/libm", "vizir_charts/libm", "vizir_core/libm"]
+
+[package.metadata.docs.rs]
+all-features = true
+default-target = "x86_64-unknown-linux-gnu"
+targets = []
