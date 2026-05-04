@@ -49,6 +49,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "imaging"
+version = "0.0.1"
+source = "git+https://github.com/forest-rs/imaging.git?rev=79f02aedf5b65b4cd151ef45d8b40013d7289ee2#79f02aedf5b65b4cd151ef45d8b40013d7289ee2"
+dependencies = [
+ "kurbo",
+ "peniko",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -195,6 +204,16 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "vizir_backend_imaging"
+version = "0.1.0"
+dependencies = [
+ "hashbrown",
+ "imaging",
+ "parley",
+ "vizir_core",
+]
 
 [[package]]
 name = "vizir_backend_svg"
