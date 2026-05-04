@@ -13,16 +13,29 @@ publish = false
 [dependencies]
 kurbo.workspace = true
 peniko.workspace = true
-vizir_charts.workspace = true
+vizir_charts = { workspace = true, features = ["json"] }
 vizir_core.workspace = true
+vizir_transforms.workspace = true
 
 [lints]
 workspace = true
 
 [features]
 default = ["libm"]
-std = ["kurbo/std", "peniko/std", "vizir_charts/std", "vizir_core/std"]
-libm = ["kurbo/libm", "peniko/libm", "vizir_charts/libm", "vizir_core/libm"]
+std = [
+  "kurbo/std",
+  "peniko/std",
+  "vizir_charts/std",
+  "vizir_core/std",
+  "vizir_transforms/std",
+]
+libm = [
+  "kurbo/libm",
+  "peniko/libm",
+  "vizir_charts/libm",
+  "vizir_core/libm",
+  "vizir_transforms/libm",
+]
 
 [package.metadata.docs.rs]
 all-features = true

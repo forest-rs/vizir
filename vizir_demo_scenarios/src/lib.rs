@@ -20,15 +20,17 @@ use vizir_charts::{
     AxisSpec, AxisStyle, ChartLayoutSpec, ChartSpec, GridStyle, HeuristicTextMeasurer,
     ScaleBandSpec, ScaleLinearSpec, SectorMarkSpec, Size, StrokeStyle, TextMarkSpec, TitleSpec,
 };
-use vizir_core::{Mark, MarkId, TextAnchor, TextBaseline};
+use vizir_core::{Mark, MarkDiff, MarkId, Scene, TextAnchor, TextBaseline};
+
+mod gallery;
 
 /// A built frame of renderer-agnostic marks.
 #[derive(Debug)]
 pub struct ScenarioFrame {
     /// View rectangle containing the marks.
     pub view: Rect,
-    /// Marks for the scenario frame.
-    pub marks: Vec<Mark>,
+    /// Evaluated mark diffs for the scenario frame.
+    pub diffs: Vec<MarkDiff>,
 }
 
 /// A static scenario that can rebuild its marks on demand.
@@ -82,6 +84,181 @@ pub fn static_scenarios() -> &'static [StaticScenario] {
             "Sectors",
             "Filled sector marks with centered labels.",
             sectors,
+        ),
+        StaticScenario::new(
+            "Bar",
+            "One rect per row; includes gridlines, axes, and a baseline at 0.",
+            gallery::bar_demo,
+        ),
+        StaticScenario::new(
+            "Scales",
+            "A quick visualization of new scale types. Time is numeric seconds with nice ticks/formatting.",
+            gallery::scales_demo,
+        ),
+        StaticScenario::new(
+            "Axes: time + log",
+            "A time x-axis and a log y-axis, with a line/point series sharing those scale instances.",
+            gallery::log_time_axes_demo,
+        ),
+        StaticScenario::new(
+            "Axis labelAngle",
+            "Bottom axis uses labelAngle=-45 deg with deliberately long labels.",
+            gallery::axis_label_angle_demo,
+        ),
+        StaticScenario::new(
+            "Transforms",
+            "A dataflow slice: source table -> filter(y>=6) -> sort(x).",
+            gallery::transforms_demo,
+        ),
+        StaticScenario::new(
+            "Aggregate",
+            "A source -> aggregate(groupby) -> bar marks pattern.",
+            gallery::aggregate_demo,
+        ),
+        StaticScenario::new(
+            "Lowered UnitSpec",
+            "An aggregate bar chart lowered through transforms, guides, and series marks.",
+            gallery::lowered_spec_demo,
+        ),
+        StaticScenario::new(
+            "Lowered JSON UnitSpec",
+            "An aggregate bar chart parsed from JSON and lowered through the authored seam.",
+            gallery::lowered_json_spec_demo,
+        ),
+        StaticScenario::new(
+            "Lowered JSON Calculate",
+            "A point chart proving narrow arithmetic calculate lowering.",
+            gallery::lowered_json_calculate_demo,
+        ),
+        StaticScenario::new(
+            "Lowered JSON JoinAggregate",
+            "A point chart proving grouped aggregates can be written back per row.",
+            gallery::lowered_json_joinaggregate_demo,
+        ),
+        StaticScenario::new(
+            "Lowered JSON Fold",
+            "A grouped bar chart proving numeric-only fold lowering from wide rows.",
+            gallery::lowered_json_fold_demo,
+        ),
+        StaticScenario::new(
+            "Lowered JSON Lookup",
+            "A bar chart proving narrow one-key lookup enrichment.",
+            gallery::lowered_json_lookup_demo,
+        ),
+        StaticScenario::new(
+            "Lowered JSON Pivot Table",
+            "A long-to-wide pivot transform rendered as band plus line overlays.",
+            gallery::lowered_json_pivot_demo,
+        ),
+        StaticScenario::new(
+            "Lowered JSON Window",
+            "A per-series ranked point chart proving narrow window rank lowering.",
+            gallery::lowered_json_window_demo,
+        ),
+        StaticScenario::new(
+            "Lowered JSON Grouped Bars",
+            "A grouped bar chart proving categorical color lowering for bars.",
+            gallery::lowered_json_grouped_bar_demo,
+        ),
+        StaticScenario::new(
+            "Lowered JSON Stacked Bars",
+            "A stacked bar chart proving explicit stack-transform lowering.",
+            gallery::lowered_json_stacked_bar_demo,
+        ),
+        StaticScenario::new(
+            "Lowered JSON Facet",
+            "A one-field faceted bar chart over the authored unit seam.",
+            gallery::lowered_json_facet_demo,
+        ),
+        StaticScenario::new(
+            "Lowered JSON Bar + Text",
+            "A shared-plot bar + text overlay from JSON.",
+            gallery::lowered_json_bar_text_demo,
+        ),
+        StaticScenario::new(
+            "Lowered JSON Point Size + Shape",
+            "A point chart proving point-local size and shape channels.",
+            gallery::lowered_json_point_shape_size_demo,
+        ),
+        StaticScenario::new(
+            "Lowered JSON Point Opacity",
+            "A point chart proving quantitative opacity lowering.",
+            gallery::lowered_json_point_opacity_demo,
+        ),
+        StaticScenario::new(
+            "Lowered JSON Point Stroke + Width",
+            "A point chart proving point-local stroke and strokeWidth channels.",
+            gallery::lowered_json_point_stroke_width_demo,
+        ),
+        StaticScenario::new(
+            "Lowered JSON Nested Child Units",
+            "A styled area + line + point overlay from nested child units.",
+            gallery::lowered_json_nested_layer_demo,
+        ),
+        StaticScenario::new(
+            "Lowered JSON Rule Layer",
+            "A line with a child-local aggregated mean rule.",
+            gallery::lowered_json_rule_layer_demo,
+        ),
+        StaticScenario::new(
+            "Lowered JSON Layer",
+            "A shared-plot area + line overlay from JSON.",
+            gallery::lowered_json_layer_demo,
+        ),
+        StaticScenario::new(
+            "Lowered Area UnitSpec",
+            "A multi-series area chart lowered from authored x/y/color channels.",
+            gallery::lowered_area_spec_demo,
+        ),
+        StaticScenario::new(
+            "Lowered Ranged Area",
+            "A ribbon-like area lowered from paired-edge range channels.",
+            gallery::lowered_ranged_area_spec_demo,
+        ),
+        StaticScenario::new(
+            "Histogram",
+            "A source -> bin(step=2) -> aggregate(count) -> sort -> bars pipeline.",
+            gallery::histogram_demo,
+        ),
+        StaticScenario::new(
+            "Stack",
+            "Stack(offset=zero) per-category accumulation drawn as rects.",
+            gallery::stack_demo,
+        ),
+        StaticScenario::new(
+            "Stacked Area",
+            "Stacked areas built from stack-produced y0/y1 spans.",
+            gallery::stacked_area_demo,
+        ),
+        StaticScenario::new(
+            "Percent Stack",
+            "Percent-stacked bars using normalized y0/y1 spans.",
+            gallery::percent_stack_demo,
+        ),
+        StaticScenario::new(
+            "Streamgraph Offsets",
+            "Compare Stack(offset=center) vs Stack(offset=wiggle) for stacked areas.",
+            gallery::streamgraph_demo,
+        ),
+        StaticScenario::new(
+            "Scatter",
+            "One point per row with axes and symbol rendering.",
+            gallery::scatter_demo,
+        ),
+        StaticScenario::new(
+            "Line",
+            "A single path mark derived from table rows.",
+            gallery::line_demo,
+        ),
+        StaticScenario::new(
+            "Area",
+            "Filled area under a curve with a stroke outline.",
+            gallery::area_demo,
+        ),
+        StaticScenario::new(
+            "Sector",
+            "Sector marks for pie/donut slices plus a legend.",
+            gallery::sector_demo,
         ),
     ];
     SCENARIOS
@@ -203,10 +380,7 @@ fn axis_label_angle_bars() -> ScenarioFrame {
         .mark(),
     );
 
-    ScenarioFrame {
-        view: layout.view,
-        marks,
-    }
+    frame_from_marks(layout.view, marks)
 }
 
 fn bars() -> ScenarioFrame {
@@ -268,10 +442,7 @@ fn bars() -> ScenarioFrame {
         out
     });
 
-    ScenarioFrame {
-        view: layout.view,
-        marks,
-    }
+    frame_from_marks(layout.view, marks)
 }
 
 fn line_points() -> ScenarioFrame {
@@ -358,10 +529,7 @@ fn line_points() -> ScenarioFrame {
         out
     });
 
-    ScenarioFrame {
-        view: layout.view,
-        marks,
-    }
+    frame_from_marks(layout.view, marks)
 }
 
 fn sectors() -> ScenarioFrame {
@@ -425,10 +593,7 @@ fn sectors() -> ScenarioFrame {
         .mark(),
     );
 
-    ScenarioFrame {
-        view: layout.view,
-        marks,
-    }
+    frame_from_marks(layout.view, marks)
 }
 
 fn plot_background(id: u64, plot: Rect) -> Mark {
@@ -436,6 +601,16 @@ fn plot_background(id: u64, plot: Rect) -> Mark {
         .with_fill(Color::TRANSPARENT)
         .with_z_index(vizir_charts::PLOT_BACKGROUND)
         .mark()
+}
+
+fn frame_from_marks(view: Rect, marks: Vec<Mark>) -> ScenarioFrame {
+    let mut scene = Scene::new();
+    frame_from_scene_marks(&mut scene, view, marks)
+}
+
+fn frame_from_scene_marks(scene: &mut Scene, view: Rect, marks: Vec<Mark>) -> ScenarioFrame {
+    let diffs = scene.tick(marks);
+    ScenarioFrame { view, diffs }
 }
 
 fn mark_id(base: u64, index: usize) -> MarkId {
@@ -492,7 +667,7 @@ mod tests {
         for scenario in static_scenarios() {
             let frame = scenario.build();
             assert!(
-                !frame.marks.is_empty(),
+                !frame.diffs.is_empty(),
                 "{} should build marks",
                 scenario.title
             );
