@@ -4,6 +4,7 @@ members = [
   "vizir_core",
   "vizir_examples",
   "vizir_charts",
+  "vizir_backend_svg",
   "vizir_charts_demo",
   "vizir_transforms",
 ]
@@ -34,6 +35,7 @@ serde_json = { version = "1.0.145", default-features = false, features = [
 smallvec = { version = "1.13.2", default-features = false }
 
 vizir_charts = { path = "vizir_charts", default-features = false }
+vizir_backend_svg = { path = "vizir_backend_svg", default-features = false }
 vizir_core = { path = "vizir_core", default-features = false }
 vizir_transforms = { path = "vizir_transforms", default-features = false }
 

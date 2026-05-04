@@ -1,0 +1,29 @@
+[package]
+name = "vizir_backend_svg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SVG rendering adapter for evaluated VizIR marks."
+readme = "README.md"
+keywords = ["visualization", "svg", "charts"]
+categories = ["graphics", "no-std"]
+
+[dependencies]
+hashbrown.workspace = true
+kurbo.workspace = true
+peniko.workspace = true
+vizir_core.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["libm"]
+std = ["kurbo/std", "peniko/std", "vizir_core/std"]
+libm = ["kurbo/libm", "peniko/libm", "vizir_core/libm"]
+
+[package.metadata.docs.rs]
+all-features = true
+default-target = "x86_64-unknown-linux-gnu"
+targets = []
