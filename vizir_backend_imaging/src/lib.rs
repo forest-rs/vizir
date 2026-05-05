@@ -14,7 +14,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use hashbrown::HashMap;
-use imaging::kurbo::{Affine, Stroke};
+use imaging::kurbo::Affine;
 #[cfg(feature = "parley")]
 use imaging::kurbo::Vec2;
 use imaging::peniko::Fill;
@@ -336,43 +336,29 @@ fn paint_payload(
 ) {
     match payload {
         MarkPayload::Rect(rect) => {
-            if brush_is_transparent(&rect.fill) {
-                return;
-            }
             Painter::new(sink)
                 .fill(rect.rect, &rect.fill)
                 .transform(transform)
                 .draw();
         }
         MarkPayload::Path(path) => {
-            if !brush_is_transparent(&path.fill) {
+            if let Some(fill) = &path.fill {
                 Painter::new(sink)
-                    .fill(&path.path, &path.fill)
+                    .fill(&path.path, fill)
                     .transform(transform)
                     .fill_rule(Fill::NonZero)
                     .draw();
             }
-            if path.stroke_width > 0.0 && !brush_is_transparent(&path.stroke) {
-                let stroke = Stroke::new(path.stroke_width);
+            if let Some(stroke) = &path.stroke {
                 Painter::new(sink)
-                    .stroke(&path.path, &stroke, &path.stroke)
+                    .stroke(&path.path, &stroke.style, &stroke.brush)
                     .transform(transform)
                     .draw();
             }
         }
         MarkPayload::Text(channels) => {
-            if brush_is_transparent(&channels.fill) {
-                return;
-            }
             text.paint_text(sink, transform, channels);
         }
-    }
-}
-
-fn brush_is_transparent(brush: &imaging::peniko::Brush) -> bool {
-    match brush {
-        imaging::peniko::Brush::Solid(color) => color.components[3] <= 0.0,
-        _ => false,
     }
 }
 
@@ -380,10 +366,10 @@ fn brush_is_transparent(brush: &imaging::peniko::Brush) -> bool {
 mod tests {
     extern crate std;
 
-    use imaging::kurbo::{BezPath, Point, Rect};
+    use imaging::kurbo::{BezPath, Point, Rect, Stroke};
     use imaging::peniko::Color;
     use imaging::record::{Command, Draw, Geometry};
-    use vizir_core::{PathChannels, RectChannels, TextChannels};
+    use vizir_core::{PathChannels, PathStroke, RectChannels, TextChannels};
 
     use super::*;
 
@@ -431,9 +417,11 @@ mod tests {
             0,
             MarkPayload::Path(PathChannels {
                 path,
-                fill: Color::from_rgb8(1, 2, 3).into(),
-                stroke: Color::BLACK.into(),
-                stroke_width: 2.0,
+                fill: Some(Color::from_rgb8(1, 2, 3).into()),
+                stroke: Some(PathStroke {
+                    brush: Color::BLACK.into(),
+                    style: Stroke::new(2.0),
+                }),
             }),
         );
 

@@ -6,8 +6,8 @@
 //! A "rule" is a straight line segment (often used for baselines, gridlines, and axis domain
 //! lines). This is a Vega mark type and also a Swift Charts primitive.
 
-use kurbo::BezPath;
-use peniko::{Brush, Color};
+use kurbo::{BezPath, Stroke};
+use peniko::Brush;
 use vizir_core::{Mark, MarkId};
 
 use crate::z_order;
@@ -27,8 +27,8 @@ pub struct RuleMarkSpec {
     pub y1: f64,
     /// Stroke paint.
     pub stroke: Brush,
-    /// Stroke width in scene coordinates.
-    pub stroke_width: f64,
+    /// Stroke style in scene coordinates.
+    pub stroke_style: Stroke,
     /// Rendering order hint (`vizir_core::Mark::z_index`).
     pub z_index: i32,
 }
@@ -43,7 +43,7 @@ impl RuleMarkSpec {
             x1,
             y1,
             stroke: Brush::default(),
-            stroke_width: 1.0,
+            stroke_style: Stroke::new(1.0),
             z_index: z_order::SERIES_STROKE,
         }
     }
@@ -61,7 +61,14 @@ impl RuleMarkSpec {
     /// Sets stroke paint and width.
     pub fn with_stroke(mut self, stroke: impl Into<Brush>, stroke_width: f64) -> Self {
         self.stroke = stroke.into();
-        self.stroke_width = stroke_width;
+        self.stroke_style = Stroke::new(stroke_width);
+        self
+    }
+
+    /// Sets stroke paint and full stroke style.
+    pub fn with_stroke_style(mut self, stroke: impl Into<Brush>, stroke_style: Stroke) -> Self {
+        self.stroke = stroke.into();
+        self.stroke_style = stroke_style;
         self
     }
 
@@ -80,9 +87,9 @@ impl RuleMarkSpec {
             .path()
             .path_const(p)
             .z_index(self.z_index)
-            .fill_const(Color::TRANSPARENT)
+            .no_fill()
             .stroke_brush_const(self.stroke.clone())
-            .stroke_width_const(self.stroke_width)
+            .stroke_style_const(self.stroke_style.clone())
             .build()
     }
 }

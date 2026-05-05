@@ -153,7 +153,7 @@ impl PointMarkSpec {
                             },
                         )
                         .fill_brush_const(fill.clone())
-                        .stroke_width_const(0.0)
+                        .no_stroke()
                         .build(),
                 }
             })

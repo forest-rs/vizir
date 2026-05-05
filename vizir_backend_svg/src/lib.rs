@@ -15,9 +15,9 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use hashbrown::HashMap;
-use kurbo::{PathEl, Rect};
+use kurbo::{Cap, Join, PathEl, Rect};
 use peniko::Brush;
-use vizir_core::{MarkDiff, MarkId, MarkPayload, TextAnchor, TextBaseline};
+use vizir_core::{MarkDiff, MarkId, MarkPayload, PathStroke, TextAnchor, TextBaseline};
 
 /// Retained SVG-facing scene built from evaluated mark diffs.
 #[derive(Debug, Default)]
@@ -220,10 +220,9 @@ fn write_payload(out: &mut String, payload: &MarkPayload) {
         MarkPayload::Path(p) => {
             let d = path_to_svg(&p.path);
             out.push_str(&format!(r#"<path d="{d}""#));
-            write_paint_attr(out, "fill", &p.fill);
-            if p.stroke_width > 0.0 {
-                write_paint_attr(out, "stroke", &p.stroke);
-                out.push_str(&format!(r#" stroke-width="{}""#, p.stroke_width));
+            write_optional_paint_attr(out, "fill", p.fill.as_ref());
+            if let Some(stroke) = &p.stroke {
+                write_stroke_attrs(out, stroke);
             }
             out.push_str("/>\n");
         }
@@ -303,6 +302,49 @@ fn write_paint_attr(out: &mut String, name: &str, brush: &Brush) {
     }
 }
 
+fn write_optional_paint_attr(out: &mut String, name: &str, brush: Option<&Brush>) {
+    match brush {
+        Some(brush) => write_paint_attr(out, name, brush),
+        None => out.push_str(&format!(r#" {name}="none""#)),
+    }
+}
+
+fn write_stroke_attrs(out: &mut String, stroke: &PathStroke) {
+    write_paint_attr(out, "stroke", &stroke.brush);
+    out.push_str(&format!(r#" stroke-width="{}""#, stroke.style.width));
+    out.push_str(match (stroke.style.start_cap, stroke.style.end_cap) {
+        (Cap::Butt, Cap::Butt) => r#" stroke-linecap="butt""#,
+        (Cap::Square, Cap::Square) => r#" stroke-linecap="square""#,
+        (Cap::Round, Cap::Round) => r#" stroke-linecap="round""#,
+        _ => "",
+    });
+    out.push_str(match stroke.style.join {
+        Join::Bevel => r#" stroke-linejoin="bevel""#,
+        Join::Miter => r#" stroke-linejoin="miter""#,
+        Join::Round => r#" stroke-linejoin="round""#,
+    });
+    out.push_str(&format!(
+        r#" stroke-miterlimit="{}""#,
+        stroke.style.miter_limit
+    ));
+    if !stroke.style.dash_pattern.is_empty() {
+        out.push_str(r#" stroke-dasharray=""#);
+        for (index, dash) in stroke.style.dash_pattern.iter().enumerate() {
+            if index > 0 {
+                out.push(' ');
+            }
+            out.push_str(&dash.to_string());
+        }
+        out.push('"');
+    }
+    if stroke.style.dash_offset != 0.0 {
+        out.push_str(&format!(
+            r#" stroke-dashoffset="{}""#,
+            stroke.style.dash_offset
+        ));
+    }
+}
+
 fn escape_xml(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -322,9 +364,9 @@ fn escape_xml(s: &str) -> String {
 mod tests {
     extern crate std;
 
-    use kurbo::{BezPath, Point, Rect};
+    use kurbo::{BezPath, Point, Rect, Stroke};
     use peniko::Color;
-    use vizir_core::{PathChannels, RectChannels, TextChannels};
+    use vizir_core::{PathChannels, PathStroke, RectChannels, TextChannels};
 
     use super::*;
 
@@ -372,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn serializes_path_stroke_when_width_is_positive() {
+    fn serializes_path_stroke_when_present() {
         let mut path = BezPath::new();
         path.move_to((0.0, 0.0));
         path.line_to((1.0, 1.0));
@@ -383,13 +425,16 @@ mod tests {
             0,
             MarkPayload::Path(PathChannels {
                 path,
-                fill: Color::TRANSPARENT.into(),
-                stroke: Color::BLACK.into(),
-                stroke_width: 2.0,
+                fill: None,
+                stroke: Some(PathStroke {
+                    brush: Color::BLACK.into(),
+                    style: Stroke::new(2.0),
+                }),
             }),
         );
 
         let svg = scene.to_svg_string();
+        assert!(svg.contains(r#"fill="none""#));
         assert!(svg.contains(r##"stroke="#000000""##));
         assert!(svg.contains(r#"stroke-width="2""#));
     }

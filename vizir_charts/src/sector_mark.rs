@@ -111,9 +111,9 @@ impl SectorMarkSpec {
         if let Some(stroke) = self.stroke.clone() {
             builder = builder
                 .stroke_brush_const(stroke.brush)
-                .stroke_width_const(stroke.stroke_width);
+                .stroke_style_const(stroke.stroke);
         } else {
-            builder = builder.stroke_width_const(0.0);
+            builder = builder.no_stroke();
         }
 
         alloc::vec![builder.build()]
@@ -163,14 +163,15 @@ mod tests {
         let MarkPayload::Path(p) = &**new else {
             panic!("expected path payload");
         };
-        assert_eq!(p.fill, css::TOMATO.into());
-        assert_eq!(p.stroke, css::BLACK.into());
-        assert_eq!(p.stroke_width, 2.0);
+        assert_eq!(p.fill, Some(css::TOMATO.into()));
+        let stroke = p.stroke.as_ref().expect("sector should have stroke");
+        assert_eq!(stroke.brush, css::BLACK.into());
+        assert_eq!(stroke.style.width, 2.0);
         assert_ne!(p.path.bounding_box(), kurbo::Rect::new(0.0, 0.0, 0.0, 0.0));
     }
 
     #[test]
-    fn sector_without_stroke_has_zero_stroke_width() {
+    fn sector_without_stroke_has_no_stroke() {
         let sector = SectorMarkSpec::new(
             MarkId::from_raw(1),
             Point::new(0.0, 0.0),
@@ -189,6 +190,6 @@ mod tests {
         let MarkPayload::Path(p) = &**new else {
             panic!("expected path payload");
         };
-        assert_eq!(p.stroke_width, 0.0);
+        assert!(p.stroke.is_none());
     }
 }

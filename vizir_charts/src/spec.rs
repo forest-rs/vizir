@@ -2993,7 +2993,7 @@ impl PointLayer {
                     } else if has_stroke_style {
                         mark.stroke_width_const(stroke_width)
                     } else {
-                        mark.stroke_width_const(0.0)
+                        mark.no_stroke()
                     };
                     mark.build()
                 }
@@ -3116,7 +3116,7 @@ impl RuleLayer {
                                 plot.y0,
                                 plot.y1,
                             )
-                            .with_stroke(stroke.brush.clone(), stroke.stroke_width)
+                            .with_stroke_style(stroke.brush.clone(), stroke.stroke.clone())
                             .mark()
                         })
                         .collect()
@@ -3142,7 +3142,7 @@ impl RuleLayer {
                                 plot.y0,
                                 plot.y1,
                             )
-                            .with_stroke(stroke.brush.clone(), stroke.stroke_width)
+                            .with_stroke_style(stroke.brush.clone(), stroke.stroke.clone())
                             .mark()
                         })
                         .collect()
@@ -3169,7 +3169,7 @@ impl RuleLayer {
                             plot.x0,
                             plot.x1,
                         )
-                        .with_stroke(stroke.brush.clone(), stroke.stroke_width)
+                        .with_stroke_style(stroke.brush.clone(), stroke.stroke.clone())
                         .mark()
                     })
                     .collect()
@@ -4318,8 +4318,8 @@ fn translate_mark(mut mark: Mark, dx: f64, dy: f64) -> Mark {
         MarkEncodings::Path(enc) => MarkEncodings::Path(Box::new(PathEncodings {
             path: translate_path_encoding(enc.path, dx, dy),
             fill: enc.fill,
+            stroke_brush: enc.stroke_brush,
             stroke: enc.stroke,
-            stroke_width: enc.stroke_width,
         })),
     };
     mark.cache = None;
@@ -4532,7 +4532,7 @@ fn apply_layer_child_style(
                 }
                 if let Some(stroke) = &style.stroke {
                     point.constant_stroke = stroke.brush.clone();
-                    point.default_stroke_width = stroke.stroke_width;
+                    point.default_stroke_width = stroke.stroke.width;
                     point.has_constant_stroke_style = true;
                 }
                 if let Some(opacity) = style.opacity {
@@ -5654,8 +5654,8 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(fills.contains(&Brush::Solid(css::TOMATO.with_alpha(0.2))));
-        assert!(fills.contains(&Brush::Solid(css::TOMATO.with_alpha(1.0))));
+        assert!(fills.contains(&Some(Brush::Solid(css::TOMATO.with_alpha(0.2)))));
+        assert!(fills.contains(&Some(Brush::Solid(css::TOMATO.with_alpha(1.0)))));
     }
 
     #[test]
@@ -5696,8 +5696,10 @@ mod tests {
             let vizir_core::MarkPayload::Path(channels) = *new else {
                 continue;
             };
-            strokes.push(channels.stroke);
-            widths.push(channels.stroke_width);
+            if let Some(stroke) = channels.stroke {
+                strokes.push(stroke.brush);
+                widths.push(stroke.style.width);
+            }
         }
         assert!(strokes.contains(&Brush::Solid(css::CORNFLOWER_BLUE)));
         assert!(strokes.contains(&Brush::Solid(css::TOMATO)));
@@ -6215,8 +6217,10 @@ mod tests {
             let vizir_core::MarkPayload::Path(channels) = *new else {
                 continue;
             };
-            strokes.push(channels.stroke);
-            widths.push(channels.stroke_width);
+            if let Some(stroke) = channels.stroke {
+                strokes.push(stroke.brush);
+                widths.push(stroke.style.width);
+            }
         }
         assert!(strokes.contains(&Brush::Solid(css::TOMATO)));
         assert!(widths.iter().any(|width| (*width - 2.0).abs() < 1e-9));
@@ -6405,10 +6409,12 @@ mod tests {
                 continue;
             };
             fills.push(channels.fill);
-            strokes.push(channels.stroke);
-            widths.push(channels.stroke_width);
+            if let Some(stroke) = channels.stroke {
+                strokes.push(stroke.brush);
+                widths.push(stroke.style.width);
+            }
         }
-        assert!(fills.contains(&Brush::Solid(css::CORNFLOWER_BLUE.with_alpha(0.25))));
+        assert!(fills.contains(&Some(Brush::Solid(css::CORNFLOWER_BLUE.with_alpha(0.25)))));
         assert!(strokes.contains(&Brush::Solid(css::BLACK)));
         assert!(widths.iter().any(|width| (*width - 2.5).abs() < 1e-9));
     }

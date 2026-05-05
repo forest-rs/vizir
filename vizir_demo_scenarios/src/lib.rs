@@ -500,7 +500,7 @@ fn line_points() -> ScenarioFrame {
                 .path()
                 .z_index(vizir_charts::SERIES_STROKE)
                 .path_const(path)
-                .fill_brush_const(Color::TRANSPARENT)
+                .no_fill()
                 .stroke_brush_const(css::STEEL_BLUE)
                 .stroke_width_const(2.0)
                 .build(),
@@ -568,7 +568,7 @@ fn sectors() -> ScenarioFrame {
             out.push(
                 TextMarkSpec::new(mark_id(0x72_000, i), p, label)
                     .with_font_size(22.0)
-                    .with_fill(css::WHITE)
+                    .with_fill(Color::TRANSPARENT)
                     .with_anchor(TextAnchor::Middle)
                     .with_baseline(TextBaseline::Middle)
                     .with_z_index(vizir_charts::SERIES_POINTS)

@@ -14,7 +14,7 @@ use alloc::vec::Vec;
 #[cfg(not(feature = "std"))]
 use crate::float::FloatExt;
 
-use kurbo::{BezPath, Rect};
+use kurbo::{BezPath, Rect, Stroke};
 use peniko::Brush;
 use peniko::color::palette::css;
 use vizir_core::{Mark, MarkId, TextAnchor, TextBaseline};
@@ -27,13 +27,13 @@ use crate::scale::{
 };
 use crate::z_order;
 
-/// A paint + width pair for stroked paths (domain lines, ticks, gridlines).
+/// A paint + stroke-style pair for stroked paths (domain lines, ticks, gridlines).
 #[derive(Clone, Debug, PartialEq)]
 pub struct StrokeStyle {
     /// Stroke paint.
     pub brush: Brush,
-    /// Stroke width in scene coordinates.
-    pub stroke_width: f64,
+    /// Stroke style in scene coordinates.
+    pub stroke: Stroke,
 }
 
 impl StrokeStyle {
@@ -41,7 +41,7 @@ impl StrokeStyle {
     pub fn solid(brush: impl Into<Brush>, stroke_width: f64) -> Self {
         Self {
             brush: brush.into(),
-            stroke_width,
+            stroke: Stroke::new(stroke_width),
         }
     }
 }
@@ -92,7 +92,7 @@ impl Default for GridStyle {
         Self {
             stroke: StrokeStyle {
                 brush: Brush::Solid(css::BLACK.with_alpha(40.0 / 255.0)),
-                stroke_width: 1.0,
+                stroke: Stroke::new(1.0),
             },
         }
     }
@@ -570,7 +570,7 @@ impl AxisSpec {
                 tick_x,
                 plot,
                 &grid.stroke.brush,
-                grid.stroke.stroke_width,
+                &grid.stroke.stroke,
                 z_order::GRID_LINES,
             ));
         }
@@ -584,7 +584,7 @@ impl AxisSpec {
                 self.id_base,
                 domain,
                 &self.style.rule.brush,
-                self.style.rule.stroke_width,
+                &self.style.rule.stroke,
                 z_order::AXIS_RULES,
             ));
         }
@@ -606,7 +606,7 @@ impl AxisSpec {
                     i,
                     tick,
                     &self.style.rule.brush,
-                    self.style.rule.stroke_width,
+                    &self.style.rule.stroke,
                     z_order::AXIS_RULES,
                 ));
             }
@@ -737,7 +737,7 @@ impl AxisSpec {
                 tick_x,
                 plot,
                 &grid.stroke.brush,
-                grid.stroke.stroke_width,
+                &grid.stroke.stroke,
                 z_order::GRID_LINES,
             ));
         }
@@ -751,7 +751,7 @@ impl AxisSpec {
                 self.id_base,
                 domain,
                 &self.style.rule.brush,
-                self.style.rule.stroke_width,
+                &self.style.rule.stroke,
                 z_order::AXIS_RULES,
             ));
         }
@@ -773,7 +773,7 @@ impl AxisSpec {
                     i,
                     tick,
                     &self.style.rule.brush,
-                    self.style.rule.stroke_width,
+                    &self.style.rule.stroke,
                     z_order::AXIS_RULES,
                 ));
             }
@@ -896,7 +896,7 @@ impl AxisSpec {
                 tick_y,
                 plot,
                 &grid.stroke.brush,
-                grid.stroke.stroke_width,
+                &grid.stroke.stroke,
                 z_order::GRID_LINES,
             ));
         }
@@ -910,7 +910,7 @@ impl AxisSpec {
                 self.id_base,
                 domain,
                 &self.style.rule.brush,
-                self.style.rule.stroke_width,
+                &self.style.rule.stroke,
                 z_order::AXIS_RULES,
             ));
         }
@@ -931,7 +931,7 @@ impl AxisSpec {
                     i,
                     tick,
                     &self.style.rule.brush,
-                    self.style.rule.stroke_width,
+                    &self.style.rule.stroke,
                     z_order::AXIS_RULES,
                 ));
             }
@@ -1030,7 +1030,7 @@ impl AxisSpec {
                 tick_y,
                 plot,
                 &grid.stroke.brush,
-                grid.stroke.stroke_width,
+                &grid.stroke.stroke,
                 z_order::GRID_LINES,
             ));
         }
@@ -1044,7 +1044,7 @@ impl AxisSpec {
                 self.id_base,
                 domain,
                 &self.style.rule.brush,
-                self.style.rule.stroke_width,
+                &self.style.rule.stroke,
                 z_order::AXIS_RULES,
             ));
         }
@@ -1065,7 +1065,7 @@ impl AxisSpec {
                     i,
                     tick,
                     &self.style.rule.brush,
-                    self.style.rule.stroke_width,
+                    &self.style.rule.stroke,
                     z_order::AXIS_RULES,
                 ));
             }
@@ -1114,8 +1114,8 @@ impl AxisSpec {
 fn domain_mark(
     id_base: u64,
     path: BezPath,
-    stroke: &Brush,
-    stroke_width: f64,
+    stroke_brush: &Brush,
+    stroke: &Stroke,
     z_index: i32,
 ) -> Mark {
     let mut it = path.into_iter();
@@ -1128,7 +1128,7 @@ fn domain_mark(
         _ => (x0, y0),
     };
     RuleMarkSpec::new(MarkId::from_raw(id_base), x0, y0, x1, y1)
-        .with_stroke(stroke.clone(), stroke_width)
+        .with_stroke_style(stroke_brush.clone(), stroke.clone())
         .with_z_index(z_index)
         .mark()
 }
@@ -1138,8 +1138,8 @@ fn grid_vertical(
     ticks: &[f64],
     map: impl Fn(f64) -> f64,
     plot: Rect,
-    stroke: &Brush,
-    stroke_width: f64,
+    stroke_brush: &Brush,
+    stroke: &Stroke,
     z_index: i32,
 ) -> Vec<Mark> {
     let base = id_base.wrapping_sub(5_000);
@@ -1148,7 +1148,7 @@ fn grid_vertical(
         let x = map(v);
         out.push(
             RuleMarkSpec::vertical(MarkId::from_raw(base + i as u64), x, plot.y0, plot.y1)
-                .with_stroke(stroke.clone(), stroke_width)
+                .with_stroke_style(stroke_brush.clone(), stroke.clone())
                 .with_z_index(z_index)
                 .mark(),
         );
@@ -1161,8 +1161,8 @@ fn grid_horizontal(
     ticks: &[f64],
     map: impl Fn(f64) -> f64,
     plot: Rect,
-    stroke: &Brush,
-    stroke_width: f64,
+    stroke_brush: &Brush,
+    stroke: &Stroke,
     z_index: i32,
 ) -> Vec<Mark> {
     let base = id_base.wrapping_sub(5_000);
@@ -1171,7 +1171,7 @@ fn grid_horizontal(
         let y = map(v);
         out.push(
             RuleMarkSpec::horizontal(MarkId::from_raw(base + i as u64), y, plot.x0, plot.x1)
-                .with_stroke(stroke.clone(), stroke_width)
+                .with_stroke_style(stroke_brush.clone(), stroke.clone())
                 .with_z_index(z_index)
                 .mark(),
         );
@@ -1183,8 +1183,8 @@ fn tick_mark(
     id_base: u64,
     index: usize,
     path: BezPath,
-    stroke: &Brush,
-    stroke_width: f64,
+    stroke_brush: &Brush,
+    stroke: &Stroke,
     z_index: i32,
 ) -> Mark {
     let mut it = path.into_iter();
@@ -1197,7 +1197,7 @@ fn tick_mark(
         _ => (x0, y0),
     };
     RuleMarkSpec::new(MarkId::from_raw(id_base + 1 + index as u64), x0, y0, x1, y1)
-        .with_stroke(stroke.clone(), stroke_width)
+        .with_stroke_style(stroke_brush.clone(), stroke.clone())
         .with_z_index(z_index)
         .mark()
 }

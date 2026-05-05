@@ -27,7 +27,7 @@ use core::any::Any;
 use core::fmt;
 use hashbrown::HashMap;
 use hashbrown::hash_map::Entry;
-use kurbo::{BezPath, Point, Rect, Shape};
+use kurbo::{BezPath, Point, Rect, Shape, Stroke};
 use peniko::{Brush, Color};
 use smallvec::SmallVec;
 
@@ -315,7 +315,7 @@ impl MarkPayload {
             Self::Rect(r) => Some(r.rect),
             // v1: text shaping/layout is downstream; bounds are not known here.
             Self::Text(_) => None,
-            Self::Path(p) => Some(p.path.bounding_box()),
+            Self::Path(p) => p.bounds(),
         }
     }
 }
@@ -391,12 +391,33 @@ pub enum TextBaseline {
 pub struct PathChannels {
     /// The vector path geometry.
     pub path: BezPath,
-    /// Fill paint.
-    pub fill: Brush,
+    /// Optional fill paint.
+    pub fill: Option<Brush>,
+    /// Optional stroke paint and style.
+    pub stroke: Option<PathStroke>,
+}
+
+impl PathChannels {
+    fn bounds(&self) -> Option<Rect> {
+        let path_bounds = self.path.bounding_box();
+        let mut bounds = self.fill.as_ref().map(|_| path_bounds);
+        if let Some(stroke) = &self.stroke
+            && stroke.style.width > 0.0
+        {
+            let half_width = 0.5 * stroke.style.width;
+            bounds = union_bounds(bounds, Some(path_bounds.inflate(half_width, half_width)));
+        }
+        bounds
+    }
+}
+
+/// Evaluated stroke paint and style for a path mark.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PathStroke {
     /// Stroke paint.
-    pub stroke: Brush,
-    /// Stroke width in scene coordinates.
-    pub stroke_width: f64,
+    pub brush: Brush,
+    /// Stroke style, including width, caps, joins, and dashes.
+    pub style: Stroke,
 }
 
 impl Default for RectChannels {
@@ -426,9 +447,8 @@ impl Default for PathChannels {
     fn default() -> Self {
         Self {
             path: BezPath::new(),
-            fill: Brush::Solid(Color::from_rgba8(0, 0, 0, 255)),
-            stroke: Brush::default(),
-            stroke_width: 0.0,
+            fill: Some(Brush::Solid(Color::from_rgba8(0, 0, 0, 255))),
+            stroke: None,
         }
     }
 }
@@ -482,8 +502,8 @@ impl MarkEncodings {
                 let e = e.as_ref();
                 out.extend(e.path.deps());
                 out.extend(e.fill.deps());
+                out.extend(e.stroke_brush.deps());
                 out.extend(e.stroke.deps());
-                out.extend(e.stroke_width.deps());
             }
         }
         out.sort();
@@ -533,12 +553,12 @@ pub struct TextEncodings {
 pub struct PathEncodings {
     /// Path geometry.
     pub path: Encoding<BezPath>,
-    /// Fill paint.
-    pub fill: Encoding<Brush>,
-    /// Stroke paint.
-    pub stroke: Encoding<Brush>,
-    /// Stroke width.
-    pub stroke_width: Encoding<f64>,
+    /// Optional fill paint.
+    pub fill: Encoding<Option<Brush>>,
+    /// Optional stroke paint.
+    pub stroke_brush: Encoding<Option<Brush>>,
+    /// Stroke style, including width, caps, joins, and dashes.
+    pub stroke: Encoding<Stroke>,
 }
 
 impl Default for RectEncodings {
@@ -572,9 +592,9 @@ impl Default for PathEncodings {
     fn default() -> Self {
         Self {
             path: Encoding::Const(BezPath::new()),
-            fill: Encoding::Const(Brush::Solid(Color::from_rgba8(0, 0, 0, 255))),
-            stroke: Encoding::Const(Brush::default()),
-            stroke_width: Encoding::Const(0.0),
+            fill: Encoding::Const(Some(Brush::Solid(Color::from_rgba8(0, 0, 0, 255)))),
+            stroke_brush: Encoding::Const(None),
+            stroke: Encoding::Const(Stroke::default()),
         }
     }
 }
@@ -799,11 +819,10 @@ impl MarkBuilder {
 
     /// Set the `fill` encoding to a constant value.
     pub fn fill_const(mut self, v: Color) -> Self {
-        let brush = Brush::Solid(v);
         match &mut self.mark.encodings {
-            MarkEncodings::Rect(e) => e.as_mut().fill = Encoding::Const(brush),
-            MarkEncodings::Text(e) => e.as_mut().fill = Encoding::Const(brush),
-            MarkEncodings::Path(e) => e.as_mut().fill = Encoding::Const(brush),
+            MarkEncodings::Rect(e) => e.as_mut().fill = Encoding::Const(Brush::Solid(v)),
+            MarkEncodings::Text(e) => e.as_mut().fill = Encoding::Const(Brush::Solid(v)),
+            MarkEncodings::Path(e) => e.as_mut().fill = Encoding::Const(Some(Brush::Solid(v))),
         }
         self
     }
@@ -814,7 +833,15 @@ impl MarkBuilder {
         match &mut self.mark.encodings {
             MarkEncodings::Rect(e) => e.as_mut().fill = Encoding::Const(v),
             MarkEncodings::Text(e) => e.as_mut().fill = Encoding::Const(v),
-            MarkEncodings::Path(e) => e.as_mut().fill = Encoding::Const(v),
+            MarkEncodings::Path(e) => e.as_mut().fill = Encoding::Const(Some(v)),
+        }
+        self
+    }
+
+    /// Disable path fill output.
+    pub fn no_fill(mut self) -> Self {
+        if let MarkEncodings::Path(e) = &mut self.mark.encodings {
+            e.as_mut().fill = Encoding::Const(None);
         }
         self
     }
@@ -841,7 +868,7 @@ impl MarkBuilder {
             MarkEncodings::Path(e) => {
                 e.as_mut().fill = Encoding::Compute {
                     deps: deps4(deps),
-                    f: Box::new(f),
+                    f: Box::new(move |ctx, id| Some(f(ctx, id))),
                 };
             }
         }
@@ -983,7 +1010,7 @@ impl MarkBuilder {
     /// Set the `stroke` encoding to a constant value (path marks only).
     pub fn stroke_const(mut self, v: Color) -> Self {
         if let MarkEncodings::Path(e) = &mut self.mark.encodings {
-            e.as_mut().stroke = Encoding::Const(Brush::Solid(v));
+            e.as_mut().stroke_brush = Encoding::Const(Some(Brush::Solid(v)));
         }
         self
     }
@@ -991,7 +1018,15 @@ impl MarkBuilder {
     /// Set the `stroke` encoding to a constant brush (path marks only).
     pub fn stroke_brush_const(mut self, v: impl Into<Brush>) -> Self {
         if let MarkEncodings::Path(e) = &mut self.mark.encodings {
-            e.as_mut().stroke = Encoding::Const(v.into());
+            e.as_mut().stroke_brush = Encoding::Const(Some(v.into()));
+        }
+        self
+    }
+
+    /// Disable path stroke output.
+    pub fn no_stroke(mut self) -> Self {
+        if let MarkEncodings::Path(e) = &mut self.mark.encodings {
+            e.as_mut().stroke_brush = Encoding::Const(None);
         }
         self
     }
@@ -1003,6 +1038,29 @@ impl MarkBuilder {
         f: impl Fn(&EvalCtx<'_>, MarkId) -> Brush + 'static,
     ) -> Self {
         if let MarkEncodings::Path(e) = &mut self.mark.encodings {
+            e.as_mut().stroke_brush = Encoding::Compute {
+                deps: deps4(deps),
+                f: Box::new(move |ctx, id| Some(f(ctx, id))),
+            };
+        }
+        self
+    }
+
+    /// Set the path stroke style to a constant value.
+    pub fn stroke_style_const(mut self, v: Stroke) -> Self {
+        if let MarkEncodings::Path(e) = &mut self.mark.encodings {
+            e.as_mut().stroke = Encoding::Const(v);
+        }
+        self
+    }
+
+    /// Set the path stroke style to a computed value.
+    pub fn stroke_style_compute(
+        mut self,
+        deps: impl IntoIterator<Item = InputRef>,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> Stroke + 'static,
+    ) -> Self {
+        if let MarkEncodings::Path(e) = &mut self.mark.encodings {
             e.as_mut().stroke = Encoding::Compute {
                 deps: deps4(deps),
                 f: Box::new(f),
@@ -1012,11 +1070,8 @@ impl MarkBuilder {
     }
 
     /// Set the `stroke_width` encoding to a constant value (path marks only).
-    pub fn stroke_width_const(mut self, v: f64) -> Self {
-        if let MarkEncodings::Path(e) = &mut self.mark.encodings {
-            e.as_mut().stroke_width = Encoding::Const(v);
-        }
-        self
+    pub fn stroke_width_const(self, v: f64) -> Self {
+        self.stroke_style_const(Stroke::new(v))
     }
 
     /// Set the `stroke_width` encoding to a computed value (path marks only).
@@ -1026,9 +1081,9 @@ impl MarkBuilder {
         f: impl Fn(&EvalCtx<'_>, MarkId) -> f64 + 'static,
     ) -> Self {
         if let MarkEncodings::Path(e) = &mut self.mark.encodings {
-            e.as_mut().stroke_width = Encoding::Compute {
+            e.as_mut().stroke = Encoding::Compute {
                 deps: deps4(deps),
-                f: Box::new(f),
+                f: Box::new(move |ctx, id| Stroke::new(f(ctx, id))),
             };
         }
         self
@@ -1600,11 +1655,15 @@ fn eval_payload(encodings: &MarkEncodings, ctx: &EvalCtx<'_>, id: MarkId) -> Mar
         }
         MarkEncodings::Path(e) => {
             let e = e.as_ref();
+            let stroke_brush = eval_value(&e.stroke_brush, ctx, id);
+            let stroke_style = eval_value(&e.stroke, ctx, id);
             MarkPayload::Path(PathChannels {
                 path: eval_value(&e.path, ctx, id),
                 fill: eval_value(&e.fill, ctx, id),
-                stroke: eval_value(&e.stroke, ctx, id),
-                stroke_width: eval_value(&e.stroke_width, ctx, id),
+                stroke: stroke_brush.map(|brush| PathStroke {
+                    brush,
+                    style: stroke_style,
+                }),
             })
         }
     }
@@ -1700,11 +1759,25 @@ fn update_payload_incremental(
             if encoding_needs_update(&e.fill, changed_inputs) {
                 p.fill = eval_value(&e.fill, ctx, id);
             }
-            if encoding_needs_update(&e.stroke, changed_inputs) {
-                p.stroke = eval_value(&e.stroke, ctx, id);
-            }
-            if encoding_needs_update(&e.stroke_width, changed_inputs) {
-                p.stroke_width = eval_value(&e.stroke_width, ctx, id);
+            let stroke_brush_changed = encoding_needs_update(&e.stroke_brush, changed_inputs);
+            let stroke_changed = encoding_needs_update(&e.stroke, changed_inputs);
+            if stroke_brush_changed || stroke_changed {
+                let stroke_brush = if stroke_brush_changed {
+                    eval_value(&e.stroke_brush, ctx, id)
+                } else {
+                    p.stroke.as_ref().map(|stroke| stroke.brush.clone())
+                };
+                let stroke_style = if stroke_changed {
+                    eval_value(&e.stroke, ctx, id)
+                } else {
+                    p.stroke
+                        .as_ref()
+                        .map_or_else(Stroke::default, |stroke| stroke.style.clone())
+                };
+                p.stroke = stroke_brush.map(|brush| PathStroke {
+                    brush,
+                    style: stroke_style,
+                });
             }
         }
     }
@@ -1909,8 +1982,10 @@ mod tests {
         let (MarkPayload::Path(old), MarkPayload::Path(new)) = (&**old, &**new) else {
             panic!("expected path payloads");
         };
-        assert_ne!(old.stroke, new.stroke);
-        assert_ne!(old.stroke_width, new.stroke_width);
+        let old_stroke = old.stroke.as_ref().expect("old stroke");
+        let new_stroke = new.stroke.as_ref().expect("new stroke");
+        assert_ne!(old_stroke.brush, new_stroke.brush);
+        assert_ne!(old_stroke.style.width, new_stroke.style.width);
     }
 
     #[test]
