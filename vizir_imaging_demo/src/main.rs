@@ -25,6 +25,7 @@ enum SurfaceBytes {
 }
 
 struct GpuState {
+    instance: wgpu::Instance,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -163,9 +164,34 @@ impl App {
             .render(&native, render_width, render_height)
             .expect("render imaging scene");
 
-        let frame = match gpu.surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(_) => {
+        let (frame, reconfigure_after_present) = match gpu.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            wgpu::CurrentSurfaceTexture::Timeout => {
+                self.gpu = Some(gpu);
+                self.request_redraw();
+                return;
+            }
+            wgpu::CurrentSurfaceTexture::Occluded => {
+                self.redraw_pending = false;
+                self.gpu = Some(gpu);
+                return;
+            }
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Validation => {
+                gpu.surface.configure(&gpu.device, &gpu.config);
+                self.gpu = Some(gpu);
+                self.request_redraw();
+                return;
+            }
+            wgpu::CurrentSurfaceTexture::Lost => {
+                let Some(window) = &self.window else {
+                    self.gpu = Some(gpu);
+                    return;
+                };
+                gpu.surface = gpu
+                    .instance
+                    .create_surface(window.clone())
+                    .expect("recreate surface");
                 gpu.surface.configure(&gpu.device, &gpu.config);
                 self.gpu = Some(gpu);
                 self.request_redraw();
@@ -183,6 +209,9 @@ impl App {
 
         submit_surface_upload(&gpu, &frame.texture, &upload, bytes_per_row, width, height);
         frame.present();
+        if reconfigure_after_present {
+            gpu.surface.configure(&gpu.device, &gpu.config);
+        }
         self.presented_chart_index = Some(chart_index);
         self.redraw_pending = false;
         self.gpu = Some(gpu);
@@ -319,6 +348,7 @@ async fn init_gpu(window: Arc<Window>, size: PhysicalSize<u32>) -> GpuState {
 
     let renderer = VelloHybridRenderer::new(device.clone(), queue.clone());
     GpuState {
+        instance,
         surface,
         device,
         queue,

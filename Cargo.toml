@@ -26,8 +26,8 @@ hashbrown = { version = "0.17.0", default-features = false, features = [
   "alloc",
   "default-hasher",
 ] }
-imaging = { git = "https://github.com/forest-rs/imaging.git", rev = "79f02aedf5b65b4cd151ef45d8b40013d7289ee2", default-features = false }
-imaging_vello_hybrid = { git = "https://github.com/forest-rs/imaging.git", rev = "79f02aedf5b65b4cd151ef45d8b40013d7289ee2" }
+imaging = { version = "0.0.1", default-features = false }
+imaging_vello_hybrid = { version = "0.0.2" }
 kurbo = { version = "0.13.0", default-features = false }
 parley = { version = "0.7.0", default-features = false }
 peniko = { version = "0.6.0", default-features = false }
