@@ -6,6 +6,7 @@
 //! This crate provides:
 //! - versioned inputs ([`Table`]/[`Signal`])
 //! - stable mark identity ([`MarkId`])
+//! - UI-neutral mark semantics ([`MarkMetadata`], [`MarkRole`], [`DatumRef`])
 //! - explicit dependency tracking ([`InputRef`])
 //! - incremental evaluation + diff output ([`MarkDiff`])
 //! - per-kind mark payloads ([`MarkPayload`])
@@ -70,6 +71,101 @@ impl MarkId {
 /// Stable identifier for a table column.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ColumnId(pub u32);
+
+/// Semantic role for a mark.
+///
+/// Roles are intentionally static strings rather than a closed enum. `vizir_core` carries the
+/// role through diffs, while higher layers own the vocabulary (`"series.bar"`, `"axis.tick"`,
+/// `"legend.swatch"`, and so on).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct MarkRole(&'static str);
+
+impl MarkRole {
+    /// Create a semantic role from a static identifier.
+    #[must_use]
+    pub const fn new(value: &'static str) -> Self {
+        Self(value)
+    }
+
+    /// Return the static role identifier.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+/// Reference from a visual mark back to source data.
+///
+/// This is a semantic link, not a data accessor. It lets downstream systems connect a mark to
+/// table rows and, when applicable, a specific field for inspection, selection, accessibility,
+/// or tooltip lookup.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DatumRef {
+    /// Source table.
+    pub table: TableId,
+    /// Stable source row key.
+    pub row_key: u64,
+    /// Optional source column when the mark primarily represents one field.
+    pub column: Option<ColumnId>,
+}
+
+impl DatumRef {
+    /// Create a datum reference for a table row.
+    #[must_use]
+    pub const fn new(table: TableId, row_key: u64) -> Self {
+        Self {
+            table,
+            row_key,
+            column: None,
+        }
+    }
+
+    /// Attach a primary source column to this datum reference.
+    #[must_use]
+    pub const fn with_column(mut self, column: ColumnId) -> Self {
+        self.column = Some(column);
+        self
+    }
+}
+
+/// UI-neutral semantic metadata associated with a mark.
+///
+/// Metadata is carried beside render payloads. It does not affect geometry or paint evaluation,
+/// but changes to metadata still produce [`MarkDiff::Update`] so retained consumers can update
+/// inspection, selection, tooltip, and accessibility state.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MarkMetadata {
+    /// Optional semantic role.
+    pub role: Option<MarkRole>,
+    /// Optional source datum reference.
+    pub datum: Option<DatumRef>,
+    /// Optional short human-facing label.
+    pub label: Option<String>,
+    /// Optional longer human-facing description.
+    pub description: Option<String>,
+}
+
+impl MarkMetadata {
+    /// Create empty mark metadata.
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self {
+            role: None,
+            datum: None,
+            label: None,
+            description: None,
+        }
+    }
+
+    /// Return `true` when no semantic fields are set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.role.is_none()
+            && self.datum.is_none()
+            && self.label.is_none()
+            && self.description.is_none()
+    }
+}
 
 /// The geometric "kind" of a mark, which determines how channels are interpreted.
 ///
@@ -289,6 +385,10 @@ fn deps4(deps: impl IntoIterator<Item = InputRef>) -> SmallVec<[InputRef; 4]> {
 ///
 /// This is the “render-facing” data model: it is what downstream renderers consume, and it is what
 /// appears in [`MarkDiff`] diffs (boxed) and cached on [`Mark`].
+#[allow(
+    clippy::large_enum_variant,
+    reason = "diffs box MarkPayload already; changing channel storage is a separate representation decision"
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum MarkPayload {
     /// An axis-aligned rectangle.
@@ -617,6 +717,9 @@ pub struct Mark {
     /// Encodings for this mark's kind.
     pub encodings: MarkEncodings,
 
+    /// UI-neutral semantic metadata carried beside render payloads.
+    pub metadata: MarkMetadata,
+
     /// Flattened dependency summary for quick dirtiness checks.
     pub deps: SmallVec<[InputRef; 8]>,
 
@@ -625,6 +728,9 @@ pub struct Mark {
 
     /// Z-index used at the time of the last evaluation (for diffing/reordering).
     cached_z_index: i32,
+
+    /// Metadata used at the time of the last evaluation (for diffing retained semantics).
+    cached_metadata: MarkMetadata,
 
     /// Last versions observed for inputs (simple per-mark tracking).
     pub last_seen: HashMap<InputRef, Version>,
@@ -640,9 +746,11 @@ impl Mark {
             z_index: 0,
             kind: MarkKind::Rect,
             encodings: MarkEncodings::Rect(Box::default()),
+            metadata: MarkMetadata::default(),
             deps: SmallVec::new(),
             cache: None,
             cached_z_index: 0,
+            cached_metadata: MarkMetadata::default(),
             last_seen: HashMap::new(),
             force_eval: false,
         };
@@ -662,6 +770,14 @@ impl Mark {
             mark: Self::new(id),
         }
     }
+
+    fn presented_metadata(&self) -> MarkMetadata {
+        if self.cache.is_some() {
+            self.cached_metadata.clone()
+        } else {
+            self.metadata.clone()
+        }
+    }
 }
 
 /// A builder for [`Mark`] that rebuilds dependencies on `build()`.
@@ -671,6 +787,36 @@ pub struct MarkBuilder {
 }
 
 impl MarkBuilder {
+    /// Replace semantic metadata.
+    pub fn metadata(mut self, metadata: MarkMetadata) -> Self {
+        self.mark.metadata = metadata;
+        self
+    }
+
+    /// Set the semantic role.
+    pub fn role(mut self, role: MarkRole) -> Self {
+        self.mark.metadata.role = Some(role);
+        self
+    }
+
+    /// Set the source datum reference.
+    pub fn datum(mut self, datum: DatumRef) -> Self {
+        self.mark.metadata.datum = Some(datum);
+        self
+    }
+
+    /// Set a short human-facing semantic label.
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.mark.metadata.label = Some(label.into());
+        self
+    }
+
+    /// Set a longer human-facing semantic description.
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.mark.metadata.description = Some(description.into());
+        self
+    }
+
     /// Set the mark z-index (rendering order).
     pub fn z_index(mut self, z_index: i32) -> Self {
         self.mark.z_index = z_index;
@@ -1157,12 +1303,14 @@ pub enum MarkDiff {
         z_index: i32,
         /// The mark kind.
         kind: MarkKind,
+        /// UI-neutral semantic metadata for the entered mark.
+        metadata: MarkMetadata,
         /// Newly evaluated channels.
         new: Box<MarkPayload>,
         /// Optional bounds hint for downstream damage calculation.
         bounds: Option<Rect>,
     },
-    /// A mark exists and some channels changed.
+    /// A mark exists and its payload, z-order, or semantic metadata changed.
     Update {
         /// Stable identifier.
         id: MarkId,
@@ -1172,6 +1320,10 @@ pub enum MarkDiff {
         new_z_index: i32,
         /// The mark kind.
         kind: MarkKind,
+        /// Previously retained semantic metadata.
+        old_metadata: MarkMetadata,
+        /// Newly retained semantic metadata.
+        new_metadata: MarkMetadata,
         /// Previously cached channels.
         old: Box<MarkPayload>,
         /// Newly evaluated channels.
@@ -1194,6 +1346,8 @@ pub enum MarkDiff {
         z_index: i32,
         /// The mark kind.
         kind: MarkKind,
+        /// UI-neutral semantic metadata for the exited mark.
+        metadata: MarkMetadata,
         /// Cached channels, if this mark was previously evaluated.
         old: Option<Box<MarkPayload>>,
         /// Optional bounds hint for downstream damage calculation.
@@ -1211,6 +1365,21 @@ impl MarkDiff {
             Self::Enter { bounds, .. } => *bounds,
             Self::Update { damage, .. } => *damage,
             Self::Exit { bounds, .. } => *bounds,
+        }
+    }
+
+    /// Returns the current semantic metadata for this diff.
+    ///
+    /// For updates, this returns the new metadata.
+    #[must_use]
+    pub fn metadata(&self) -> &MarkMetadata {
+        match self {
+            Self::Enter { metadata, .. }
+            | Self::Update {
+                new_metadata: metadata,
+                ..
+            }
+            | Self::Exit { metadata, .. } => metadata,
         }
     }
 }
@@ -1381,10 +1550,12 @@ impl Scene {
             if let Some(old) = old_marks.remove(&mark.id) {
                 if mark.kind != old.kind {
                     let bounds = old.cache.as_ref().and_then(MarkPayload::bounds);
+                    let metadata = old.presented_metadata();
                     exits.push(MarkDiff::Exit {
                         id: mark.id,
                         z_index: old.z_index,
                         kind: old.kind,
+                        metadata,
                         old: old.cache.map(Box::new),
                         bounds,
                     });
@@ -1392,6 +1563,7 @@ impl Scene {
                     mark.force_eval |= mark.deps != old.deps;
                     mark.cache = old.cache;
                     mark.cached_z_index = old.cached_z_index;
+                    mark.cached_metadata = old.cached_metadata;
                     mark.last_seen = old.last_seen;
                 }
             }
@@ -1401,10 +1573,12 @@ impl Scene {
 
         for (id, old) in old_marks {
             let bounds = old.cache.as_ref().and_then(MarkPayload::bounds);
+            let metadata = old.presented_metadata();
             exits.push(MarkDiff::Exit {
                 id,
                 z_index: old.z_index,
                 kind: old.kind,
+                metadata,
                 old: old.cache.map(Box::new),
                 bounds,
             });
@@ -1471,10 +1645,14 @@ impl Scene {
             let removed = self.marks.remove(&id);
             let old = removed.as_ref().and_then(|m| m.cache.clone());
             let bounds = old.as_ref().and_then(MarkPayload::bounds);
+            let metadata = removed
+                .as_ref()
+                .map_or_else(MarkMetadata::default, Mark::presented_metadata);
             diffs.push(MarkDiff::Exit {
                 id,
                 z_index: removed.as_ref().map_or(0, |m| m.z_index),
                 kind: removed.as_ref().map_or(MarkKind::Rect, |m| m.kind),
+                metadata,
                 old: old.map(Box::new),
                 bounds,
             });
@@ -1502,11 +1680,13 @@ impl Scene {
                     id: mark.id,
                     z_index: mark.z_index,
                     kind: mark.kind,
+                    metadata: mark.metadata.clone(),
                     new: Box::new(new.clone()),
                     bounds: new.bounds(),
                 });
                 mark.cache = Some(new);
                 mark.cached_z_index = mark.z_index;
+                mark.cached_metadata = mark.metadata.clone();
                 mark.force_eval = false;
                 continue;
             }
@@ -1514,10 +1694,13 @@ impl Scene {
             if mark.force_eval {
                 let old_z_index = mark.cached_z_index;
                 let new_z_index = mark.z_index;
+                let old_metadata = mark.cached_metadata.clone();
+                let new_metadata = mark.metadata.clone();
+                let metadata_changed = old_metadata != new_metadata;
                 let old = mark.cache.as_ref().expect("checked above").clone();
                 let new = eval_payload(&mark.encodings, &ctx, mark.id);
 
-                if old != new || old_z_index != new_z_index {
+                if old != new || old_z_index != new_z_index || metadata_changed {
                     let old_bounds = old.bounds();
                     let new_bounds = new.bounds();
                     let damage = union_bounds(old_bounds, new_bounds);
@@ -1526,6 +1709,8 @@ impl Scene {
                         old_z_index,
                         new_z_index,
                         kind: mark.kind,
+                        old_metadata,
+                        new_metadata,
                         old: Box::new(old.clone()),
                         new: Box::new(new.clone()),
                         old_bounds,
@@ -1536,37 +1721,48 @@ impl Scene {
 
                 mark.cache = Some(new);
                 mark.cached_z_index = mark.z_index;
+                mark.cached_metadata = mark.metadata.clone();
                 mark.force_eval = false;
                 continue;
             }
 
             if changed_inputs.is_empty() {
-                if mark.cached_z_index != mark.z_index {
+                let old_metadata = mark.cached_metadata.clone();
+                let new_metadata = mark.metadata.clone();
+                let metadata_changed = old_metadata != new_metadata;
+                if mark.cached_z_index != mark.z_index || metadata_changed {
                     let old = mark.cache.as_ref().expect("checked above").clone();
                     let bounds = old.bounds();
+                    let z_index_changed = mark.cached_z_index != mark.z_index;
                     diffs.push(MarkDiff::Update {
                         id: mark.id,
                         old_z_index: mark.cached_z_index,
                         new_z_index: mark.z_index,
                         kind: mark.kind,
+                        old_metadata,
+                        new_metadata,
                         old: Box::new(old.clone()),
                         new: Box::new(old.clone()),
                         old_bounds: bounds,
                         new_bounds: bounds,
-                        damage: bounds,
+                        damage: if z_index_changed { bounds } else { None },
                     });
                     mark.cached_z_index = mark.z_index;
+                    mark.cached_metadata = mark.metadata.clone();
                 }
                 continue;
             }
 
             let old_z_index = mark.cached_z_index;
             let new_z_index = mark.z_index;
+            let old_metadata = mark.cached_metadata.clone();
+            let new_metadata = mark.metadata.clone();
+            let metadata_changed = old_metadata != new_metadata;
             let old = mark.cache.as_ref().expect("checked above").clone();
             let mut new = old.clone();
             update_payload_incremental(&mark.encodings, &ctx, mark.id, &changed_inputs, &mut new);
 
-            if old != new || old_z_index != new_z_index {
+            if old != new || old_z_index != new_z_index || metadata_changed {
                 let old_bounds = old.bounds();
                 let new_bounds = new.bounds();
                 let damage = union_bounds(old_bounds, new_bounds);
@@ -1575,6 +1771,8 @@ impl Scene {
                     old_z_index,
                     new_z_index,
                     kind: mark.kind,
+                    old_metadata,
+                    new_metadata,
                     old: Box::new(old.clone()),
                     new: Box::new(new.clone()),
                     old_bounds,
@@ -1584,6 +1782,7 @@ impl Scene {
             }
             mark.cache = Some(new);
             mark.cached_z_index = mark.z_index;
+            mark.cached_metadata = mark.metadata.clone();
         }
 
         diffs
@@ -1823,6 +2022,64 @@ mod tests {
             &diffs[..],
             [MarkDiff::Exit { id, .. }] if *id == mark_id
         ));
+    }
+
+    #[test]
+    fn metadata_flows_through_enter_update_exit() {
+        let mut scene = Scene::new();
+        let mark_id = MarkId(9);
+        let table = TableId(3);
+        let column = ColumnId(2);
+        let row_key = 42;
+        let role_a = MarkRole::new("series.point");
+        let role_b = MarkRole::new("selection.highlight");
+
+        let mark = Mark::builder(mark_id)
+            .role(role_a)
+            .datum(DatumRef::new(table, row_key).with_column(column))
+            .label("Forty two")
+            .build();
+
+        let diffs = scene.tick([mark]);
+        let [MarkDiff::Enter { metadata, .. }] = &diffs[..] else {
+            panic!("expected enter");
+        };
+        assert_eq!(metadata.role, Some(role_a));
+        assert_eq!(
+            metadata.datum,
+            Some(DatumRef::new(table, row_key).with_column(column))
+        );
+        assert_eq!(metadata.label.as_deref(), Some("Forty two"));
+
+        let mark = Mark::builder(mark_id)
+            .role(role_b)
+            .datum(DatumRef::new(table, row_key).with_column(column))
+            .label("Forty two")
+            .build();
+        let diffs = scene.tick([mark]);
+        let [
+            MarkDiff::Update {
+                old_metadata,
+                new_metadata,
+                old,
+                new,
+                damage,
+                ..
+            },
+        ] = &diffs[..]
+        else {
+            panic!("expected metadata-only update");
+        };
+        assert_eq!(old_metadata.role, Some(role_a));
+        assert_eq!(new_metadata.role, Some(role_b));
+        assert_eq!(old, new);
+        assert_eq!(*damage, None);
+
+        let diffs = scene.tick(core::iter::empty());
+        let [MarkDiff::Exit { metadata, .. }] = &diffs[..] else {
+            panic!("expected exit");
+        };
+        assert_eq!(metadata.role, Some(role_b));
     }
 
     #[test]

@@ -13,6 +13,7 @@ use peniko::Brush;
 use vizir_core::{Mark, MarkId};
 
 use crate::axis::StrokeStyle;
+use crate::roles::ROLE_SERIES_SECTOR;
 
 /// A sector (arc slice), suitable for pie/donut charts.
 ///
@@ -104,6 +105,7 @@ impl SectorMarkSpec {
 
         let mut builder = Mark::builder(self.id)
             .path()
+            .role(ROLE_SERIES_SECTOR)
             .path_const(path)
             .z_index(self.z_index)
             .fill_brush_const(self.fill.clone());

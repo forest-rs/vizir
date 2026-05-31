@@ -10,6 +10,7 @@ use peniko::Brush;
 use vizir_core::{ColumnId, InputRef, Mark, MarkId, TableId};
 
 use crate::axis::StrokeStyle;
+use crate::roles::{ROLE_SERIES_AREA, ROLE_SERIES_LINE};
 use crate::scale::ScaleContinuous;
 
 /// An area mark derived from a table.
@@ -111,6 +112,7 @@ impl AreaMarkSpec {
         let z_index = self.z_index;
         let area = Mark::builder(area_id)
             .path()
+            .role(ROLE_SERIES_AREA)
             .z_index(z_index)
             .path_compute([InputRef::Table { table: table_id }], move |ctx, _| {
                 let n = ctx.table_row_count(table_id).unwrap_or(0);
@@ -151,6 +153,7 @@ impl AreaMarkSpec {
             let stroke_style = stroke.stroke.clone();
             let line = Mark::builder(line_id)
                 .path()
+                .role(ROLE_SERIES_LINE)
                 .z_index(z_index.saturating_add(crate::z_order::SERIES_STROKE))
                 .path_compute([InputRef::Table { table: table_id }], move |ctx, _| {
                     let n = ctx.table_row_count(table_id).unwrap_or(0);

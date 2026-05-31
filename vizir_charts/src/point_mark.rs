@@ -6,8 +6,9 @@
 use alloc::vec::Vec;
 
 use peniko::Brush;
-use vizir_core::{ColumnId, InputRef, Mark, MarkId, TableId};
+use vizir_core::{ColumnId, DatumRef, InputRef, Mark, MarkId, TableId};
 
+use crate::roles::ROLE_SERIES_POINT;
 use crate::scale::ScaleContinuous;
 use crate::symbol::Symbol;
 
@@ -105,6 +106,8 @@ impl PointMarkSpec {
                 match symbol {
                     Symbol::Square => Mark::builder(id)
                         .rect()
+                        .role(ROLE_SERIES_POINT)
+                        .datum(DatumRef::new(table_id, row_key))
                         .z_index(z_index)
                         .x_compute(
                             [InputRef::TableCol {
@@ -132,6 +135,8 @@ impl PointMarkSpec {
                         .build(),
                     Symbol::Circle | Symbol::Diamond | Symbol::Triangle => Mark::builder(id)
                         .path()
+                        .role(ROLE_SERIES_POINT)
+                        .datum(DatumRef::new(table_id, row_key))
                         .z_index(z_index)
                         .path_compute(
                             [

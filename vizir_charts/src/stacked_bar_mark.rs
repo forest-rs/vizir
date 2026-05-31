@@ -7,11 +7,12 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use peniko::Brush;
-use vizir_core::{ColumnId, InputRef, Mark, MarkId, TableId};
+use vizir_core::{ColumnId, DatumRef, InputRef, Mark, MarkId, TableId};
 
 #[cfg(not(feature = "std"))]
 use crate::float::FloatExt;
 
+use crate::roles::ROLE_SERIES_BAR;
 use crate::scale::{ScaleBand, ScaleContinuous};
 
 /// A vertical stacked bar mark derived from a table.
@@ -151,16 +152,21 @@ impl StackedBarMarkSpec {
 
                 let x = {
                     let category_index = category_index.clone();
-                    Mark::builder(id).rect().z_index(z_index).x_compute(
-                        [InputRef::TableCol {
-                            table: table_id,
-                            col: cat_col,
-                        }],
-                        move |ctx, _| {
-                            let cat = ctx.table_f64(table_id, row, cat_col).unwrap_or(0.0);
-                            band.x(category_index(cat))
-                        },
-                    )
+                    Mark::builder(id)
+                        .rect()
+                        .role(ROLE_SERIES_BAR)
+                        .datum(DatumRef::new(table_id, row_key))
+                        .z_index(z_index)
+                        .x_compute(
+                            [InputRef::TableCol {
+                                table: table_id,
+                                col: cat_col,
+                            }],
+                            move |ctx, _| {
+                                let cat = ctx.table_f64(table_id, row, cat_col).unwrap_or(0.0);
+                                band.x(category_index(cat))
+                            },
+                        )
                 };
 
                 let y = x.y_compute(

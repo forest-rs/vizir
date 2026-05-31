@@ -6,8 +6,9 @@
 use alloc::vec::Vec;
 
 use peniko::Brush;
-use vizir_core::{ColumnId, InputRef, Mark, MarkId, TableId};
+use vizir_core::{ColumnId, DatumRef, InputRef, Mark, MarkId, TableId};
 
+use crate::roles::ROLE_SERIES_BAR;
 use crate::scale::{ScaleBand, ScaleContinuous};
 
 /// A vertical bar mark derived from a table.
@@ -86,6 +87,8 @@ impl BarMarkSpec {
                 let id = MarkId::for_row(table_id, row_key);
                 Mark::builder(id)
                     .rect()
+                    .role(ROLE_SERIES_BAR)
+                    .datum(DatumRef::new(table_id, row_key).with_column(y_col))
                     .z_index(z_index)
                     .x_const(band.x(row))
                     .y_compute(

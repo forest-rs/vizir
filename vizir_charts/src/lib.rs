@@ -32,6 +32,7 @@ mod measure;
 mod point_mark;
 mod range_area_mark;
 mod rect_mark;
+mod roles;
 mod rule_mark;
 mod scale;
 mod sector_mark;
@@ -62,6 +63,9 @@ pub use measure::{HeuristicTextMeasurer, TextMeasurer, TextMetrics};
 pub use point_mark::PointMarkSpec;
 pub use range_area_mark::RangeAreaMarkSpec;
 pub use rect_mark::RectMarkSpec;
+pub use roles::{
+    ROLE_SERIES_AREA, ROLE_SERIES_BAR, ROLE_SERIES_LINE, ROLE_SERIES_POINT, ROLE_SERIES_SECTOR,
+};
 pub use rule_mark::RuleMarkSpec;
 pub use scale::{
     ScaleBand, ScaleBandSpec, ScaleContinuous, ScaleLinear, ScaleLinearSpec, ScaleLog,

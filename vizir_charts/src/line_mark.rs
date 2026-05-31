@@ -9,6 +9,7 @@ use kurbo::BezPath;
 use vizir_core::{ColumnId, InputRef, Mark, MarkId, TableId};
 
 use crate::axis::StrokeStyle;
+use crate::roles::ROLE_SERIES_LINE;
 use crate::scale::ScaleContinuous;
 
 /// A line mark derived from a table.
@@ -81,6 +82,7 @@ impl LineMarkSpec {
 
         let line = Mark::builder(self.id)
             .path()
+            .role(ROLE_SERIES_LINE)
             .z_index(z_index)
             .path_compute([InputRef::Table { table: table_id }], move |ctx, _| {
                 let n = ctx.table_row_count(table_id).unwrap_or(0);
