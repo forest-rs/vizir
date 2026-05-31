@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use kurbo::BezPath;
 use peniko::Brush;
-use vizir_core::{ColumnId, InputRef, Mark, MarkId, TableId};
+use vizir_core::{ColumnId, Mark, MarkId, TableId};
 
 use crate::axis::StrokeStyle;
 use crate::scale::ScaleContinuous;
@@ -107,7 +107,7 @@ impl StackedAreaMarkSpec {
         let area = Mark::builder(area_id)
             .path()
             .z_index(z_index)
-            .path_compute([InputRef::Table { table: table_id }], move |ctx, _| {
+            .path_table(table_id, move |ctx, _| {
                 let n = ctx.table_row_count(table_id).unwrap_or(0);
                 let mut top: Vec<(f64, f64)> = Vec::with_capacity(n);
                 let mut bot: Vec<(f64, f64)> = Vec::with_capacity(n);
@@ -149,7 +149,7 @@ impl StackedAreaMarkSpec {
             let line = Mark::builder(line_id)
                 .path()
                 .z_index(z_index.saturating_add(crate::z_order::SERIES_STROKE))
-                .path_compute([InputRef::Table { table: table_id }], move |ctx, _| {
+                .path_table(table_id, move |ctx, _| {
                     let n = ctx.table_row_count(table_id).unwrap_or(0);
                     let mut p = BezPath::new();
                     for row in 0..n {

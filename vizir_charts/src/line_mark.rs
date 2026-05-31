@@ -6,7 +6,7 @@
 use alloc::vec::Vec;
 
 use kurbo::BezPath;
-use vizir_core::{ColumnId, InputRef, Mark, MarkId, TableId};
+use vizir_core::{ColumnId, Mark, MarkId, TableId};
 
 use crate::axis::StrokeStyle;
 use crate::roles::ROLE_SERIES_LINE;
@@ -84,7 +84,7 @@ impl LineMarkSpec {
             .path()
             .role(ROLE_SERIES_LINE)
             .z_index(z_index)
-            .path_compute([InputRef::Table { table: table_id }], move |ctx, _| {
+            .path_table(table_id, move |ctx, _| {
                 let n = ctx.table_row_count(table_id).unwrap_or(0);
                 let mut p = BezPath::new();
                 for row in 0..n {

@@ -26,8 +26,8 @@ use kurbo::{Affine, BezPath, Rect};
 use peniko::Brush;
 use peniko::color::palette::css;
 use vizir_core::{
-    ColumnId, Encoding, InputRef, Mark, MarkDiff, MarkEncodings, MarkId, PathEncodings,
-    RectEncodings, Scene, TableId, TextAnchor, TextBaseline, TextEncodings,
+    ColumnId, Encoding, Mark, MarkDiff, MarkEncodings, MarkId, PathEncodings, RectEncodings, Scene,
+    TableId, TextAnchor, TextBaseline, TextEncodings,
 };
 use vizir_transforms::{
     AggregateField, AggregateOp, CalculateExpr, CalculateOperand, LookupField, PivotValue,
@@ -2647,94 +2647,42 @@ impl BarLayer {
                 let mark = Mark::builder(layer_row_mark_id(id_base, row_key))
                     .rect()
                     .z_index(crate::z_order::SERIES_FILL)
-                    .x_compute(
-                        [InputRef::TableCol {
-                            table: table_id,
-                            col: x_col,
-                        }],
-                        move |ctx, _| {
-                            let value = ctx.table_f64(table_id, row, x_col).unwrap_or(f64::NAN);
-                            band.x(category_index_for_value(value, &category_index_map))
-                                + group_offset
-                        },
-                    )
+                    .x_table_f64(table_id, row, x_col, f64::NAN, move |value| {
+                        band.x(category_index_for_value(value, &category_index_map)) + group_offset
+                    })
                     .w_const(group_width);
                 let mut mark = if let Some(y2_col) = y2_col {
-                    mark.y_compute(
-                        [
-                            InputRef::TableCol {
-                                table: table_id,
-                                col: y_col,
-                            },
-                            InputRef::TableCol {
-                                table: table_id,
-                                col: y2_col,
-                            },
-                        ],
-                        move |ctx, _| {
-                            let top = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
-                            let bottom = ctx.table_f64(table_id, row, y2_col).unwrap_or(baseline);
-                            y_scale.map(top.max(bottom))
-                        },
-                    )
-                    .h_compute(
-                        [
-                            InputRef::TableCol {
-                                table: table_id,
-                                col: y_col,
-                            },
-                            InputRef::TableCol {
-                                table: table_id,
-                                col: y2_col,
-                            },
-                        ],
-                        move |ctx, _| {
-                            let top = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
-                            let bottom = ctx.table_f64(table_id, row, y2_col).unwrap_or(baseline);
-                            (y_scale.map(top) - y_scale.map(bottom)).abs()
-                        },
-                    )
+                    mark.y_table_cols(table_id, [y_col, y2_col], move |ctx, _| {
+                        let top = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
+                        let bottom = ctx.table_f64(table_id, row, y2_col).unwrap_or(baseline);
+                        y_scale.map(top.max(bottom))
+                    })
+                    .h_table_cols(table_id, [y_col, y2_col], move |ctx, _| {
+                        let top = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
+                        let bottom = ctx.table_f64(table_id, row, y2_col).unwrap_or(baseline);
+                        (y_scale.map(top) - y_scale.map(bottom)).abs()
+                    })
                 } else {
                     let y0 = y_scale.map(baseline);
-                    mark.y_compute(
-                        [InputRef::TableCol {
-                            table: table_id,
-                            col: y_col,
-                        }],
-                        move |ctx, _| {
-                            let v = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
-                            y_scale.map(v).min(y0)
-                        },
-                    )
-                    .h_compute(
-                        [InputRef::TableCol {
-                            table: table_id,
-                            col: y_col,
-                        }],
-                        move |ctx, _| {
-                            let v = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
-                            (y_scale.map(v) - y0).abs()
-                        },
-                    )
+                    mark.y_table_f64(table_id, row, y_col, baseline, move |v| {
+                        y_scale.map(v).min(y0)
+                    })
+                    .h_table_f64(table_id, row, y_col, baseline, move |v| {
+                        (y_scale.map(v) - y0).abs()
+                    })
                 };
                 mark = if let Some(opacity_col) = opacity_col {
                     let fill = fill.clone();
-                    mark.fill_compute(
-                        [InputRef::TableCol {
-                            table: table_id,
-                            col: opacity_col,
-                        }],
-                        move |ctx, _| {
-                            brush_with_opacity(
-                                &fill,
-                                opacity_for_value(
-                                    ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
-                                    opacity_domain,
-                                    1.0,
-                                ),
-                            )
-                        },
-                    )
+                    mark.fill_table_col(table_id, opacity_col, move |ctx, _| {
+                        brush_with_opacity(
+                            &fill,
+                            opacity_for_value(
+                                ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
+                                opacity_domain,
+                                1.0,
+                            ),
+                        )
+                    })
                 } else {
                     mark.fill_brush_const(fill.clone())
                 };
@@ -2868,46 +2816,26 @@ impl PointLayer {
                     let mut mark = Mark::builder(layer_row_mark_id(id_base, row_key))
                         .rect()
                         .z_index(crate::z_order::SERIES_POINTS)
-                        .x_compute(
-                            [InputRef::TableCol {
-                                table: table_id,
-                                col: x_col,
-                            }],
-                            move |ctx, _| {
-                                x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0))
-                                    - size / 2.0
-                            },
-                        )
-                        .y_compute(
-                            [InputRef::TableCol {
-                                table: table_id,
-                                col: y_col,
-                            }],
-                            move |ctx, _| {
-                                y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0))
-                                    - size / 2.0
-                            },
-                        )
+                        .x_table_f64(table_id, row, x_col, 0.0, move |x| {
+                            x_scale.map(x) - size / 2.0
+                        })
+                        .y_table_f64(table_id, row, y_col, 0.0, move |y| {
+                            y_scale.map(y) - size / 2.0
+                        })
                         .w_const(size)
                         .h_const(size);
                     mark = if let Some(opacity_col) = opacity_col {
                         let fill = fill.clone();
-                        mark.fill_compute(
-                            [InputRef::TableCol {
-                                table: table_id,
-                                col: opacity_col,
-                            }],
-                            move |ctx, _| {
-                                brush_with_opacity(
-                                    &fill,
-                                    opacity_for_value(
-                                        ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
-                                        opacity_domain,
-                                        1.0,
-                                    ),
-                                )
-                            },
-                        )
+                        mark.fill_table_col(table_id, opacity_col, move |ctx, _| {
+                            brush_with_opacity(
+                                &fill,
+                                opacity_for_value(
+                                    ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
+                                    opacity_domain,
+                                    1.0,
+                                ),
+                            )
+                        })
                     } else {
                         mark.fill_brush_const(fill.clone())
                     };
@@ -2916,80 +2844,44 @@ impl PointLayer {
                     let mut mark = Mark::builder(layer_row_mark_id(id_base, row_key))
                         .path()
                         .z_index(crate::z_order::SERIES_POINTS)
-                        .path_compute(
-                            [
-                                InputRef::TableCol {
-                                    table: table_id,
-                                    col: x_col,
-                                },
-                                InputRef::TableCol {
-                                    table: table_id,
-                                    col: y_col,
-                                },
-                            ],
-                            move |ctx, _| {
-                                let x =
-                                    x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0));
-                                let y =
-                                    y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0));
-                                symbol.path(x, y, size)
-                            },
-                        );
+                        .path_table_cols(table_id, [x_col, y_col], move |ctx, _| {
+                            let x = x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0));
+                            let y = y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0));
+                            symbol.path(x, y, size)
+                        });
                     mark = if let Some(opacity_col) = opacity_col {
                         let fill = fill.clone();
-                        mark.fill_compute(
-                            [InputRef::TableCol {
-                                table: table_id,
-                                col: opacity_col,
-                            }],
-                            move |ctx, _| {
-                                brush_with_opacity(
-                                    &fill,
-                                    opacity_for_value(
-                                        ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
-                                        opacity_domain,
-                                        1.0,
-                                    ),
-                                )
-                            },
-                        )
+                        mark.fill_table_col(table_id, opacity_col, move |ctx, _| {
+                            brush_with_opacity(
+                                &fill,
+                                opacity_for_value(
+                                    ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
+                                    opacity_domain,
+                                    1.0,
+                                ),
+                            )
+                        })
                     } else {
                         mark.fill_brush_const(fill.clone())
                     };
                     mark = if let Some(stroke_col) = stroke_col {
                         let stroke_map = stroke_map.clone();
                         let default_stroke = constant_stroke.clone();
-                        mark.stroke_compute(
-                            [InputRef::TableCol {
-                                table: table_id,
-                                col: stroke_col,
-                            }],
-                            move |ctx, _| {
-                                let value =
-                                    ctx.table_f64(table_id, row, stroke_col).unwrap_or(f64::NAN);
-                                brush_for_series_value(value, &stroke_map, default_stroke.clone())
-                            },
-                        )
+                        mark.stroke_table_col(table_id, stroke_col, move |ctx, _| {
+                            let value =
+                                ctx.table_f64(table_id, row, stroke_col).unwrap_or(f64::NAN);
+                            brush_for_series_value(value, &stroke_map, default_stroke.clone())
+                        })
                     } else {
                         mark.stroke_brush_const(stroke.clone())
                     };
                     mark = if let Some(stroke_width_col) = stroke_width_col {
-                        mark.stroke_width_compute(
-                            [InputRef::TableCol {
-                                table: table_id,
-                                col: stroke_width_col,
-                            }],
-                            move |ctx, _| {
-                                let value = ctx
-                                    .table_f64(table_id, row, stroke_width_col)
-                                    .unwrap_or(default_stroke_width);
-                                stroke_width_for_value(
-                                    value,
-                                    stroke_width_domain,
-                                    default_stroke_width,
-                                )
-                            },
-                        )
+                        mark.stroke_width_table_col(table_id, stroke_width_col, move |ctx, _| {
+                            let value = ctx
+                                .table_f64(table_id, row, stroke_width_col)
+                                .unwrap_or(default_stroke_width);
+                            stroke_width_for_value(value, stroke_width_domain, default_stroke_width)
+                        })
                     } else if has_stroke_style {
                         mark.stroke_width_const(stroke_width)
                     } else {
@@ -3230,59 +3122,29 @@ impl TextLayer {
                         let mut mark = Mark::builder(layer_row_mark_id(id_base, row_key))
                             .text()
                             .z_index(crate::z_order::SERIES_LABELS)
-                            .x_compute(
-                                [InputRef::TableCol {
-                                    table: table_id,
-                                    col: x_col,
-                                }],
-                                move |ctx, _| {
-                                    x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0))
-                                },
-                            )
-                            .y_compute(
-                                [InputRef::TableCol {
-                                    table: table_id,
-                                    col: y_col,
-                                }],
-                                move |ctx, _| {
-                                    y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0))
-                                        - 4.0
-                                },
-                            )
-                            .text_compute(
-                                [InputRef::TableCol {
-                                    table: table_id,
-                                    col: text_col,
-                                }],
-                                move |ctx, _| {
-                                    format_channel_value(
-                                        ctx.table_f64(table_id, row, text_col).unwrap_or(f64::NAN),
-                                        text_kind,
-                                    )
-                                },
-                            )
+                            .x_table_f64(table_id, row, x_col, 0.0, move |x| x_scale.map(x))
+                            .y_table_f64(table_id, row, y_col, 0.0, move |y| y_scale.map(y) - 4.0)
+                            .text_table_col(table_id, text_col, move |ctx, _| {
+                                format_channel_value(
+                                    ctx.table_f64(table_id, row, text_col).unwrap_or(f64::NAN),
+                                    text_kind,
+                                )
+                            })
                             .font_size_const(10.0)
                             .text_anchor(TextAnchor::Middle)
                             .text_baseline(TextBaseline::Ideographic);
                         mark = if let Some(opacity_col) = opacity_col {
                             let fill = fill.clone();
-                            mark.fill_compute(
-                                [InputRef::TableCol {
-                                    table: table_id,
-                                    col: opacity_col,
-                                }],
-                                move |ctx, _| {
-                                    brush_with_opacity(
-                                        &fill,
-                                        opacity_for_value(
-                                            ctx.table_f64(table_id, row, opacity_col)
-                                                .unwrap_or(1.0),
-                                            opacity_domain,
-                                            1.0,
-                                        ),
-                                    )
-                                },
-                            )
+                            mark.fill_table_col(table_id, opacity_col, move |ctx, _| {
+                                brush_with_opacity(
+                                    &fill,
+                                    opacity_for_value(
+                                        ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
+                                        opacity_domain,
+                                        1.0,
+                                    ),
+                                )
+                            })
                         } else {
                             mark.fill_brush_const(fill.clone())
                         };
@@ -3305,50 +3167,28 @@ impl TextLayer {
                             .text()
                             .z_index(crate::z_order::SERIES_LABELS)
                             .x_const(band.x(row) + 0.5 * band_width)
-                            .y_compute(
-                                [InputRef::TableCol {
-                                    table: table_id,
-                                    col: y_col,
-                                }],
-                                move |ctx, _| {
-                                    y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0))
-                                        - 4.0
-                                },
-                            )
-                            .text_compute(
-                                [InputRef::TableCol {
-                                    table: table_id,
-                                    col: text_col,
-                                }],
-                                move |ctx, _| {
-                                    format_channel_value(
-                                        ctx.table_f64(table_id, row, text_col).unwrap_or(f64::NAN),
-                                        text_kind,
-                                    )
-                                },
-                            )
+                            .y_table_f64(table_id, row, y_col, 0.0, move |y| y_scale.map(y) - 4.0)
+                            .text_table_col(table_id, text_col, move |ctx, _| {
+                                format_channel_value(
+                                    ctx.table_f64(table_id, row, text_col).unwrap_or(f64::NAN),
+                                    text_kind,
+                                )
+                            })
                             .font_size_const(10.0)
                             .text_anchor(TextAnchor::Middle)
                             .text_baseline(TextBaseline::Ideographic);
                         mark = if let Some(opacity_col) = opacity_col {
                             let fill = fill.clone();
-                            mark.fill_compute(
-                                [InputRef::TableCol {
-                                    table: table_id,
-                                    col: opacity_col,
-                                }],
-                                move |ctx, _| {
-                                    brush_with_opacity(
-                                        &fill,
-                                        opacity_for_value(
-                                            ctx.table_f64(table_id, row, opacity_col)
-                                                .unwrap_or(1.0),
-                                            opacity_domain,
-                                            1.0,
-                                        ),
-                                    )
-                                },
-                            )
+                            mark.fill_table_col(table_id, opacity_col, move |ctx, _| {
+                                brush_with_opacity(
+                                    &fill,
+                                    opacity_for_value(
+                                        ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
+                                        opacity_domain,
+                                        1.0,
+                                    ),
+                                )
+                            })
                         } else {
                             mark.fill_brush_const(fill.clone())
                         };

@@ -4,6 +4,8 @@ Minimal incremental visualization runtime core.
 
 Provides versioned `Table`/`Signal` inputs, stable `MarkId` identity, UI-neutral mark metadata, explicit dependency tracking, and `Enter/Update/Exit` diffs via `Scene::update`.
 
+Computed encodings still have a low-level explicit `InputRef` escape hatch, but common table and signal constructors attach those dependencies mechanically. The chart/spec layers should prefer those helpers so closures and dependency lists do not drift apart.
+
 This crate is `no_std` by default (uses `alloc` + `hashbrown`).
 
 Geometry uses `kurbo`, and paint uses `peniko`.

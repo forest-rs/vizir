@@ -7,7 +7,7 @@
 //! - versioned inputs ([`Table`]/[`Signal`])
 //! - stable mark identity ([`MarkId`])
 //! - UI-neutral mark semantics ([`MarkMetadata`], [`MarkRole`], [`DatumRef`])
-//! - explicit dependency tracking ([`InputRef`])
+//! - explicit dependency tracking ([`InputRef`]) with helper constructors for common inputs
 //! - incremental evaluation + diff output ([`MarkDiff`])
 //! - per-kind mark payloads ([`MarkPayload`])
 //!
@@ -211,6 +211,26 @@ pub enum InputRef {
     },
 }
 
+impl InputRef {
+    /// Create a coarse table dependency.
+    #[must_use]
+    pub const fn table(table: TableId) -> Self {
+        Self::Table { table }
+    }
+
+    /// Create a table-column dependency.
+    #[must_use]
+    pub const fn table_col(table: TableId, col: ColumnId) -> Self {
+        Self::TableCol { table, col }
+    }
+
+    /// Create a signal dependency.
+    #[must_use]
+    pub const fn signal(signal: SignalId) -> Self {
+        Self::Signal { signal }
+    }
+}
+
 /// Minimal columnar table placeholder.
 /// Replace with Arrow, your own column store, or a trait object later.
 #[derive(Debug)]
@@ -349,6 +369,72 @@ pub enum Encoding<T> {
         /// Compute the value for a given mark.
         f: Box<ComputeFn<T>>,
     },
+}
+
+impl<T> Encoding<T> {
+    /// Create a computed encoding with explicit dependencies.
+    ///
+    /// Prefer the narrower dependency constructors such as [`Self::from_table_col`] or
+    /// [`Self::from_signal`] when a computed channel reads one known input. Use this constructor
+    /// for low-level escape hatches where the caller has already derived the full dependency set.
+    pub fn compute(
+        deps: impl IntoIterator<Item = InputRef>,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> T + 'static,
+    ) -> Self {
+        Self::Compute {
+            deps: deps4(deps),
+            f: Box::new(f),
+        }
+    }
+
+    /// Create a computed encoding that depends on an entire table.
+    pub fn from_table(table: TableId, f: impl Fn(&EvalCtx<'_>, MarkId) -> T + 'static) -> Self {
+        Self::compute([InputRef::table(table)], f)
+    }
+
+    /// Create a computed encoding that depends on one table column.
+    pub fn from_table_col(
+        table: TableId,
+        col: ColumnId,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> T + 'static,
+    ) -> Self {
+        Self::compute([InputRef::table_col(table, col)], f)
+    }
+
+    /// Create a computed encoding that depends on several columns from the same table.
+    pub fn from_table_cols(
+        table: TableId,
+        cols: impl IntoIterator<Item = ColumnId>,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> T + 'static,
+    ) -> Self {
+        Self::compute(
+            cols.into_iter().map(|col| InputRef::table_col(table, col)),
+            f,
+        )
+    }
+
+    /// Create a computed encoding that depends on one signal.
+    pub fn from_signal(signal: SignalId, f: impl Fn(&EvalCtx<'_>, MarkId) -> T + 'static) -> Self {
+        Self::compute([InputRef::signal(signal)], f)
+    }
+}
+
+impl Encoding<f64> {
+    /// Create a numeric encoding by reading one `f64` table column and mapping it.
+    ///
+    /// The dependency on `table`/`col` is attached mechanically, so callers do not have to keep a
+    /// closure and an explicit dependency list in sync.
+    pub fn table_f64(
+        table: TableId,
+        row: usize,
+        col: ColumnId,
+        fallback: f64,
+        map: impl Fn(f64) -> f64 + 'static,
+    ) -> Self {
+        Self::from_table_col(table, col, move |ctx, _| {
+            map(ctx.table_f64(table, row, col).unwrap_or(fallback))
+        })
+    }
 }
 
 impl<T: fmt::Debug> fmt::Debug for Encoding<T> {
@@ -850,10 +936,15 @@ impl MarkBuilder {
     }
 
     /// Set the `x` encoding to a constant value.
-    pub fn x_const(mut self, v: f64) -> Self {
+    pub fn x_const(self, v: f64) -> Self {
+        self.x_encoding(Encoding::Const(v))
+    }
+
+    /// Set the `x` encoding directly.
+    pub fn x_encoding(mut self, encoding: Encoding<f64>) -> Self {
         match &mut self.mark.encodings {
-            MarkEncodings::Rect(e) => e.as_mut().x = Encoding::Const(v),
-            MarkEncodings::Text(e) => e.as_mut().x = Encoding::Const(v),
+            MarkEncodings::Rect(e) => e.as_mut().x = encoding,
+            MarkEncodings::Text(e) => e.as_mut().x = encoding,
             MarkEncodings::Path(_) => {}
         }
         self
@@ -861,33 +952,35 @@ impl MarkBuilder {
 
     /// Set the `x` encoding to a computed value.
     pub fn x_compute(
-        mut self,
+        self,
         deps: impl IntoIterator<Item = InputRef>,
         f: impl Fn(&EvalCtx<'_>, MarkId) -> f64 + 'static,
     ) -> Self {
-        match &mut self.mark.encodings {
-            MarkEncodings::Rect(e) => {
-                e.as_mut().x = Encoding::Compute {
-                    deps: deps4(deps),
-                    f: Box::new(f),
-                };
-            }
-            MarkEncodings::Text(e) => {
-                e.as_mut().x = Encoding::Compute {
-                    deps: deps4(deps),
-                    f: Box::new(f),
-                };
-            }
-            MarkEncodings::Path(_) => {}
-        }
-        self
+        self.x_encoding(Encoding::compute(deps, f))
+    }
+
+    /// Set the `x` encoding from one numeric table column.
+    pub fn x_table_f64(
+        self,
+        table: TableId,
+        row: usize,
+        col: ColumnId,
+        fallback: f64,
+        map: impl Fn(f64) -> f64 + 'static,
+    ) -> Self {
+        self.x_encoding(Encoding::table_f64(table, row, col, fallback, map))
     }
 
     /// Set the `y` encoding to a constant value.
-    pub fn y_const(mut self, v: f64) -> Self {
+    pub fn y_const(self, v: f64) -> Self {
+        self.y_encoding(Encoding::Const(v))
+    }
+
+    /// Set the `y` encoding directly.
+    pub fn y_encoding(mut self, encoding: Encoding<f64>) -> Self {
         match &mut self.mark.encodings {
-            MarkEncodings::Rect(e) => e.as_mut().y = Encoding::Const(v),
-            MarkEncodings::Text(e) => e.as_mut().y = Encoding::Const(v),
+            MarkEncodings::Rect(e) => e.as_mut().y = encoding,
+            MarkEncodings::Text(e) => e.as_mut().y = encoding,
             MarkEncodings::Path(_) => {}
         }
         self
@@ -895,72 +988,111 @@ impl MarkBuilder {
 
     /// Set the `y` encoding to a computed value.
     pub fn y_compute(
-        mut self,
+        self,
         deps: impl IntoIterator<Item = InputRef>,
         f: impl Fn(&EvalCtx<'_>, MarkId) -> f64 + 'static,
     ) -> Self {
-        match &mut self.mark.encodings {
-            MarkEncodings::Rect(e) => {
-                e.as_mut().y = Encoding::Compute {
-                    deps: deps4(deps),
-                    f: Box::new(f),
-                };
-            }
-            MarkEncodings::Text(e) => {
-                e.as_mut().y = Encoding::Compute {
-                    deps: deps4(deps),
-                    f: Box::new(f),
-                };
-            }
-            MarkEncodings::Path(_) => {}
-        }
-        self
+        self.y_encoding(Encoding::compute(deps, f))
+    }
+
+    /// Set the `y` encoding from one numeric table column.
+    pub fn y_table_f64(
+        self,
+        table: TableId,
+        row: usize,
+        col: ColumnId,
+        fallback: f64,
+        map: impl Fn(f64) -> f64 + 'static,
+    ) -> Self {
+        self.y_encoding(Encoding::table_f64(table, row, col, fallback, map))
+    }
+
+    /// Set the `y` encoding from several columns from one table.
+    pub fn y_table_cols(
+        self,
+        table: TableId,
+        cols: impl IntoIterator<Item = ColumnId>,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> f64 + 'static,
+    ) -> Self {
+        self.y_encoding(Encoding::from_table_cols(table, cols, f))
     }
 
     /// Set the `w` encoding to a constant value.
-    pub fn w_const(mut self, v: f64) -> Self {
+    pub fn w_const(self, v: f64) -> Self {
+        self.w_encoding(Encoding::Const(v))
+    }
+
+    /// Set the `w` encoding directly (rect marks only).
+    pub fn w_encoding(mut self, encoding: Encoding<f64>) -> Self {
         if let MarkEncodings::Rect(e) = &mut self.mark.encodings {
-            e.as_mut().w = Encoding::Const(v);
+            e.as_mut().w = encoding;
         }
         self
     }
 
     /// Set the `w` encoding to a computed value (rect marks only).
     pub fn w_compute(
-        mut self,
+        self,
         deps: impl IntoIterator<Item = InputRef>,
         f: impl Fn(&EvalCtx<'_>, MarkId) -> f64 + 'static,
     ) -> Self {
-        if let MarkEncodings::Rect(e) = &mut self.mark.encodings {
-            e.as_mut().w = Encoding::Compute {
-                deps: deps4(deps),
-                f: Box::new(f),
-            };
-        }
-        self
+        self.w_encoding(Encoding::compute(deps, f))
+    }
+
+    /// Set the `w` encoding from one numeric table column (rect marks only).
+    pub fn w_table_f64(
+        self,
+        table: TableId,
+        row: usize,
+        col: ColumnId,
+        fallback: f64,
+        map: impl Fn(f64) -> f64 + 'static,
+    ) -> Self {
+        self.w_encoding(Encoding::table_f64(table, row, col, fallback, map))
     }
 
     /// Set the `h` encoding to a constant value.
-    pub fn h_const(mut self, v: f64) -> Self {
+    pub fn h_const(self, v: f64) -> Self {
+        self.h_encoding(Encoding::Const(v))
+    }
+
+    /// Set the `h` encoding directly (rect marks only).
+    pub fn h_encoding(mut self, encoding: Encoding<f64>) -> Self {
         if let MarkEncodings::Rect(e) = &mut self.mark.encodings {
-            e.as_mut().h = Encoding::Const(v);
+            e.as_mut().h = encoding;
         }
         self
     }
 
     /// Set the `h` encoding to a computed value (rect marks only).
     pub fn h_compute(
-        mut self,
+        self,
         deps: impl IntoIterator<Item = InputRef>,
         f: impl Fn(&EvalCtx<'_>, MarkId) -> f64 + 'static,
     ) -> Self {
-        if let MarkEncodings::Rect(e) = &mut self.mark.encodings {
-            e.as_mut().h = Encoding::Compute {
-                deps: deps4(deps),
-                f: Box::new(f),
-            };
-        }
-        self
+        self.h_encoding(Encoding::compute(deps, f))
+    }
+
+    /// Set the `h` encoding from one numeric table column (rect marks only).
+    pub fn h_table_f64(
+        self,
+        table: TableId,
+        row: usize,
+        col: ColumnId,
+        fallback: f64,
+        map: impl Fn(f64) -> f64 + 'static,
+    ) -> Self {
+        self.h_encoding(Encoding::table_f64(table, row, col, fallback, map))
+    }
+
+    /// Set the `h` encoding from several columns from one table (rect marks only).
+    pub fn h_table_cols(
+        self,
+        table: TableId,
+        cols: impl IntoIterator<Item = ColumnId>,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> f64 + 'static,
+    ) -> Self {
+        self.h_encoding(Encoding::from_table_cols(table, cols, f))
     }
 
     /// Set the `fill` encoding to a constant value.
@@ -1021,6 +1153,16 @@ impl MarkBuilder {
         self
     }
 
+    /// Set the `fill` encoding from one table column.
+    pub fn fill_table_col(
+        self,
+        table: TableId,
+        col: ColumnId,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> Brush + 'static,
+    ) -> Self {
+        self.fill_compute([InputRef::table_col(table, col)], f)
+    }
+
     /// Set the `text` encoding to a constant value (text marks only).
     pub fn text_const(mut self, v: impl Into<String>) -> Self {
         if let MarkEncodings::Text(e) = &mut self.mark.encodings {
@@ -1031,17 +1173,29 @@ impl MarkBuilder {
 
     /// Set the `text` encoding to a computed value (text marks only).
     pub fn text_compute(
-        mut self,
+        self,
         deps: impl IntoIterator<Item = InputRef>,
         f: impl Fn(&EvalCtx<'_>, MarkId) -> String + 'static,
     ) -> Self {
+        self.text_encoding(Encoding::compute(deps, f))
+    }
+
+    /// Set the `text` encoding directly (text marks only).
+    pub fn text_encoding(mut self, encoding: Encoding<String>) -> Self {
         if let MarkEncodings::Text(e) = &mut self.mark.encodings {
-            e.as_mut().text = Encoding::Compute {
-                deps: deps4(deps),
-                f: Box::new(f),
-            };
+            e.as_mut().text = encoding;
         }
         self
+    }
+
+    /// Set the `text` encoding from one table column (text marks only).
+    pub fn text_table_col(
+        self,
+        table: TableId,
+        col: ColumnId,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> String + 'static,
+    ) -> Self {
+        self.text_encoding(Encoding::from_table_col(table, col, f))
     }
 
     /// Set the `font_size` encoding to a constant value (text marks only).
@@ -1131,26 +1285,44 @@ impl MarkBuilder {
     }
 
     /// Set the `path` encoding to a constant value (path marks only).
-    pub fn path_const(mut self, v: BezPath) -> Self {
+    pub fn path_const(self, v: BezPath) -> Self {
+        self.path_encoding(Encoding::Const(v))
+    }
+
+    /// Set the `path` encoding directly (path marks only).
+    pub fn path_encoding(mut self, encoding: Encoding<BezPath>) -> Self {
         if let MarkEncodings::Path(e) = &mut self.mark.encodings {
-            e.as_mut().path = Encoding::Const(v);
+            e.as_mut().path = encoding;
         }
         self
     }
 
     /// Set the `path` encoding to a computed value (path marks only).
     pub fn path_compute(
-        mut self,
+        self,
         deps: impl IntoIterator<Item = InputRef>,
         f: impl Fn(&EvalCtx<'_>, MarkId) -> BezPath + 'static,
     ) -> Self {
-        if let MarkEncodings::Path(e) = &mut self.mark.encodings {
-            e.as_mut().path = Encoding::Compute {
-                deps: deps4(deps),
-                f: Box::new(f),
-            };
-        }
-        self
+        self.path_encoding(Encoding::compute(deps, f))
+    }
+
+    /// Set the `path` encoding from an entire table (path marks only).
+    pub fn path_table(
+        self,
+        table: TableId,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> BezPath + 'static,
+    ) -> Self {
+        self.path_encoding(Encoding::from_table(table, f))
+    }
+
+    /// Set the `path` encoding from several columns from one table (path marks only).
+    pub fn path_table_cols(
+        self,
+        table: TableId,
+        cols: impl IntoIterator<Item = ColumnId>,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> BezPath + 'static,
+    ) -> Self {
+        self.path_encoding(Encoding::from_table_cols(table, cols, f))
     }
 
     /// Set the `stroke` encoding to a constant value (path marks only).
@@ -1190,6 +1362,16 @@ impl MarkBuilder {
             };
         }
         self
+    }
+
+    /// Set the `stroke` encoding from one table column (path marks only).
+    pub fn stroke_table_col(
+        self,
+        table: TableId,
+        col: ColumnId,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> Brush + 'static,
+    ) -> Self {
+        self.stroke_compute([InputRef::table_col(table, col)], f)
     }
 
     /// Set the path stroke style to a constant value.
@@ -1233,6 +1415,16 @@ impl MarkBuilder {
             };
         }
         self
+    }
+
+    /// Set the `stroke_width` encoding from one table column (path marks only).
+    pub fn stroke_width_table_col(
+        self,
+        table: TableId,
+        col: ColumnId,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> f64 + 'static,
+    ) -> Self {
+        self.stroke_width_compute([InputRef::table_col(table, col)], f)
     }
 
     /// Finish building and rebuild dependencies.
@@ -1987,6 +2179,25 @@ mod tests {
 
     use super::*;
 
+    #[derive(Debug)]
+    struct OneCol {
+        values: Vec<f64>,
+    }
+
+    impl TableData for OneCol {
+        fn row_count(&self) -> usize {
+            self.values.len()
+        }
+
+        fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+            if col == ColumnId(0) {
+                self.values.get(row).copied()
+            } else {
+                None
+            }
+        }
+    }
+
     #[test]
     fn enter_update_exit_smoke() {
         let mut scene = Scene::new();
@@ -2080,6 +2291,52 @@ mod tests {
             panic!("expected exit");
         };
         assert_eq!(metadata.role, Some(role_b));
+    }
+
+    #[test]
+    fn table_column_helpers_derive_dependencies() {
+        let mut scene = Scene::new();
+        let table = TableId(1);
+        let col = ColumnId(0);
+        let mark_id = MarkId(1);
+
+        scene.set_table_row_keys(table, Vec::from([10]));
+        scene.set_table_data(
+            table,
+            Some(Box::new(OneCol {
+                values: Vec::from([2.0]),
+            })),
+        );
+
+        let mark = Mark::builder(mark_id)
+            .x_table_f64(table, 0, col, 0.0, |value| value * 2.0)
+            .build();
+        assert_eq!(mark.deps.as_slice(), &[InputRef::table_col(table, col)]);
+
+        let diffs = scene.tick([mark]);
+        let [MarkDiff::Enter { new, .. }] = &diffs[..] else {
+            panic!("expected enter");
+        };
+        let MarkPayload::Rect(rect) = &**new else {
+            panic!("expected rect payload");
+        };
+        assert_eq!(rect.rect.x0, 4.0);
+
+        scene.set_table_data(
+            table,
+            Some(Box::new(OneCol {
+                values: Vec::from([3.0]),
+            })),
+        );
+        let diffs = scene.update();
+        let [MarkDiff::Update { old, new, .. }] = &diffs[..] else {
+            panic!("expected update");
+        };
+        let (MarkPayload::Rect(old), MarkPayload::Rect(new)) = (&**old, &**new) else {
+            panic!("expected rect payloads");
+        };
+        assert_eq!(old.rect.x0, 4.0);
+        assert_eq!(new.rect.x0, 6.0);
     }
 
     #[test]
