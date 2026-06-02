@@ -351,7 +351,7 @@ impl Program {
                     let mut row_keys: Vec<u64> = Vec::with_capacity(groups.len());
 
                     for group in &groups {
-                        row_keys.push(hash_group_key(&group.key));
+                        row_keys.push(row_key_for_group_key(&group.key));
 
                         // Group-by columns.
                         for (i, v) in group.group_vals.iter().copied().enumerate() {
@@ -474,7 +474,7 @@ impl Program {
                         for (slot, &field) in fields.iter().enumerate() {
                             folded_key.push(slot as f64);
                             folded_value.push(frame.get_f64(row, field).unwrap_or(f64::NAN));
-                            row_keys.push(hash_group_key(&[frame.row_keys[row], slot as u64]));
+                            row_keys.push(row_key_for_folded_field(frame.row_keys[row], slot));
                         }
                     }
                     out_data.push(folded_key);
@@ -586,7 +586,7 @@ impl Program {
                     let mut row_keys: Vec<u64> = Vec::with_capacity(groups.len());
 
                     for group in &groups {
-                        row_keys.push(hash_group_key(&group.key));
+                        row_keys.push(row_key_for_group_key(&group.key));
 
                         for (i, v) in group.group_vals.iter().copied().enumerate() {
                             data[i].push(v);
@@ -1035,14 +1035,32 @@ struct PivotGroup {
     accumulators: Vec<PivotAccumulator>,
 }
 
-fn hash_group_key(bits: &[u64]) -> u64 {
-    // FNV-1a 64-bit: deterministic and cheap.
-    let mut h = 0xcbf29ce484222325_u64;
+const GROUP_ROW_KEY_NAMESPACE: u64 = 0x7669_7a69_725f_6770;
+const FOLDED_ROW_KEY_NAMESPACE: u64 = 0x7669_7a69_725f_6664;
+
+fn hash_bits(mut h: u64, bits: &[u64]) -> u64 {
     for &x in bits {
         h ^= x;
         h = h.wrapping_mul(0x100000001b3);
     }
     h
+}
+
+fn hash_group_key(bits: &[u64]) -> u64 {
+    // FNV-1a 64-bit: deterministic and cheap.
+    hash_bits(0xcbf29ce484222325_u64, bits)
+}
+
+fn hash_tagged_key(tag: u64, bits: &[u64]) -> u64 {
+    hash_bits(hash_group_key(core::slice::from_ref(&tag)), bits)
+}
+
+fn row_key_for_group_key(group_key: &[u64]) -> u64 {
+    hash_tagged_key(GROUP_ROW_KEY_NAMESPACE, group_key)
+}
+
+fn row_key_for_folded_field(origin_key: u64, field_slot: usize) -> u64 {
+    hash_group_key(&[FOLDED_ROW_KEY_NAMESPACE, origin_key, field_slot as u64])
 }
 
 fn cmp_f64_bits(a: u64, b: u64) -> core::cmp::Ordering {
@@ -1484,6 +1502,7 @@ mod tests {
         assert_eq!(t.columns, vec![ColumnId(1)]);
         assert_eq!(t.data.len(), 1);
         assert_eq!(t.data[0], vec![10.0, 9.0, 8.0, 7.0]);
+        assert_eq!(t.row_keys, vec![10, 11, 12, 13]);
     }
 
     #[test]
@@ -1538,6 +1557,13 @@ mod tests {
         assert_eq!(t.data.len(), 2);
         assert_eq!(t.data[0], vec![0.0, 1.0]);
         assert_eq!(t.data[1], vec![3.0, 12.0]);
+        assert_eq!(
+            t.row_keys,
+            vec![
+                row_key_for_group_key(&[0.0_f64.to_bits()]),
+                row_key_for_group_key(&[1.0_f64.to_bits()])
+            ]
+        );
     }
 
     #[test]
@@ -1707,6 +1733,15 @@ mod tests {
         assert_eq!(t.data[1], vec![0.0, 1.0, 0.0, 1.0]);
         assert_eq!(t.data[2], vec![2.0, 3.0, 4.0, 5.0]);
         assert_eq!(t.row_count(), 4);
+        assert_eq!(
+            t.row_keys,
+            vec![
+                row_key_for_folded_field(10, 0),
+                row_key_for_folded_field(10, 1),
+                row_key_for_folded_field(11, 0),
+                row_key_for_folded_field(11, 1)
+            ]
+        );
     }
 
     #[test]
@@ -1798,6 +1833,13 @@ mod tests {
         assert_eq!(t.data[0], vec![0.0, 1.0]);
         assert_eq!(t.data[1], vec![2.0, 4.0]);
         assert_eq!(t.data[2], vec![3.0, 6.0]);
+        assert_eq!(
+            t.row_keys,
+            vec![
+                row_key_for_group_key(&[0.0_f64.to_bits()]),
+                row_key_for_group_key(&[1.0_f64.to_bits()])
+            ]
+        );
     }
 
     #[test]

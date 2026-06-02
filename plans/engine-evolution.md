@@ -9,6 +9,7 @@ charting layer and future Vega/Vega-Lite lowering.
 
 - Tables/signals with versions.
 - Tables carry minimal schema metadata keyed by `ColumnId`.
+- Transform outputs have documented row-key provenance for the current full-recompute operators.
 - `TableData` exposes typed lanes (`f64`, integers, bool, text) plus optional physical column type
   reporting.
 - Marks with explicit deps and incremental per-encoding updates.
@@ -32,9 +33,10 @@ Detailed table-data design lives in `plans/table-data.md`.
   - **Arrow(-ish)** (or Arrow2) as the eventual “real” table substrate.
     - Pros: interoperable; rich types; already has compute ecosystem.
     - Cons: dependency weight; `no_std` compatibility is nuanced; API churn risk.
-- Decide the row-id story (stable identity through transforms):
+- Extend the row-id story (stable identity through transforms):
   - v1 uses `row_keys: Vec<u64>` as stable identity for “one mark per row” charts.
-  - v2 needs an explicit model for:
+  - Current transforms document which operators preserve, reorder, or derive row keys.
+  - v2 still needs an explicit model for:
     - **row identity** (stable key) vs **row index** (position) vs **row order** (sort output),
     - how transforms produce new row sets while preserving provenance.
   - Likely direction:

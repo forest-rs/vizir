@@ -200,18 +200,22 @@ Likely model:
 output row key = hash(transform namespace, origin key(s), derived key parts)
 ```
 
-Rules to define:
+Current transform rules:
 
 - Filter preserves upstream row keys.
-- Sort preserves row keys and changes row order only.
+- Project preserves upstream row keys.
+- Sort moves row keys with rows and changes row order only.
 - Calculate preserves row keys and adds derived columns.
 - Aggregate creates derived keys from group values.
-- Bin creates derived keys from bin boundaries.
+- JoinAggregate preserves row keys and writes aggregate values back per input row.
+- Bin preserves row keys and adds derived bin columns.
 - Fold creates derived keys from `(origin key, folded field id)`.
-- Pivot creates derived keys from group values and explicit output slots.
+- Lookup preserves input row keys and appends looked-up values.
+- Pivot creates derived keys from group values.
 - Stack/window preserve row keys when they add columns per existing row.
 
-This should be designed before adding incremental table patches.
+These rules are now in place for the current full-recompute executor and should remain the
+baseline before adding incremental table patches.
 
 ## Versioning And Patches
 
@@ -325,8 +329,11 @@ Exit criteria:
 ### M2: Row Provenance
 
 - Define stable row-key rules for each existing transform.
-- Add tests for filter, sort, calculate, aggregate, bin, fold, pivot, stack, and window.
+- Add tests for current transform row-key behavior, including preserving, reordering, and derived
+  output keys.
 - Make support docs state which transforms preserve origin keys and which derive new keys.
+
+Status: done.
 
 Exit criteria:
 
@@ -374,15 +381,15 @@ Exit criteria:
 
 ## Next Implementation Slice
 
-The next code slice should be M2, not patches or Arrow:
+The next code slice should be M3, not patches or Arrow:
 
-1. Define stable row-key rules for each existing transform in code comments and tests.
-2. Add row-provenance tests for filter, sort, calculate, aggregate, bin, fold, pivot, stack, and
-   window.
-3. Adjust any transform that still has incidental row-key behavior.
-4. Update support docs only for what is proven.
+1. Add column-level version metadata while keeping table-level versions as the fallback.
+2. Make `InputRef::TableCol` consult column versions when available.
+3. Add tests showing unrelated column updates do not dirty table-column inputs.
+4. Keep patch storage and propagation out of this slice.
 
-This constrains later table patch and incremental transform work.
+This narrows dependency invalidation before introducing table patches or incremental transform
+execution.
 
 ## Risks
 

@@ -10,7 +10,9 @@ useful for ergonomic Rust chart APIs.
 - `vizir_core::Table`: row keys + version; `TableData` supports typed lanes.
 - No table diffs beyond row key reconciliation.
 - `vizir_transforms` provides a first transform IR + full-recompute executor for numeric columns:
-  - `Filter`, `Project`, `Sort`, `Bin`, `Aggregate`, `Stack (offset=zero)` are implemented
+  - `Filter`, `Project`, `Sort`, `Calculate`, `JoinAggregate`, `Aggregate`, `Bin`, `Fold`,
+    `Lookup`, `Pivot`, `Window`, and `Stack` are implemented.
+  - Transform row-key provenance is documented in the IR and covered by focused executor tests.
 
 ## Staged milestones
 
@@ -28,7 +30,8 @@ useful for ergonomic Rust chart APIs.
 - Start with full recompute per transform, but structured so we can add incremental patches.
 - Add stable row IDs through transforms (lineage/provenance):
   - carry original row keys + transform-specific keys.
-  - Current: `Filter`/`Sort` preserve upstream `row_keys` as stable identity.
+  - Current: row-preserving transforms keep upstream row keys, sort moves keys with rows, and
+    aggregate/fold/pivot derive deterministic output row keys from transform semantics.
 
 ### M2: Incremental table patches
 

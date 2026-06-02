@@ -186,6 +186,8 @@ impl Predicate {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Transform {
     /// Keep only rows that satisfy a predicate.
+    ///
+    /// Output row keys preserve the surviving input row keys.
     Filter {
         /// Input table.
         input: TableId,
@@ -197,6 +199,8 @@ pub enum Transform {
         columns: Vec<ColumnId>,
     },
     /// Select a subset of columns.
+    ///
+    /// Output row keys preserve input row keys.
     Project {
         /// Input table.
         input: TableId,
@@ -206,6 +210,8 @@ pub enum Transform {
         columns: Vec<ColumnId>,
     },
     /// Reorder rows by a numeric key column.
+    ///
+    /// Output row keys move with their rows; row identity is preserved.
     Sort {
         /// Input table.
         input: TableId,
@@ -221,6 +227,7 @@ pub enum Transform {
     /// Compute one derived numeric column from a narrow arithmetic expression.
     ///
     /// Output columns are `columns` (in order) followed by `output`.
+    /// Output row keys preserve input row keys.
     Calculate {
         /// Input table.
         input: TableId,
@@ -236,6 +243,7 @@ pub enum Transform {
     /// Group rows by one or more keys, compute aggregates, and write the results back per row.
     ///
     /// Output columns are `columns` (in order) followed by the `fields` outputs (in order).
+    /// Output row keys preserve input row keys.
     JoinAggregate {
         /// Input table.
         input: TableId,
@@ -251,6 +259,7 @@ pub enum Transform {
     /// Group rows by one or more key columns and compute aggregates.
     ///
     /// Output columns are `group_by` (in order) followed by the `fields` outputs (in order).
+    /// Output row keys are derived from the group key values.
     Aggregate {
         /// Input table.
         input: TableId,
@@ -264,6 +273,7 @@ pub enum Transform {
     /// Bin a numeric column into fixed-width buckets.
     ///
     /// This is a v0 placeholder: we want the IR shape before committing to all bin options.
+    /// Output row keys preserve input row keys; the bin start is a derived column.
     Bin {
         /// Input table.
         input: TableId,
@@ -281,6 +291,7 @@ pub enum Transform {
     /// Fold several numeric columns into repeated rows with a numeric slot id and folded value.
     ///
     /// Output columns are `columns` (in order) followed by `output_key`, `output_value`.
+    /// Output row keys are derived from the input row key and folded field slot.
     Fold {
         /// Input table.
         input: TableId,
@@ -298,6 +309,7 @@ pub enum Transform {
     /// Enrich rows by looking up values from another table on one numeric key.
     ///
     /// Output columns are `columns` (in order) followed by the `fields` outputs (in order).
+    /// Output row keys preserve input row keys.
     Lookup {
         /// Input table.
         input: TableId,
@@ -317,6 +329,7 @@ pub enum Transform {
     /// Group rows and widen a numeric pivot key into explicit output columns.
     ///
     /// Output columns are `group_by` (in order) followed by the `values` outputs (in order).
+    /// Output row keys are derived from the group key values.
     Pivot {
         /// Input table.
         input: TableId,
@@ -336,6 +349,7 @@ pub enum Transform {
     /// Compute simple window values over sorted row partitions and write them per row.
     ///
     /// Output columns are `columns` (in order) followed by the `fields` outputs (in order).
+    /// Output row keys preserve input row keys.
     Window {
         /// Input table.
         input: TableId,
@@ -362,6 +376,8 @@ pub enum Transform {
     /// - Negative values are stacked downward from 0, positive values upward from 0.
     ///
     /// Output columns are `columns` (in order) followed by `output_start`, `output_end`.
+    /// Output row keys preserve input row keys; optional stack sorting affects layout, not row
+    /// order.
     Stack {
         /// Input table.
         input: TableId,
