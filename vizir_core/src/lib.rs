@@ -72,6 +72,26 @@ impl MarkId {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ColumnId(pub u32);
 
+/// Physical value lane for a table column.
+///
+/// This is intentionally about storage/access type, not authored visualization semantics. A
+/// [`ColumnType::F64`] column may still be used as a quantitative value, category key, or
+/// timestamp-seconds lane by higher layers. Keeping the lanes typed avoids a shapeless dynamic
+/// value enum while still allowing non-numeric data to enter the runtime.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum ColumnType {
+    /// 64-bit floating point values.
+    F64,
+    /// 64-bit signed integer values.
+    I64,
+    /// 64-bit unsigned integer values.
+    U64,
+    /// Boolean values.
+    Bool,
+    /// UTF-8 text values.
+    Text,
+}
+
 /// Semantic role for a mark.
 ///
 /// Roles are intentionally static strings rather than a closed enum. `vizir_core` carries the
@@ -286,20 +306,58 @@ impl Table {
     pub fn row_key(&self, row: usize) -> Option<u64> {
         self.row_keys.get(row).copied()
     }
+
+    /// Return the physical value type for a column, if known.
+    pub fn column_type(&self, col: ColumnId) -> Option<ColumnType> {
+        self.data.as_deref()?.column_type(col)
+    }
 }
 
-/// Optional columnar access for table-driven mark encodings.
+/// Optional typed columnar access for table-driven mark encodings.
 ///
-/// v0: only `f64` is supported because it's enough for basic charts (positions, sizes).
-///
-/// To use this, implement `TableData` on your column store and set [`Table::data`]. Computed mark
-/// encodings can read values via [`EvalCtx::table_f64`].
+/// This is a small typed-lane interface, not a table engine. Implementors expose whichever column
+/// accessors they support and can optionally report a [`ColumnType`] for each column. Numeric chart
+/// code currently reads via [`Self::get_f64`] and [`EvalCtx::table_f64`], while future authored
+/// layers can use text, integer, and boolean lanes without introducing a dynamic value enum.
 pub trait TableData: fmt::Debug {
     /// Number of rows available via this accessor.
     fn row_count(&self) -> usize;
 
-    /// Return a numeric value for a given row/column.
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64>;
+    /// Return the physical value type for a column, if known.
+    fn column_type(&self, col: ColumnId) -> Option<ColumnType> {
+        let _ = col;
+        None
+    }
+
+    /// Return an `f64` value for a given row/column.
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        let _ = (row, col);
+        None
+    }
+
+    /// Return an `i64` value for a given row/column.
+    fn get_i64(&self, row: usize, col: ColumnId) -> Option<i64> {
+        let _ = (row, col);
+        None
+    }
+
+    /// Return a `u64` value for a given row/column.
+    fn get_u64(&self, row: usize, col: ColumnId) -> Option<u64> {
+        let _ = (row, col);
+        None
+    }
+
+    /// Return a `bool` value for a given row/column.
+    fn get_bool(&self, row: usize, col: ColumnId) -> Option<bool> {
+        let _ = (row, col);
+        None
+    }
+
+    /// Return a UTF-8 text value for a given row/column.
+    fn get_str(&self, row: usize, col: ColumnId) -> Option<&str> {
+        let _ = (row, col);
+        None
+    }
 }
 
 /// Type-erased access to a [`Signal`] for storage in a scene.
@@ -1456,6 +1514,13 @@ impl<'a> EvalCtx<'a> {
     pub fn table_version(&self, id: TableId) -> Option<Version> {
         self.tables.get(&id).map(|t| t.version)
     }
+
+    /// Return the physical value type for a table column, if known.
+    pub fn table_column_type(&self, table: TableId, col: ColumnId) -> Option<ColumnType> {
+        let t = self.tables.get(&table)?;
+        t.column_type(col)
+    }
+
     /// Return the current version of a signal, if present.
     pub fn signal_version(&self, id: SignalId) -> Option<Version> {
         self.signals.get(&id).map(|s| s.version())
@@ -1472,7 +1537,35 @@ impl<'a> EvalCtx<'a> {
     pub fn table_f64(&self, table: TableId, row: usize, col: ColumnId) -> Option<f64> {
         let t = self.tables.get(&table)?;
         let data = t.data.as_deref()?;
-        data.f64(row, col)
+        data.get_f64(row, col)
+    }
+
+    /// Read a signed integer table value, if a table data accessor is present.
+    pub fn table_i64(&self, table: TableId, row: usize, col: ColumnId) -> Option<i64> {
+        let t = self.tables.get(&table)?;
+        let data = t.data.as_deref()?;
+        data.get_i64(row, col)
+    }
+
+    /// Read an unsigned integer table value, if a table data accessor is present.
+    pub fn table_u64(&self, table: TableId, row: usize, col: ColumnId) -> Option<u64> {
+        let t = self.tables.get(&table)?;
+        let data = t.data.as_deref()?;
+        data.get_u64(row, col)
+    }
+
+    /// Read a boolean table value, if a table data accessor is present.
+    pub fn table_bool(&self, table: TableId, row: usize, col: ColumnId) -> Option<bool> {
+        let t = self.tables.get(&table)?;
+        let data = t.data.as_deref()?;
+        data.get_bool(row, col)
+    }
+
+    /// Read a UTF-8 text table value, if a table data accessor is present.
+    pub fn table_str(&self, table: TableId, row: usize, col: ColumnId) -> Option<&str> {
+        let t = self.tables.get(&table)?;
+        let data = t.data.as_deref()?;
+        data.get_str(row, col)
     }
 
     /// Return the current table row count.
@@ -2189,9 +2282,49 @@ mod tests {
             self.values.len()
         }
 
-        fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        fn column_type(&self, col: ColumnId) -> Option<ColumnType> {
+            (col == ColumnId(0)).then_some(ColumnType::F64)
+        }
+
+        fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
             if col == ColumnId(0) {
                 self.values.get(row).copied()
+            } else {
+                None
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct MixedCols {
+        names: Vec<String>,
+        flags: Vec<bool>,
+    }
+
+    impl TableData for MixedCols {
+        fn row_count(&self) -> usize {
+            self.names.len().min(self.flags.len())
+        }
+
+        fn column_type(&self, col: ColumnId) -> Option<ColumnType> {
+            match col {
+                ColumnId(0) => Some(ColumnType::Text),
+                ColumnId(1) => Some(ColumnType::Bool),
+                _ => None,
+            }
+        }
+
+        fn get_bool(&self, row: usize, col: ColumnId) -> Option<bool> {
+            if col == ColumnId(1) {
+                self.flags.get(row).copied()
+            } else {
+                None
+            }
+        }
+
+        fn get_str(&self, row: usize, col: ColumnId) -> Option<&str> {
+            if col == ColumnId(0) {
+                self.names.get(row).map(String::as_str)
             } else {
                 None
             }
@@ -2337,6 +2470,37 @@ mod tests {
         };
         assert_eq!(old.rect.x0, 4.0);
         assert_eq!(new.rect.x0, 6.0);
+    }
+
+    #[test]
+    fn table_data_exposes_typed_lanes() {
+        let mut scene = Scene::new();
+        let table = TableId(7);
+        scene.set_table_row_keys(table, Vec::from([1, 2]));
+        scene.set_table_data(
+            table,
+            Some(Box::new(MixedCols {
+                names: Vec::from([String::from("alpha"), String::from("beta")]),
+                flags: Vec::from([true, false]),
+            })),
+        );
+
+        let ctx = EvalCtx {
+            tables: &scene.tables,
+            signals: &scene.signals,
+        };
+
+        assert_eq!(
+            ctx.table_column_type(table, ColumnId(0)),
+            Some(ColumnType::Text)
+        );
+        assert_eq!(
+            ctx.table_column_type(table, ColumnId(1)),
+            Some(ColumnType::Bool)
+        );
+        assert_eq!(ctx.table_str(table, 1, ColumnId(0)), Some("beta"));
+        assert_eq!(ctx.table_bool(table, 0, ColumnId(1)), Some(true));
+        assert_eq!(ctx.table_f64(table, 0, ColumnId(0)), None);
     }
 
     #[test]

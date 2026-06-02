@@ -107,7 +107,7 @@ impl Program {
 
                     let mut row_indices = Vec::new();
                     for row in 0..frame.row_count() {
-                        let v = frame.f64(row, predicate.col).unwrap_or(f64::NAN);
+                        let v = frame.get_f64(row, predicate.col).unwrap_or(f64::NAN);
                         if predicate.eval(v) {
                             row_indices.push(row);
                         }
@@ -473,7 +473,7 @@ impl Program {
                     for row in 0..frame.row_count() {
                         for (slot, &field) in fields.iter().enumerate() {
                             folded_key.push(slot as f64);
-                            folded_value.push(frame.f64(row, field).unwrap_or(f64::NAN));
+                            folded_value.push(frame.get_f64(row, field).unwrap_or(f64::NAN));
                             row_keys.push(hash_group_key(&[frame.row_keys[row], slot as u64]));
                         }
                     }
@@ -514,7 +514,7 @@ impl Program {
 
                     let mut lookup_index: HashMap<u64, usize> = HashMap::new();
                     for row in 0..lookup.row_count() {
-                        let bits = lookup.f64(row, *from_key).unwrap_or(f64::NAN).to_bits();
+                        let bits = lookup.get_f64(row, *from_key).unwrap_or(f64::NAN).to_bits();
                         if lookup_index.insert(bits, row).is_some() {
                             return Err(ExecutionError::InvalidTransform);
                         }
@@ -533,11 +533,11 @@ impl Program {
                     let mut lookup_values: Vec<Vec<f64>> =
                         vec![vec![f64::NAN; frame.row_count()]; fields.len()];
                     for (row, _) in frame.row_keys.iter().enumerate() {
-                        let bits = frame.f64(row, *key).unwrap_or(f64::NAN).to_bits();
+                        let bits = frame.get_f64(row, *key).unwrap_or(f64::NAN).to_bits();
                         if let Some(&lookup_row) = lookup_index.get(&bits) {
                             for (fi, field) in fields.iter().enumerate() {
                                 lookup_values[fi][row] =
-                                    lookup.f64(lookup_row, field.input).unwrap_or(f64::NAN);
+                                    lookup.get_f64(lookup_row, field.input).unwrap_or(f64::NAN);
                             }
                         }
                     }
@@ -756,7 +756,7 @@ impl Program {
                     for row in 0..frame.row_count() {
                         let mut key: Vec<u64> = Vec::with_capacity(group_by.len());
                         for &c in group_by {
-                            let v = frame.f64(row, c).unwrap_or(f64::NAN);
+                            let v = frame.get_f64(row, c).unwrap_or(f64::NAN);
                             key.push(v.to_bits());
                         }
                         groups.entry(key).or_default().push(row);
@@ -1163,7 +1163,7 @@ fn validate_derived_output_columns(
 fn frame_group_key(frame: &TableFrame, row: usize, group_by: &[ColumnId]) -> Vec<u64> {
     let mut key = Vec::with_capacity(group_by.len());
     for &col in group_by {
-        key.push(frame.f64(row, col).unwrap_or(f64::NAN).to_bits());
+        key.push(frame.get_f64(row, col).unwrap_or(f64::NAN).to_bits());
     }
     key
 }
@@ -1181,7 +1181,7 @@ fn build_aggregate_groups(
         let key = frame_group_key(frame, row, group_by);
         let mut group_vals: Vec<f64> = Vec::with_capacity(group_by.len());
         for &col in group_by {
-            group_vals.push(frame.f64(row, col).unwrap_or(f64::NAN));
+            group_vals.push(frame.get_f64(row, col).unwrap_or(f64::NAN));
         }
 
         let idx = match groups.get(&key).copied() {
@@ -1204,7 +1204,7 @@ fn build_aggregate_groups(
 
         let acc = &mut accs[idx];
         for (fi, field) in fields.iter().enumerate() {
-            let value = frame.f64(row, field.input).unwrap_or(f64::NAN);
+            let value = frame.get_f64(row, field.input).unwrap_or(f64::NAN);
             match field.op {
                 AggregateOp::Count => {
                     acc.count[fi] = acc.count[fi].saturating_add(1);
@@ -1264,7 +1264,7 @@ fn build_pivot_groups(
             None => {
                 let mut group_vals = Vec::with_capacity(group_by.len());
                 for &col in group_by {
-                    group_vals.push(frame.f64(row, col).unwrap_or(f64::NAN));
+                    group_vals.push(frame.get_f64(row, col).unwrap_or(f64::NAN));
                 }
 
                 let i = accs.len();
@@ -1287,14 +1287,14 @@ fn build_pivot_groups(
             }
         };
 
-        let pivot_bits = frame.f64(row, pivot).unwrap_or(f64::NAN).to_bits();
+        let pivot_bits = frame.get_f64(row, pivot).unwrap_or(f64::NAN).to_bits();
         let Some(&slot) = slot_index.get(&pivot_bits) else {
             continue;
         };
         accumulate_pivot_value(
             &mut accs[idx].accumulators[slot],
             op,
-            frame.f64(row, value).unwrap_or(f64::NAN),
+            frame.get_f64(row, value).unwrap_or(f64::NAN),
         );
     }
 
@@ -1396,7 +1396,7 @@ fn pivot_slot_value(acc: &PivotAccumulator, op: AggregateOp) -> f64 {
 
 fn evaluate_calculate_operand(frame: &TableFrame, row: usize, operand: CalculateOperand) -> f64 {
     match operand {
-        CalculateOperand::Column(col) => frame.f64(row, col).unwrap_or(f64::NAN),
+        CalculateOperand::Column(col) => frame.get_f64(row, col).unwrap_or(f64::NAN),
         CalculateOperand::Constant(value) => value,
     }
 }

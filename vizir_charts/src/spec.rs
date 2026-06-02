@@ -2790,21 +2790,41 @@ impl PointLayer {
             .enumerate()
             .map(|(row, row_key)| {
                 let size = size_col
-                    .and_then(|col| table.data.as_deref().and_then(|data| data.f64(row, col)))
+                    .and_then(|col| {
+                        table
+                            .data
+                            .as_deref()
+                            .and_then(|data| data.get_f64(row, col))
+                    })
                     .map(|value| point_size_for_value(value, size_domain, default_size))
                     .unwrap_or(default_size);
                 let symbol = shape_col
-                    .and_then(|col| table.data.as_deref().and_then(|data| data.f64(row, col)))
+                    .and_then(|col| {
+                        table
+                            .data
+                            .as_deref()
+                            .and_then(|data| data.get_f64(row, col))
+                    })
                     .map(|value| symbol_for_shape_value(value, &shape_map, default_symbol))
                     .unwrap_or(default_symbol);
                 let stroke = stroke_col
-                    .and_then(|col| table.data.as_deref().and_then(|data| data.f64(row, col)))
+                    .and_then(|col| {
+                        table
+                            .data
+                            .as_deref()
+                            .and_then(|data| data.get_f64(row, col))
+                    })
                     .map(|value| {
                         brush_for_series_value(value, &stroke_map, constant_stroke.clone())
                     })
                     .unwrap_or_else(|| constant_stroke.clone());
                 let stroke_width = stroke_width_col
-                    .and_then(|col| table.data.as_deref().and_then(|data| data.f64(row, col)))
+                    .and_then(|col| {
+                        table
+                            .data
+                            .as_deref()
+                            .and_then(|data| data.get_f64(row, col))
+                    })
                     .map(|value| {
                         stroke_width_for_value(value, stroke_width_domain, default_stroke_width)
                     })
@@ -3028,7 +3048,7 @@ impl RuleLayer {
                                     table
                                         .data
                                         .as_deref()
-                                        .and_then(|data| data.f64(row, x))
+                                        .and_then(|data| data.get_f64(row, x))
                                         .unwrap_or(0.0),
                                 ),
                                 plot.y0,
@@ -3055,7 +3075,7 @@ impl RuleLayer {
                                 table
                                     .data
                                     .as_deref()
-                                    .and_then(|data| data.f64(row, y))
+                                    .and_then(|data| data.get_f64(row, y))
                                     .unwrap_or(0.0),
                             ),
                             plot.x0,
@@ -3667,7 +3687,7 @@ fn infer_frame_domain_pair(
     let mut max = f64::NEG_INFINITY;
     for col in [Some(primary), secondary].into_iter().flatten() {
         for row in 0..frame.row_count() {
-            let Some(v) = frame.f64(row, col) else {
+            let Some(v) = frame.get_f64(row, col) else {
                 continue;
             };
             if !v.is_finite() {
@@ -3746,7 +3766,7 @@ fn category_labels(frame: &TableFrame, col: ColumnId, kind: FieldKind) -> Vec<St
 fn distinct_values(frame: &TableFrame, col: ColumnId) -> Vec<f64> {
     let mut values = Vec::new();
     for row in 0..frame.row_count() {
-        let Some(v) = frame.f64(row, col) else {
+        let Some(v) = frame.get_f64(row, col) else {
             continue;
         };
         if !v.is_finite() {
@@ -4750,7 +4770,7 @@ mod tests {
             self.a.len().min(self.b.len())
         }
 
-        fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
             match col {
                 ColumnId(0) => self.a.get(row).copied(),
                 ColumnId(1) => self.b.get(row).copied(),
@@ -4771,7 +4791,7 @@ mod tests {
             self.a.len().min(self.b.len()).min(self.c.len())
         }
 
-        fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
             match col {
                 ColumnId(0) => self.a.get(row).copied(),
                 ColumnId(1) => self.b.get(row).copied(),
@@ -4798,7 +4818,7 @@ mod tests {
                 .min(self.d.len())
         }
 
-        fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
             match col {
                 ColumnId(0) => self.a.get(row).copied(),
                 ColumnId(1) => self.b.get(row).copied(),
@@ -4884,9 +4904,9 @@ mod tests {
             .get(&lowered.output_table())
             .expect("calculated output table");
         let data = calculated.data.as_deref().expect("calculated table data");
-        assert_eq!(data.f64(0, ColumnId(10)), Some(2.5));
-        assert_eq!(data.f64(1, ColumnId(10)), Some(5.0));
-        assert_eq!(data.f64(2, ColumnId(10)), Some(7.5));
+        assert_eq!(data.get_f64(0, ColumnId(10)), Some(2.5));
+        assert_eq!(data.get_f64(1, ColumnId(10)), Some(5.0));
+        assert_eq!(data.get_f64(2, ColumnId(10)), Some(7.5));
 
         let (_layout, marks) = lowered
             .marks(&scene, &HeuristicTextMeasurer)
@@ -4938,10 +4958,10 @@ mod tests {
             .get(&lowered.output_table())
             .expect("joinaggregate output table");
         let data = joined.data.as_deref().expect("joinaggregate table data");
-        assert_eq!(data.f64(0, ColumnId(10)), Some(4.0));
-        assert_eq!(data.f64(2, ColumnId(10)), Some(4.0));
-        assert_eq!(data.f64(3, ColumnId(10)), Some(5.0));
-        assert_eq!(data.f64(5, ColumnId(10)), Some(5.0));
+        assert_eq!(data.get_f64(0, ColumnId(10)), Some(4.0));
+        assert_eq!(data.get_f64(2, ColumnId(10)), Some(4.0));
+        assert_eq!(data.get_f64(3, ColumnId(10)), Some(5.0));
+        assert_eq!(data.get_f64(5, ColumnId(10)), Some(5.0));
     }
 
     #[test]
@@ -5033,13 +5053,13 @@ mod tests {
             .get(&lowered.output_table())
             .expect("lookup output table");
         let data = enriched.data.as_deref().expect("lookup table data");
-        assert_eq!(data.f64(0, ColumnId(10)), Some(4.0));
+        assert_eq!(data.get_f64(0, ColumnId(10)), Some(4.0));
         assert!(
-            data.f64(1, ColumnId(10))
+            data.get_f64(1, ColumnId(10))
                 .expect("missing lookup value")
                 .is_nan()
         );
-        assert_eq!(data.f64(2, ColumnId(10)), Some(6.0));
+        assert_eq!(data.get_f64(2, ColumnId(10)), Some(6.0));
     }
 
     #[test]
@@ -5089,10 +5109,10 @@ mod tests {
             .expect("pivot output table");
         let data = pivoted.data.as_deref().expect("pivot table data");
         assert_eq!(pivoted.row_keys.len(), 3);
-        assert_eq!(data.f64(0, ColumnId(10)), Some(2.0));
-        assert_eq!(data.f64(2, ColumnId(10)), Some(4.0));
-        assert_eq!(data.f64(0, ColumnId(11)), Some(4.0));
-        assert_eq!(data.f64(2, ColumnId(11)), Some(6.0));
+        assert_eq!(data.get_f64(0, ColumnId(10)), Some(2.0));
+        assert_eq!(data.get_f64(2, ColumnId(10)), Some(4.0));
+        assert_eq!(data.get_f64(0, ColumnId(11)), Some(4.0));
+        assert_eq!(data.get_f64(2, ColumnId(11)), Some(6.0));
     }
 
     #[test]
@@ -5190,7 +5210,7 @@ mod tests {
             .expect("window output table");
         let data = ranked.data.as_deref().expect("window table data");
         let ranks = (0..data.row_count())
-            .map(|row| data.f64(row, ColumnId(10)).expect("rank value"))
+            .map(|row| data.get_f64(row, ColumnId(10)).expect("rank value"))
             .collect::<Vec<_>>();
         assert_eq!(ranks, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
     }
@@ -5583,9 +5603,9 @@ mod tests {
             .get(&lowered.output_table())
             .expect("sorted table");
         let data = sorted.data.as_deref().expect("sorted data");
-        assert_eq!(data.f64(0, ColumnId(0)), Some(0.0));
-        assert_eq!(data.f64(1, ColumnId(0)), Some(1.0));
-        assert_eq!(data.f64(2, ColumnId(0)), Some(2.0));
+        assert_eq!(data.get_f64(0, ColumnId(0)), Some(0.0));
+        assert_eq!(data.get_f64(1, ColumnId(0)), Some(1.0));
+        assert_eq!(data.get_f64(2, ColumnId(0)), Some(2.0));
 
         let (_layout, marks) = lowered
             .marks(&scene, &HeuristicTextMeasurer)

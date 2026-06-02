@@ -120,7 +120,7 @@ impl TableData for BarValues {
         self.y.len()
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.y.get(row).copied(),
             _ => None,
@@ -139,7 +139,7 @@ impl TableData for TwoCols {
         self.a.len().min(self.b.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.a.get(row).copied(),
             ColumnId(1) => self.b.get(row).copied(),
@@ -504,7 +504,7 @@ impl TableData for CategoryValues {
         self.cat.len().min(self.v.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.cat.get(row).copied(),
             ColumnId(1) => self.v.get(row).copied(),
@@ -558,8 +558,8 @@ fn aggregate_section() -> ScenarioSection {
     let mut labels: Vec<String> = Vec::with_capacity(n);
     if let Some(data) = scene.tables[&agg_id].data.as_deref() {
         for row in 0..n {
-            let cat = data.f64(row, cat_col).unwrap_or(f64::NAN);
-            let sum = data.f64(row, sum_col).unwrap_or(0.0);
+            let cat = data.get_f64(row, cat_col).unwrap_or(f64::NAN);
+            let sum = data.get_f64(row, sum_col).unwrap_or(0.0);
             max_sum = max_sum.max(sum);
             labels.push(format!("cat={cat:.0}"));
         }
@@ -1582,7 +1582,7 @@ impl TableData for PointShapeSizeValues {
             .min(self.series.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.x.get(row).copied(),
             ColumnId(1) => self.y.get(row).copied(),
@@ -1598,7 +1598,7 @@ impl TableData for PointOpacityValues {
         self.x.len().min(self.y.len()).min(self.opacity.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.x.get(row).copied(),
             ColumnId(1) => self.y.get(row).copied(),
@@ -1613,7 +1613,7 @@ impl TableData for CalculateValues {
         self.x.len().min(self.base.len()).min(self.delta.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.x.get(row).copied(),
             ColumnId(1) => self.base.get(row).copied(),
@@ -1628,7 +1628,7 @@ impl TableData for SeriesPointValues {
         self.x.len().min(self.value.len()).min(self.series.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.x.get(row).copied(),
             ColumnId(1) => self.value.get(row).copied(),
@@ -1647,7 +1647,7 @@ impl TableData for FoldValues {
             .min(self.q3.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.category.get(row).copied(),
             ColumnId(1) => self.q1.get(row).copied(),
@@ -1663,7 +1663,7 @@ impl TableData for RankSeriesValues {
         self.value.len().min(self.series.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.value.get(row).copied(),
             ColumnId(1) => self.series.get(row).copied(),
@@ -1681,7 +1681,7 @@ impl TableData for PointStrokeValues {
             .min(self.weight.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.x.get(row).copied(),
             ColumnId(1) => self.y.get(row).copied(),
@@ -1700,7 +1700,7 @@ impl TableData for GroupedBarValues {
             .min(self.series.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.category.get(row).copied(),
             ColumnId(1) => self.value.get(row).copied(),
@@ -1719,7 +1719,7 @@ impl TableData for StyledLayerValues {
             .min(self.line.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.x.get(row).copied(),
             ColumnId(1) => self.high.get(row).copied(),
@@ -1735,7 +1735,7 @@ impl TableData for LineSeriesValues {
         self.x.len().min(self.y.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.x.get(row).copied(),
             ColumnId(1) => self.y.get(row).copied(),
@@ -1749,7 +1749,7 @@ impl TableData for LayerOverlayValues {
         self.x.len().min(self.area_top.len()).min(self.line_y.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.x.get(row).copied(),
             ColumnId(1) => self.area_top.get(row).copied(),
@@ -1771,7 +1771,7 @@ impl TableData for SeriesValues {
         self.x.len().min(self.y.len()).min(self.series.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.x.get(row).copied(),
             ColumnId(1) => self.y.get(row).copied(),
@@ -1833,7 +1833,7 @@ impl TableData for RibbonValues {
             .min(self.y2.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.x.get(row).copied(),
             ColumnId(1) => self.y.get(row).copied(),
@@ -1892,7 +1892,7 @@ impl TableData for HistogramValues {
         self.v.len()
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.v.get(row).copied(),
             _ => None,
@@ -1964,8 +1964,8 @@ fn histogram_section() -> ScenarioSection {
     let mut labels: Vec<String> = Vec::with_capacity(n);
     if let Some(data) = scene.tables[&sorted_id].data.as_deref() {
         for row in 0..n {
-            let bin0 = data.f64(row, bin0_col).unwrap_or(f64::NAN);
-            let count = data.f64(row, count_col).unwrap_or(0.0);
+            let bin0 = data.get_f64(row, bin0_col).unwrap_or(f64::NAN);
+            let count = data.get_f64(row, count_col).unwrap_or(0.0);
             max_count = max_count.max(count);
             labels.push(format!("{bin0:.0}–{:.0}", bin0 + step));
         }
@@ -2060,7 +2060,7 @@ impl TableData for StackValues {
         self.cat.len().min(self.series.len()).min(self.v.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.cat.get(row).copied(),
             ColumnId(1) => self.series.get(row).copied(),
@@ -2117,8 +2117,8 @@ fn stack_section() -> ScenarioSection {
     let mut max_y = 0.0_f64;
     if let Some(data) = scene.tables[&stacked_id].data.as_deref() {
         for row in 0..n_rows {
-            let y0 = data.f64(row, y0_col).unwrap_or(f64::NAN);
-            let y1 = data.f64(row, y1_col).unwrap_or(f64::NAN);
+            let y0 = data.get_f64(row, y0_col).unwrap_or(f64::NAN);
+            let y1 = data.get_f64(row, y1_col).unwrap_or(f64::NAN);
             if y0.is_finite() && y1.is_finite() {
                 min_y = min_y.min(y0.min(y1));
                 max_y = max_y.max(y0.max(y1));
@@ -2248,7 +2248,7 @@ impl TableData for StackedAreaSourceValues {
         self.x.len().min(self.series.len()).min(self.y.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.x.get(row).copied(),
             ColumnId(1) => self.series.get(row).copied(),
@@ -2325,7 +2325,7 @@ fn stacked_area_section() -> ScenarioSection {
     if let Some(data) = scene.tables[&stacked_id].data.as_deref() {
         let n = scene.tables[&stacked_id].row_keys.len();
         for row in 0..n {
-            let y1 = data.f64(row, y1_col).unwrap_or(f64::NAN);
+            let y1 = data.get_f64(row, y1_col).unwrap_or(f64::NAN);
             if y1.is_finite() {
                 max_y1 = max_y1.max(y1);
             }
@@ -2456,7 +2456,7 @@ impl TableData for PercentStackValues {
         self.cat.len().min(self.series.len()).min(self.v.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.cat.get(row).copied(),
             ColumnId(1) => self.series.get(row).copied(),
@@ -2592,7 +2592,7 @@ impl TableData for StreamValues {
         self.x.len().min(self.series.len()).min(self.y.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.x.get(row).copied(),
             ColumnId(1) => self.series.get(row).copied(),
@@ -2669,8 +2669,8 @@ fn streamgraph_section() -> ScenarioSection {
         if let Some(data) = scene.tables[&stacked_id].data.as_deref() {
             let n = scene.tables[&stacked_id].row_keys.len();
             for row in 0..n {
-                let y0 = data.f64(row, y0_col).unwrap_or(f64::NAN);
-                let y1 = data.f64(row, y1_col).unwrap_or(f64::NAN);
+                let y0 = data.get_f64(row, y0_col).unwrap_or(f64::NAN);
+                let y1 = data.get_f64(row, y1_col).unwrap_or(f64::NAN);
                 if y0.is_finite() {
                     min_y = min_y.min(y0);
                 }
@@ -2833,7 +2833,7 @@ impl TableData for AngleValues {
         self.x.len().min(self.y.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.x.get(row).copied(),
             ColumnId(1) => self.y.get(row).copied(),
@@ -3252,7 +3252,7 @@ impl TableData for ScatterValues {
         self.x.len().min(self.y.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.x.get(row).copied(),
             ColumnId(1) => self.y.get(row).copied(),

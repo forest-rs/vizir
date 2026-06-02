@@ -373,7 +373,7 @@ mod tests {
             self.a.len().min(self.b.len())
         }
 
-        fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
             match col {
                 ColumnId(0) => self.a.get(row).copied(),
                 ColumnId(1) => self.b.get(row).copied(),

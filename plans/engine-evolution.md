@@ -8,6 +8,8 @@ charting layer and future Vega/Vega-Lite lowering.
 ## Current state
 
 - Tables/signals with versions.
+- `TableData` exposes typed lanes (`f64`, integers, bool, text) plus optional physical column type
+  reporting.
 - Marks with explicit deps and incremental per-encoding updates.
 - Diffs: `Enter/Update/Exit` with optional bounds (text bounds unknown).
 - Marks have an explicit `z_index` for rendering order; diffs carry z-index changes so renderers
@@ -15,15 +17,15 @@ charting layer and future Vega/Vega-Lite lowering.
 
 ## Staged milestones
 
-### M0: Tables v1→v2
+### M0: Tables v2 refinement
 
-- Decide the column interface shape (and how it interacts with `no_std`):
+- Refine the typed column interface shape (and how it interacts with `no_std`):
   - **Borrowed slices**: columns as `&[T]` obtained from a table handle.
     - Pros: fastest, simplest call sites, easy SIMD.
     - Cons: lifetime/threading constraints; hard to model partial updates/patched views.
-  - **Trait object accessor** (`dyn TableData`-ish) with typed getters and row count.
-    - Pros: flexible backing stores (custom, Arrow, DataFusion, generated).
-    - Cons: per-element virtual dispatch; harder to batch/SIMD; less “Rust-y” for fast paths.
+  - **Trait object accessor** (`dyn TableData`) with typed getters and row count.
+    - Current: flexible backing stores with per-cell typed getters.
+    - Next question: whether to expose optional contiguous typed slices for fast paths.
   - **Arrow(-ish)** (or Arrow2) as the eventual “real” table substrate.
     - Pros: interoperable; rich types; already has compute ecosystem.
     - Cons: dependency weight; `no_std` compatibility is nuanced; API churn risk.

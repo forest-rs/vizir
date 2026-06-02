@@ -36,7 +36,7 @@ Status meanings:
 | `point` | supported | Quantitative/temporal `x`, quantitative `y`, plus point-only `size` and `shape` channels |
 | `area` | supported | Plain area, categorical color-split area, ranged area via `y2`, paired-edge area via `x2` + `y2` |
 | `rule` | partial | Full-span threshold line from exactly one authored `x` or `y` channel; useful in layered overlays |
-| `text` | partial | Numeric text labels over shared x/y scales; text field formatting is supported, but string-backed text data is not |
+| `text` | partial | Numeric text labels over shared x/y scales; text field formatting is supported, but authored lowering does not yet consume text table lanes |
 | `rect`, `arc`, `tick`, `trail`, `image`, `geoshape` | missing | Some runtime/chart primitives exist, but not in authored spec lowering |
 
 ### Channels
@@ -135,7 +135,8 @@ Status meanings:
   `strokeWidth` must be quantitative.
 - `order` and `detail` are currently line/area-only, `detail` must be categorical, and
   `color + detail` is rejected.
-- `text` currently formats numeric columns only; string-backed table data is not in the runtime yet.
+- `text` currently formats numeric columns only in authored lowering; text table lanes exist in
+  `TableData` but are not consumed by the spec path yet.
 - The JSON/parser path is feature-gated and should stay narrower than the runtime until support is
   proven.
 

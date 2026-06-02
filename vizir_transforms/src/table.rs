@@ -6,7 +6,7 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use vizir_core::{ColumnId, Table, TableData, TableId};
+use vizir_core::{ColumnId, ColumnType, Table, TableData, TableId};
 
 /// Errors returned when building or using a [`TableFrame`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,7 +71,7 @@ impl TableFrame {
         for &col in &columns {
             let mut out = Vec::with_capacity(n);
             for row in 0..n {
-                out.push(data.f64(row, col).unwrap_or(f64::NAN));
+                out.push(data.get_f64(row, col).unwrap_or(f64::NAN));
             }
             cols.push(out);
         }
@@ -93,7 +93,7 @@ impl TableFrame {
     }
 
     /// Gets a numeric value for a row/col if both exist.
-    pub fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    pub fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         let ci = self.column_index(col)?;
         self.data.get(ci)?.get(row).copied()
     }
@@ -123,7 +123,11 @@ impl TableData for FrameData {
         self.data.first().map_or(0, |c| c.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn column_type(&self, col: ColumnId) -> Option<ColumnType> {
+        self.columns.contains(&col).then_some(ColumnType::F64)
+    }
+
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         let idx = self.columns.iter().position(|&c| c == col)?;
         self.data.get(idx)?.get(row).copied()
     }

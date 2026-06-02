@@ -10,7 +10,8 @@ Core rule: keep IO/backends as separate adapter crates.
 ## Current state
 
 - `vizir_core::Table` is versioned and can optionally store a `Box<dyn TableData>`.
-- `TableData` is minimal (`f64` reads only), sufficient for basic chart prototypes.
+- `TableData` is a small typed-lane interface with optional physical column type reporting.
+- Current chart and transform code still primarily consumes `f64` lanes.
 
 ## Principles
 
@@ -22,7 +23,7 @@ Core rule: keep IO/backends as separate adapter crates.
 
 - `vizir_io`
   - CSV parsing and small utilities (feature-gated `std` likely required).
-  - Output: a simple column store implementing `TableData`, or Arrow arrays.
+  - Output: a simple typed column store implementing `TableData`, or Arrow arrays.
 
 - `vizir_arrow`
   - Adapter layer for Apache Arrow columnar arrays.
@@ -44,7 +45,7 @@ Core rule: keep IO/backends as separate adapter crates.
 
 ### M1: Arrow adapter
 
-- Implement `TableData` over Arrow arrays for numeric columns.
+- Implement `TableData` over Arrow arrays for typed columns.
 - Define a stable mapping from column names → `ColumnId` (likely an interner in chart-layer code).
 
 ### M2: DataFusion executor (optional)
@@ -58,7 +59,8 @@ Core rule: keep IO/backends as separate adapter crates.
 
 - Which Arrow crate (arrow-rs vs arrow2) is best given `no_std`/feature constraints?
 - How do we manage schemas/column names across layers (tokens, interner, or string keys)?
-- Do we extend `TableData` beyond `f64` (strings/categories/timestamps), or add a separate typed column API?
+- Which non-numeric physical lanes need first-class authored-spec support first: text labels,
+  category keys, or timestamps?
 
 ## Related plans
 
