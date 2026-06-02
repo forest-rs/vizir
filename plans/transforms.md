@@ -8,13 +8,15 @@ useful for ergonomic Rust chart APIs.
 ## Current state
 
 - `vizir_core::Table`: row keys + table/column versions; `TableData` supports typed lanes.
-- No table diffs beyond row key reconciliation.
+- Core has semantic `TablePatch` values; transform patch propagation is currently bounded to
+  `Project`, with replacement fallback for other operators.
 - `vizir_transforms` provides a first transform IR + full-recompute executor for numeric columns:
   - `Filter`, `Project`, `Sort`, `Calculate`, `JoinAggregate`, `Aggregate`, `Bin`, `Fold`,
     `Lookup`, `Pivot`, `Window`, and `Stack` are implemented.
   - Transform row-key provenance is documented in the IR and covered by focused executor tests.
   - `TableFrame` extraction uses the optional bulk `f64` table view when available and falls back
     to per-cell reads.
+  - `Project` can propagate bounded row/column patches.
 
 ## Staged milestones
 

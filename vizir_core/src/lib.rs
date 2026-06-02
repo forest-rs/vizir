@@ -533,6 +533,48 @@ impl<'a> F64ColumnRef<'a> {
     }
 }
 
+/// Semantic table change description.
+///
+/// Patches are expressed in terms of stable row keys and [`ColumnId`]s, not storage buffers or
+/// row positions. This keeps patch propagation independent of the table backend.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TablePatch {
+    /// No observable table change.
+    Empty,
+    /// Rows with these stable keys were inserted.
+    RowsInserted {
+        /// Inserted row keys.
+        keys: Vec<u64>,
+    },
+    /// Rows with these stable keys were removed.
+    RowsRemoved {
+        /// Removed row keys.
+        keys: Vec<u64>,
+    },
+    /// Existing rows changed in the listed columns.
+    RowsUpdated {
+        /// Updated row keys.
+        keys: Vec<u64>,
+        /// Updated columns.
+        columns: Vec<ColumnId>,
+    },
+    /// One or more whole columns changed.
+    ColumnsUpdated {
+        /// Updated columns.
+        columns: Vec<ColumnId>,
+    },
+    /// The table changed in a way that is not represented by a bounded patch.
+    Replaced,
+}
+
+impl TablePatch {
+    /// Return `true` if this patch represents no observable table change.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        matches!(self, Self::Empty)
+    }
+}
+
 /// Optional typed columnar access for table-driven mark encodings.
 ///
 /// This is a small typed-lane interface, not a table engine. Implementors expose whichever column
@@ -2913,6 +2955,12 @@ mod tests {
         assert_eq!(table.column_version(ColumnId(0)), None);
         assert_eq!(table.column_version(ColumnId(1)), None);
         assert_eq!(table.table_column_version(ColumnId(0)), table.version);
+    }
+
+    #[test]
+    fn table_patch_empty_reports_no_observable_change() {
+        assert!(TablePatch::Empty.is_empty());
+        assert!(!TablePatch::RowsInserted { keys: Vec::new() }.is_empty());
     }
 
     #[test]

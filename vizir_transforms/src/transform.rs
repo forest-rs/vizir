@@ -5,7 +5,7 @@
 
 use alloc::vec::Vec;
 
-use vizir_core::{ColumnId, TableId};
+use vizir_core::{ColumnId, TableId, TablePatch};
 
 /// Stack baseline offset mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -403,4 +403,131 @@ pub enum Transform {
         /// Columns to carry through to the output table.
         columns: Vec<ColumnId>,
     },
+}
+
+impl Transform {
+    /// Propagate an input table patch to this transform's output table.
+    ///
+    /// The current bounded implementation supports [`Transform::Project`]. Other transforms
+    /// conservatively report [`TablePatch::Replaced`] for non-empty input patches until their
+    /// row/column semantics are implemented.
+    #[must_use]
+    pub fn propagate_patch(&self, patch: &TablePatch) -> TablePatch {
+        if patch.is_empty() {
+            return TablePatch::Empty;
+        }
+
+        match self {
+            Self::Project { columns, .. } => project_patch(columns, patch),
+            _ => TablePatch::Replaced,
+        }
+    }
+}
+
+fn project_patch(project_columns: &[ColumnId], patch: &TablePatch) -> TablePatch {
+    match patch {
+        TablePatch::Empty => TablePatch::Empty,
+        TablePatch::RowsInserted { keys } => TablePatch::RowsInserted { keys: keys.clone() },
+        TablePatch::RowsRemoved { keys } => TablePatch::RowsRemoved { keys: keys.clone() },
+        TablePatch::RowsUpdated { keys, columns } => {
+            let columns = projected_columns(project_columns, columns);
+            if columns.is_empty() {
+                TablePatch::Empty
+            } else {
+                TablePatch::RowsUpdated {
+                    keys: keys.clone(),
+                    columns,
+                }
+            }
+        }
+        TablePatch::ColumnsUpdated { columns } => {
+            let columns = projected_columns(project_columns, columns);
+            if columns.is_empty() {
+                TablePatch::Empty
+            } else {
+                TablePatch::ColumnsUpdated { columns }
+            }
+        }
+        TablePatch::Replaced => TablePatch::Replaced,
+    }
+}
+
+fn projected_columns(project_columns: &[ColumnId], changed_columns: &[ColumnId]) -> Vec<ColumnId> {
+    let mut out = Vec::new();
+    for &col in changed_columns {
+        if project_columns.contains(&col) && !out.contains(&col) {
+            out.push(col);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+
+    use super::*;
+
+    fn project() -> Transform {
+        Transform::Project {
+            input: TableId(1),
+            output: TableId(2),
+            columns: vec![ColumnId(0), ColumnId(2)],
+        }
+    }
+
+    #[test]
+    fn project_patch_filters_updated_columns() {
+        let patch = TablePatch::RowsUpdated {
+            keys: vec![10, 11],
+            columns: vec![ColumnId(2), ColumnId(1), ColumnId(2)],
+        };
+
+        assert_eq!(
+            project().propagate_patch(&patch),
+            TablePatch::RowsUpdated {
+                keys: vec![10, 11],
+                columns: vec![ColumnId(2)]
+            }
+        );
+    }
+
+    #[test]
+    fn project_patch_drops_unprojected_column_updates() {
+        let patch = TablePatch::ColumnsUpdated {
+            columns: vec![ColumnId(1)],
+        };
+
+        assert_eq!(project().propagate_patch(&patch), TablePatch::Empty);
+    }
+
+    #[test]
+    fn project_patch_preserves_row_insertions() {
+        let patch = TablePatch::RowsInserted { keys: vec![10, 11] };
+
+        assert_eq!(project().propagate_patch(&patch), patch);
+    }
+
+    #[test]
+    fn unsupported_transform_patch_falls_back_to_replaced() {
+        let transform = Transform::Filter {
+            input: TableId(1),
+            output: TableId(2),
+            predicate: Predicate {
+                col: ColumnId(0),
+                op: CompareOp::Gt,
+                value: 0.0,
+            },
+            columns: vec![ColumnId(0)],
+        };
+
+        assert_eq!(
+            transform.propagate_patch(&TablePatch::RowsInserted { keys: vec![10] }),
+            TablePatch::Replaced
+        );
+        assert_eq!(
+            transform.propagate_patch(&TablePatch::Empty),
+            TablePatch::Empty
+        );
+    }
 }

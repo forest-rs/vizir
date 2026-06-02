@@ -223,6 +223,8 @@ baseline before adding incremental table patches.
 
 Current table-level versions are the coarse invalidation path. Optional column versions let
 `InputRef::TableCol` avoid unrelated column updates when callers provide per-column metadata.
+`TablePatch` describes bounded semantic table changes; `vizir_transforms` currently propagates the
+simple `Project` case and falls back to replacement for other operators.
 
 Target shape:
 
@@ -234,6 +236,7 @@ Sketch:
 
 ```rust
 pub enum TablePatch {
+    Empty,
     RowsInserted { keys: Vec<u64> },
     RowsRemoved { keys: Vec<u64> },
     RowsUpdated { keys: Vec<u64>, columns: Vec<ColumnId> },
@@ -369,8 +372,10 @@ Exit criteria:
 ### M5: Table Patches
 
 - Define `TablePatch`.
-- Decide whether patches live in `Scene`, transform executor state, or a future scheduler.
-- Add patch propagation for one simple transform, probably filter or calculate.
+- Add patch propagation for one simple transform.
+- Leave executor patch state and scheduling for a later slice.
+
+Status: done.
 
 Exit criteria:
 
@@ -388,14 +393,14 @@ Exit criteria:
 
 ## Next Implementation Slice
 
-The next code slice should be M5, not Arrow:
+The next code slice should be M6, not Arrow:
 
-1. Define the smallest useful `TablePatch` shape in core docs/API.
-2. Decide where pending patches live for the first executor slice.
-3. Add patch propagation for one simple transform, probably `Filter` or `Calculate`.
+1. Wire text table lanes into text marks for a minimal authored/runtime path.
+2. Keep text shaping and rich styling out of core; downstream should handle `styled_text` later.
+3. Decide only the minimal category/text representation needed for this slice.
 4. Keep storage-backend adapters out of this slice.
 
-This starts bounded updates without introducing a storage backend dependency.
+This validates non-numeric table lanes without pulling text layout into the core runtime.
 
 ## Risks
 

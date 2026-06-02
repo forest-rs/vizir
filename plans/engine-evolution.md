@@ -14,6 +14,8 @@ charting layer and future Vega/Vega-Lite lowering.
 - Transform outputs have documented row-key provenance for the current full-recompute operators.
 - `TableData` exposes typed lanes (`f64`, integers, bool, text), optional physical column type
   reporting, and an optional bulk `f64` view.
+- `TablePatch` describes semantic row/column changes; transform propagation currently covers
+  `Project` only.
 - Marks with explicit deps and incremental per-encoding updates.
 - Diffs: `Enter/Update/Exit` with optional bounds (text bounds unknown).
 - Marks have an explicit `z_index` for rendering order; diffs carry z-index changes so renderers

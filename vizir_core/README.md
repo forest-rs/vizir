@@ -2,7 +2,7 @@
 
 Minimal incremental visualization runtime core.
 
-Provides versioned `Table`/`Signal` inputs, table-column versions for narrow invalidation, stable `MarkId` identity, UI-neutral mark metadata, table schema metadata, typed table-data accessors with an optional bulk `f64` view, explicit dependency tracking, and `Enter/Update/Exit` diffs via `Scene::update`.
+Provides versioned `Table`/`Signal` inputs, table-column versions for narrow invalidation, semantic `TablePatch` descriptions, stable `MarkId` identity, UI-neutral mark metadata, table schema metadata, typed table-data accessors with an optional bulk `f64` view, explicit dependency tracking, and `Enter/Update/Exit` diffs via `Scene::update`.
 
 Computed encodings still have a low-level explicit `InputRef` escape hatch, but common table and signal constructors attach those dependencies mechanically. The chart/spec layers should prefer those helpers so closures and dependency lists do not drift apart.
 
