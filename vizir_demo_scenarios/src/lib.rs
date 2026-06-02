@@ -176,6 +176,11 @@ pub fn static_scenarios() -> &'static [StaticScenario] {
             gallery::lowered_json_bar_text_demo,
         ),
         StaticScenario::new(
+            "Lowered JSON Text Labels",
+            "A text chart from JSON using string-backed label data.",
+            gallery::lowered_json_text_labels_demo,
+        ),
+        StaticScenario::new(
             "Lowered JSON Point Size + Shape",
             "A point chart proving point-local size and shape channels.",
             gallery::lowered_json_point_shape_size_demo,
@@ -674,5 +679,32 @@ mod tests {
             assert!(frame.view.width() > 0.0, "{} view width", scenario.title);
             assert!(frame.view.height() > 0.0, "{} view height", scenario.title);
         }
+    }
+
+    #[test]
+    fn text_label_scenario_uses_string_data() {
+        let scenario = static_scenarios()
+            .iter()
+            .find(|scenario| scenario.title == "Lowered JSON Text Labels")
+            .expect("text label scenario");
+        let frame = scenario.build();
+        let labels: Vec<&str> = frame
+            .diffs
+            .iter()
+            .filter_map(|diff| {
+                let MarkDiff::Enter { new, .. } = diff else {
+                    return None;
+                };
+                let vizir_core::MarkPayload::Text(text) = &**new else {
+                    return None;
+                };
+                Some(text.text.as_str())
+            })
+            .collect();
+
+        assert!(labels.contains(&"alpha"));
+        assert!(labels.contains(&"beta"));
+        assert!(labels.contains(&"gamma"));
+        assert!(labels.contains(&"delta"));
     }
 }

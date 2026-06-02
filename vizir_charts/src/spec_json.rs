@@ -1371,6 +1371,37 @@ mod tests {
     }
 
     #[test]
+    fn parses_text_labels_fixture() {
+        let spec = parse_unit_spec_json(include_str!("../../fixtures/specs/unit_text_labels.json"))
+            .expect("parse text labels spec");
+
+        let resolver = SliceFieldResolver::new(&[
+            SchemaField {
+                name: "x",
+                column: ColumnId(0),
+            },
+            SchemaField {
+                name: "y",
+                column: ColumnId(1),
+            },
+            SchemaField {
+                name: "label",
+                column: ColumnId(2),
+            },
+        ]);
+        let _unit = spec
+            .adapt(
+                &resolver,
+                AdaptContext {
+                    id_base: 0xC1_100,
+                    derived_table_base: TableId(302),
+                    data: DataRef::Table(TableId(4)),
+                },
+            )
+            .expect("adapt parsed text labels spec");
+    }
+
+    #[test]
     fn parses_rule_mark_spec() {
         let spec = parse_unit_spec_json(
             r#"{

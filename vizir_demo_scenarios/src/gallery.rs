@@ -22,7 +22,9 @@ use vizir_charts::{
     StrokeStyle, Symbol, TextMarkSpec, TitleSpec, UnitSpec, parse_facet_spec_json,
     parse_layer_spec_json, parse_unit_spec_json,
 };
-use vizir_core::{ColumnId, Mark, MarkDiff, MarkPayload, Scene, Table, TableData, TableId};
+use vizir_core::{
+    ColumnId, ColumnType, Mark, MarkDiff, MarkPayload, Scene, Table, TableData, TableId,
+};
 use vizir_transforms::{
     AggregateField, AggregateOp, CompareOp, Predicate, Program, StackOffset, Transform,
 };
@@ -67,6 +69,10 @@ scenario_wrapper!(
 scenario_wrapper!(lowered_json_facet_demo, lowered_json_facet_section);
 scenario_wrapper!(lowered_json_layer_demo, lowered_json_layer_section);
 scenario_wrapper!(lowered_json_bar_text_demo, lowered_json_bar_text_section);
+scenario_wrapper!(
+    lowered_json_text_labels_demo,
+    lowered_json_text_labels_section
+);
 scenario_wrapper!(
     lowered_json_point_shape_size_demo,
     lowered_json_point_shape_size_section
@@ -1244,6 +1250,59 @@ fn lowered_json_bar_text_section() -> ScenarioSection {
     }
 }
 
+fn lowered_json_text_labels_section() -> ScenarioSection {
+    let mut scene = Scene::new();
+    let source_id = TableId(1410);
+
+    let mut table = Table::new(source_id);
+    table.row_keys = vec![0, 1, 2, 3];
+    table.data = Some(Box::new(TextLabelValues {
+        x: vec![0.0, 1.0, 2.0, 3.0],
+        y: vec![4.0, 7.0, 5.0, 8.0],
+        label: vec![
+            String::from("alpha"),
+            String::from("beta"),
+            String::from("gamma"),
+            String::from("delta"),
+        ],
+    }));
+    scene.insert_table(table);
+
+    let parsed = parse_unit_spec_json(include_str!("../../fixtures/specs/unit_text_labels.json"))
+        .expect("parse json text labels spec");
+
+    let resolver = SliceFieldResolver::new(&[
+        SchemaField {
+            name: "x",
+            column: ColumnId(0),
+        },
+        SchemaField {
+            name: "y",
+            column: ColumnId(1),
+        },
+        SchemaField {
+            name: "label",
+            column: ColumnId(2),
+        },
+    ]);
+    let spec = parsed
+        .adapt(
+            &resolver,
+            AdaptContext {
+                id_base: 0xD0_980,
+                derived_table_base: TableId(1411),
+                data: DataRef::Table(source_id),
+            },
+        )
+        .expect("adapt json text labels spec");
+
+    ScenarioSection {
+        title: "Lowered JSON Text Labels",
+        description: "A JSON-authored text chart whose labels come from string-backed table data.",
+        frame: render_lowered_unit_spec(&mut scene, spec),
+    }
+}
+
 fn lowered_json_point_shape_size_section() -> ScenarioSection {
     let mut scene = Scene::new();
     let source_id = TableId(142);
@@ -1571,6 +1630,43 @@ struct StyledLayerValues {
 struct LineSeriesValues {
     x: Vec<f64>,
     y: Vec<f64>,
+}
+
+#[derive(Debug)]
+struct TextLabelValues {
+    x: Vec<f64>,
+    y: Vec<f64>,
+    label: Vec<String>,
+}
+
+impl TableData for TextLabelValues {
+    fn row_count(&self) -> usize {
+        self.x.len().min(self.y.len()).min(self.label.len())
+    }
+
+    fn column_type(&self, col: ColumnId) -> Option<ColumnType> {
+        match col {
+            ColumnId(0) | ColumnId(1) => Some(ColumnType::F64),
+            ColumnId(2) => Some(ColumnType::Text),
+            _ => None,
+        }
+    }
+
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        match col {
+            ColumnId(0) => self.x.get(row).copied(),
+            ColumnId(1) => self.y.get(row).copied(),
+            _ => None,
+        }
+    }
+
+    fn get_str(&self, row: usize, col: ColumnId) -> Option<&str> {
+        if col == ColumnId(2) {
+            self.label.get(row).map(String::as_str)
+        } else {
+            None
+        }
+    }
 }
 
 impl TableData for PointShapeSizeValues {

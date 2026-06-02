@@ -1,0 +1,11 @@
+{
+  "mark": "text",
+  "title": "String labels",
+  "width": 240.0,
+  "height": 140.0,
+  "encoding": {
+    "x": { "field": "x", "type": "quantitative", "title": "x" },
+    "y": { "field": "y", "type": "quantitative", "title": "value" },
+    "text": { "field": "label", "type": "nominal" }
+  }
+}
