@@ -49,5 +49,6 @@ useful for ergonomic Rust chart APIs.
 
 ## Related plans
 
+- See `plans/table-data.md` for typed table access, row provenance, schema, and patch design.
 - See `plans/engine-evolution.md` for table storage and diff representation.
 - See `plans/scales.md` for scale domains that often depend on transforms (aggregate/bin).

@@ -64,5 +64,6 @@ Core rule: keep IO/backends as separate adapter crates.
 
 ## Related plans
 
+- `plans/table-data.md` (table-data model, typed lanes, schema, row provenance)
 - `plans/transforms.md` (transform IR and table diffs)
 - `plans/engine-evolution.md` (table representation evolution)

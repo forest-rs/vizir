@@ -19,6 +19,8 @@ charting layer and future Vega/Vega-Lite lowering.
 
 ### M0: Tables v2 refinement
 
+Detailed table-data design lives in `plans/table-data.md`.
+
 - Refine the typed column interface shape (and how it interacts with `no_std`):
   - **Borrowed slices**: columns as `&[T]` obtained from a table handle.
     - Pros: fastest, simplest call sites, easy SIMD.
