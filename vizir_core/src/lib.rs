@@ -92,6 +92,106 @@ pub enum ColumnType {
     Text,
 }
 
+/// Metadata for one table column.
+///
+/// This is core-level schema metadata: it records physical storage/access type and an optional
+/// human or adapter-provided name. Authored visualization semantics such as quantitative,
+/// nominal, ordinal, or temporal still belong in higher layers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ColumnSchema {
+    /// Stable runtime column token.
+    pub id: ColumnId,
+    /// Physical value lane for this column.
+    pub ty: ColumnType,
+    /// Optional column name supplied by an adapter or authored field resolver.
+    pub name: Option<String>,
+}
+
+impl ColumnSchema {
+    /// Create schema metadata for an unnamed column.
+    #[must_use]
+    pub const fn new(id: ColumnId, ty: ColumnType) -> Self {
+        Self { id, ty, name: None }
+    }
+
+    /// Attach a column name.
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+}
+
+/// Metadata for a table's known columns.
+///
+/// `TableSchema` is intentionally small and keyed by [`ColumnId`]. It is useful for diagnostics,
+/// adapters, and lowering checks, but it is not a dataframe schema language.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TableSchema {
+    columns: Vec<ColumnSchema>,
+}
+
+impl TableSchema {
+    /// Create an empty table schema.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            columns: Vec::new(),
+        }
+    }
+
+    /// Create a table schema from column metadata.
+    #[must_use]
+    pub fn from_columns(columns: impl IntoIterator<Item = ColumnSchema>) -> Self {
+        Self {
+            columns: columns.into_iter().collect(),
+        }
+    }
+
+    /// Return all known columns.
+    #[must_use]
+    pub fn columns(&self) -> &[ColumnSchema] {
+        &self.columns
+    }
+
+    /// Return `true` if this schema has no column metadata.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.columns.is_empty()
+    }
+
+    /// Return metadata for one column.
+    #[must_use]
+    pub fn column(&self, id: ColumnId) -> Option<&ColumnSchema> {
+        self.columns.iter().find(|column| column.id == id)
+    }
+
+    /// Return the physical value type for one column.
+    #[must_use]
+    pub fn column_type(&self, id: ColumnId) -> Option<ColumnType> {
+        self.column(id).map(|column| column.ty)
+    }
+
+    /// Return the optional name for one column.
+    #[must_use]
+    pub fn column_name(&self, id: ColumnId) -> Option<&str> {
+        self.column(id).and_then(|column| column.name.as_deref())
+    }
+
+    /// Insert or replace column metadata by [`ColumnId`].
+    pub fn upsert_column(&mut self, column: ColumnSchema) {
+        if let Some(existing) = self
+            .columns
+            .iter_mut()
+            .find(|existing| existing.id == column.id)
+        {
+            *existing = column;
+        } else {
+            self.columns.push(column);
+        }
+    }
+}
+
 /// Semantic role for a mark.
 ///
 /// Roles are intentionally static strings rather than a closed enum. `vizir_core` carries the
@@ -265,6 +365,9 @@ pub struct Table {
     /// row-driven mark sets without committing to a column representation yet.
     pub row_keys: Vec<u64>,
 
+    /// Optional metadata for known columns.
+    pub schema: TableSchema,
+
     /// Optional columnar access for encodings.
     pub data: Option<Box<dyn TableData>>,
 }
@@ -276,6 +379,7 @@ impl Table {
             id,
             version: 1,
             row_keys: Vec::new(),
+            schema: TableSchema::new(),
             data: None,
         }
     }
@@ -297,6 +401,12 @@ impl Table {
         self.bump();
     }
 
+    /// Replace the table schema and bump its version.
+    pub fn set_schema(&mut self, schema: TableSchema) {
+        self.schema = schema;
+        self.bump();
+    }
+
     /// Return the number of rows.
     pub fn row_count(&self) -> usize {
         self.row_keys.len()
@@ -307,9 +417,21 @@ impl Table {
         self.row_keys.get(row).copied()
     }
 
+    /// Return metadata for one column, if known.
+    pub fn column_schema(&self, col: ColumnId) -> Option<&ColumnSchema> {
+        self.schema.column(col)
+    }
+
     /// Return the physical value type for a column, if known.
     pub fn column_type(&self, col: ColumnId) -> Option<ColumnType> {
-        self.data.as_deref()?.column_type(col)
+        self.schema
+            .column_type(col)
+            .or_else(|| self.data.as_deref()?.column_type(col))
+    }
+
+    /// Return the optional name for a column, if known.
+    pub fn column_name(&self, col: ColumnId) -> Option<&str> {
+        self.schema.column_name(col)
     }
 }
 
@@ -2501,6 +2623,23 @@ mod tests {
         assert_eq!(ctx.table_str(table, 1, ColumnId(0)), Some("beta"));
         assert_eq!(ctx.table_bool(table, 0, ColumnId(1)), Some(true));
         assert_eq!(ctx.table_f64(table, 0, ColumnId(0)), None);
+    }
+
+    #[test]
+    fn table_schema_tracks_column_metadata() {
+        let mut table = Table::new(TableId(11));
+        let start_version = table.version;
+        table.set_schema(TableSchema::from_columns([
+            ColumnSchema::new(ColumnId(0), ColumnType::Text).with_name("label"),
+            ColumnSchema::new(ColumnId(1), ColumnType::F64).with_name("value"),
+        ]));
+
+        assert_ne!(table.version, start_version);
+        assert_eq!(table.column_type(ColumnId(0)), Some(ColumnType::Text));
+        assert_eq!(table.column_type(ColumnId(1)), Some(ColumnType::F64));
+        assert_eq!(table.column_name(ColumnId(0)), Some("label"));
+        assert_eq!(table.column_name(ColumnId(1)), Some("value"));
+        assert_eq!(table.column_type(ColumnId(2)), None);
     }
 
     #[test]

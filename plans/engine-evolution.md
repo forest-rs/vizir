@@ -8,6 +8,7 @@ charting layer and future Vega/Vega-Lite lowering.
 ## Current state
 
 - Tables/signals with versions.
+- Tables carry minimal schema metadata keyed by `ColumnId`.
 - `TableData` exposes typed lanes (`f64`, integers, bool, text) plus optional physical column type
   reporting.
 - Marks with explicit deps and incremental per-encoding updates.

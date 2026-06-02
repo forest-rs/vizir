@@ -6,7 +6,7 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use vizir_core::{ColumnId, ColumnType, Table, TableData, TableId};
+use vizir_core::{ColumnId, ColumnSchema, ColumnType, Table, TableData, TableId, TableSchema};
 
 /// Errors returned when building or using a [`TableFrame`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,12 +104,21 @@ impl TableFrame {
             id,
             version: 1,
             row_keys: self.row_keys,
+            schema: numeric_schema(self.columns.iter().copied()),
             data: Some(Box::new(FrameData {
                 columns: self.columns,
                 data: self.data,
             })),
         }
     }
+}
+
+fn numeric_schema(columns: impl IntoIterator<Item = ColumnId>) -> TableSchema {
+    TableSchema::from_columns(
+        columns
+            .into_iter()
+            .map(|id| ColumnSchema::new(id, ColumnType::F64)),
+    )
 }
 
 #[derive(Debug)]

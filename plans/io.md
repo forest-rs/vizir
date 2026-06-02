@@ -10,6 +10,7 @@ Core rule: keep IO/backends as separate adapter crates.
 ## Current state
 
 - `vizir_core::Table` is versioned and can optionally store a `Box<dyn TableData>`.
+- `vizir_core::Table` carries minimal schema metadata keyed by `ColumnId`.
 - `TableData` is a small typed-lane interface with optional physical column type reporting.
 - Current chart and transform code still primarily consumes `f64` lanes.
 

@@ -34,7 +34,9 @@ renderer adapters, or authored visualization semantics.
   - `TableId`
   - table-level `Version`
   - stable `row_keys: Vec<u64>`
+  - `TableSchema`
   - optional `Box<dyn TableData>`
+- `TableSchema` carries known column ids, physical types, and optional names.
 - `TableData` exposes typed lanes:
   - `get_f64`
   - `get_i64`
@@ -153,6 +155,7 @@ pub struct Table {
     pub id: TableId,
     pub version: Version,
     pub row_keys: Vec<u64>,
+    pub schema: TableSchema,
     pub data: Option<Box<dyn TableData>>,
 }
 
@@ -312,6 +315,8 @@ Status: done.
 - Ensure generated/transform tables can report `ColumnType` for all carried columns.
 - Add tests for schema/type reporting through transform outputs.
 
+Status: done.
+
 Exit criteria:
 
 - authored/spec lowering can ask whether a field has a usable physical lane,
@@ -367,16 +372,17 @@ Exit criteria:
 
 - a simple authored text-label chart can read actual string data without numeric placeholders.
 
-## First Implementation Slice
+## Next Implementation Slice
 
-The next code slice should be M1, not patches or Arrow:
+The next code slice should be M2, not patches or Arrow:
 
-1. Add a minimal schema/type reporting path for table implementations.
-2. Make transform output tables report `ColumnType::F64` for all numeric columns.
-3. Add tests proving schema/type information survives transform execution into a `Scene`.
-4. Update the support matrix only for what is proven.
+1. Define stable row-key rules for each existing transform in code comments and tests.
+2. Add row-provenance tests for filter, sort, calculate, aggregate, bin, fold, pivot, stack, and
+   window.
+3. Adjust any transform that still has incidental row-key behavior.
+4. Update support docs only for what is proven.
 
-This is small, useful, and constrains later row identity and patch work.
+This constrains later table patch and incremental transform work.
 
 ## Risks
 
