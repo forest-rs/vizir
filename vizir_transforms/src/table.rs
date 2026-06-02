@@ -6,7 +6,9 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use vizir_core::{ColumnId, ColumnSchema, ColumnType, Table, TableData, TableId, TableSchema};
+use vizir_core::{
+    ColumnId, ColumnSchema, ColumnType, F64ColumnRef, Table, TableData, TableId, TableSchema,
+};
 
 /// Errors returned when building or using a [`TableFrame`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,11 +71,20 @@ impl TableFrame {
         let n = table.row_keys.len();
         let mut cols = Vec::with_capacity(columns.len());
         for &col in &columns {
-            let mut out = Vec::with_capacity(n);
-            for row in 0..n {
-                out.push(data.get_f64(row, col).unwrap_or(f64::NAN));
+            if let Some(values) = data.f64_column(col) {
+                let values = values.as_slice();
+                let len = values.len().min(n);
+                let mut out = Vec::with_capacity(n);
+                out.extend_from_slice(&values[..len]);
+                out.resize(n, f64::NAN);
+                cols.push(out);
+            } else {
+                let mut out = Vec::with_capacity(n);
+                for row in 0..n {
+                    out.push(data.get_f64(row, col).unwrap_or(f64::NAN));
+                }
+                cols.push(out);
             }
-            cols.push(out);
         }
         Ok(Self {
             row_keys: table.row_keys.clone(),
@@ -137,5 +148,68 @@ impl TableData for FrameData {
     fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         let idx = self.columns.iter().position(|&c| c == col)?;
         self.data.get(idx)?.get(row).copied()
+    }
+
+    fn f64_column(&self, col: ColumnId) -> Option<F64ColumnRef<'_>> {
+        let idx = self.columns.iter().position(|&c| c == col)?;
+        Some(F64ColumnRef::Slice(self.data.get(idx)?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+
+    use super::*;
+
+    #[derive(Debug)]
+    struct ViewOnlyData {
+        values: Vec<f64>,
+    }
+
+    impl TableData for ViewOnlyData {
+        fn row_count(&self) -> usize {
+            self.values.len()
+        }
+
+        fn column_type(&self, col: ColumnId) -> Option<ColumnType> {
+            (col == ColumnId(0)).then_some(ColumnType::F64)
+        }
+
+        fn f64_column(&self, col: ColumnId) -> Option<F64ColumnRef<'_>> {
+            (col == ColumnId(0)).then_some(F64ColumnRef::Slice(&self.values))
+        }
+    }
+
+    #[test]
+    fn from_table_uses_bulk_f64_column_view() {
+        let mut table = Table::new(TableId(1));
+        table.row_keys = vec![10, 11, 12];
+        table.data = Some(Box::new(ViewOnlyData {
+            values: vec![1.0, 2.0],
+        }));
+
+        let frame = TableFrame::from_table(&table, vec![ColumnId(0)]).unwrap();
+
+        assert_eq!(frame.row_keys, vec![10, 11, 12]);
+        assert_eq!(frame.columns, vec![ColumnId(0)]);
+        assert_eq!(frame.data.len(), 1);
+        assert_eq!(frame.data[0][..2], [1.0, 2.0]);
+        assert!(frame.data[0][2].is_nan());
+    }
+
+    #[test]
+    fn into_table_exposes_bulk_f64_column_view() {
+        let frame = TableFrame {
+            row_keys: vec![10, 11],
+            columns: vec![ColumnId(0)],
+            data: vec![vec![1.0, 2.0]],
+        };
+        let table = frame.into_table(TableId(1));
+
+        assert_eq!(
+            table.f64_column(ColumnId(0)).map(F64ColumnRef::as_slice),
+            Some(&[1.0, 2.0][..])
+        );
     }
 }

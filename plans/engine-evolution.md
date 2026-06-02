@@ -12,8 +12,8 @@ charting layer and future Vega/Vega-Lite lowering.
 - Tables can carry optional column versions; `InputRef::TableCol` uses them when available and
   falls back to table-level versions.
 - Transform outputs have documented row-key provenance for the current full-recompute operators.
-- `TableData` exposes typed lanes (`f64`, integers, bool, text) plus optional physical column type
-  reporting.
+- `TableData` exposes typed lanes (`f64`, integers, bool, text), optional physical column type
+  reporting, and an optional bulk `f64` view.
 - Marks with explicit deps and incremental per-encoding updates.
 - Diffs: `Enter/Update/Exit` with optional bounds (text bounds unknown).
 - Marks have an explicit `z_index` for rendering order; diffs carry z-index changes so renderers
@@ -30,8 +30,8 @@ Detailed table-data design lives in `plans/table-data.md`.
     - Pros: fastest, simplest call sites, easy SIMD.
     - Cons: lifetime/threading constraints; hard to model partial updates/patched views.
   - **Trait object accessor** (`dyn TableData`) with typed getters and row count.
-    - Current: flexible backing stores with per-cell typed getters.
-    - Next question: whether to expose optional contiguous typed slices for fast paths.
+    - Current: flexible backing stores with per-cell typed getters and an optional contiguous
+      `f64` slice fast path.
   - **Arrow(-ish)** (or Arrow2) as the eventual “real” table substrate.
     - Pros: interoperable; rich types; already has compute ecosystem.
     - Cons: dependency weight; `no_std` compatibility is nuanced; API churn risk.

@@ -484,14 +484,62 @@ impl Table {
     pub fn column_name(&self, col: ColumnId) -> Option<&str> {
         self.schema.column_name(col)
     }
+
+    /// Return an optional bulk `f64` view for one column.
+    pub fn f64_column(&self, col: ColumnId) -> Option<F64ColumnRef<'_>> {
+        self.data.as_deref()?.f64_column(col)
+    }
+}
+
+/// Borrowed bulk view of an `f64` table column.
+///
+/// This is an optional fast path. Callers must continue to support per-cell
+/// [`TableData::get_f64`] fallback when a table implementation cannot expose a contiguous slice.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum F64ColumnRef<'a> {
+    /// A contiguous `f64` slice.
+    Slice(&'a [f64]),
+}
+
+impl<'a> F64ColumnRef<'a> {
+    /// Return the number of values in the view.
+    #[must_use]
+    pub const fn len(self) -> usize {
+        match self {
+            Self::Slice(values) => values.len(),
+        }
+    }
+
+    /// Return `true` when the view contains no values.
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+
+    /// Return the value at `row`, if present.
+    #[must_use]
+    pub fn get(self, row: usize) -> Option<f64> {
+        match self {
+            Self::Slice(values) => values.get(row).copied(),
+        }
+    }
+
+    /// Return the view as a contiguous slice.
+    #[must_use]
+    pub const fn as_slice(self) -> &'a [f64] {
+        match self {
+            Self::Slice(values) => values,
+        }
+    }
 }
 
 /// Optional typed columnar access for table-driven mark encodings.
 ///
 /// This is a small typed-lane interface, not a table engine. Implementors expose whichever column
 /// accessors they support and can optionally report a [`ColumnType`] for each column. Numeric chart
-/// code currently reads via [`Self::get_f64`] and [`EvalCtx::table_f64`], while future authored
-/// layers can use text, integer, and boolean lanes without introducing a dynamic value enum.
+/// code can read via [`Self::get_f64`] or the optional [`Self::f64_column`] bulk view, while future
+/// authored layers can use text, integer, and boolean lanes without introducing a dynamic value
+/// enum.
 pub trait TableData: fmt::Debug {
     /// Number of rows available via this accessor.
     fn row_count(&self) -> usize;
@@ -505,6 +553,12 @@ pub trait TableData: fmt::Debug {
     /// Return an `f64` value for a given row/column.
     fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         let _ = (row, col);
+        None
+    }
+
+    /// Return a bulk `f64` view for a column, if available.
+    fn f64_column(&self, col: ColumnId) -> Option<F64ColumnRef<'_>> {
+        let _ = col;
         None
     }
 
@@ -1720,6 +1774,11 @@ impl<'a> EvalCtx<'a> {
         data.get_f64(row, col)
     }
 
+    /// Return an optional bulk `f64` view for a table column.
+    pub fn table_f64_column(&self, table: TableId, col: ColumnId) -> Option<F64ColumnRef<'_>> {
+        self.tables.get(&table)?.f64_column(col)
+    }
+
     /// Read a signed integer table value, if a table data accessor is present.
     pub fn table_i64(&self, table: TableId, row: usize, col: ColumnId) -> Option<i64> {
         let t = self.tables.get(&table)?;
@@ -2504,6 +2563,10 @@ mod tests {
                 None
             }
         }
+
+        fn f64_column(&self, col: ColumnId) -> Option<F64ColumnRef<'_>> {
+            (col == ColumnId(0)).then_some(F64ColumnRef::Slice(&self.values))
+        }
     }
 
     #[derive(Debug)]
@@ -2528,6 +2591,14 @@ mod tests {
             match col {
                 ColumnId(0) => self.x.get(row).copied(),
                 ColumnId(1) => self.y.get(row).copied(),
+                _ => None,
+            }
+        }
+
+        fn f64_column(&self, col: ColumnId) -> Option<F64ColumnRef<'_>> {
+            match col {
+                ColumnId(0) => Some(F64ColumnRef::Slice(&self.x)),
+                ColumnId(1) => Some(F64ColumnRef::Slice(&self.y)),
                 _ => None,
             }
         }
@@ -2692,6 +2763,14 @@ mod tests {
             panic!("expected rect payload");
         };
         assert_eq!(rect.rect.x0, 4.0);
+        let ctx = EvalCtx {
+            tables: &scene.tables,
+            signals: &scene.signals,
+        };
+        assert_eq!(
+            ctx.table_f64_column(table, col).map(F64ColumnRef::as_slice),
+            Some(&[2.0][..])
+        );
 
         scene.set_table_data(
             table,

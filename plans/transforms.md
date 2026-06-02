@@ -13,6 +13,8 @@ useful for ergonomic Rust chart APIs.
   - `Filter`, `Project`, `Sort`, `Calculate`, `JoinAggregate`, `Aggregate`, `Bin`, `Fold`,
     `Lookup`, `Pivot`, `Window`, and `Stack` are implemented.
   - Transform row-key provenance is documented in the IR and covered by focused executor tests.
+  - `TableFrame` extraction uses the optional bulk `f64` table view when available and falls back
+    to per-cell reads.
 
 ## Staged milestones
 

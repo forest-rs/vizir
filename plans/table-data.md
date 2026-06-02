@@ -44,6 +44,7 @@ renderer adapters, or authored visualization semantics.
   - `get_u64`
   - `get_bool`
   - `get_str`
+  - optional `f64_column`
   - optional `column_type`
 - Existing charts and transforms still consume mostly `f64` lanes.
 - `InputRef::TableCol` uses explicit column versions when present and falls back to table-level
@@ -176,9 +177,8 @@ pub trait TableData: fmt::Debug {
 }
 ```
 
-Open before implementation:
+Open after this slice:
 
-- whether column views should be enum refs, trait refs, or small adapter structs,
 - how missing values are represented in bulk views,
 - whether text views return `&str` by row, offset buffers, or another abstraction,
 - whether column types should include timestamp/category dictionary lanes now or later.
@@ -360,6 +360,8 @@ Exit criteria:
 - Use it in domain inference or transform extraction.
 - Keep per-cell fallback.
 
+Status: done.
+
 Exit criteria:
 
 - no caller needs to know the backing store to get bulk numeric reads.
@@ -386,14 +388,14 @@ Exit criteria:
 
 ## Next Implementation Slice
 
-The next code slice should be M4, not patches or Arrow:
+The next code slice should be M5, not Arrow:
 
-1. Add one optional bulk column view, likely for `f64`.
-2. Use it in a narrow hot path such as transform extraction or scale-domain inference.
-3. Keep per-cell `TableData` access as the fallback.
-4. Keep patch storage and propagation out of this slice.
+1. Define the smallest useful `TablePatch` shape in core docs/API.
+2. Decide where pending patches live for the first executor slice.
+3. Add patch propagation for one simple transform, probably `Filter` or `Calculate`.
+4. Keep storage-backend adapters out of this slice.
 
-This improves read performance without introducing table patches or a storage backend dependency.
+This starts bounded updates without introducing a storage backend dependency.
 
 ## Risks
 
