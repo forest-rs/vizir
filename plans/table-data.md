@@ -35,6 +35,7 @@ renderer adapters, or authored visualization semantics.
   - table-level `Version`
   - stable `row_keys: Vec<u64>`
   - `TableSchema`
+  - optional per-column versions for `InputRef::TableCol`
   - optional `Box<dyn TableData>`
 - `TableSchema` carries known column ids, physical types, and optional names.
 - `TableData` exposes typed lanes:
@@ -45,8 +46,8 @@ renderer adapters, or authored visualization semantics.
   - `get_str`
   - optional `column_type`
 - Existing charts and transforms still consume mostly `f64` lanes.
-- `InputRef::TableCol` can describe table-column dependencies, but table versions are still
-  table-wide.
+- `InputRef::TableCol` uses explicit column versions when present and falls back to table-level
+  versions otherwise.
 - `vizir_transforms::TableFrame` is an owned numeric frame used by the current full-recompute
   transform executor.
 
@@ -156,6 +157,7 @@ pub struct Table {
     pub version: Version,
     pub row_keys: Vec<u64>,
     pub schema: TableSchema,
+    pub column_versions: HashMap<ColumnId, Version>,
     pub data: Option<Box<dyn TableData>>,
 }
 
@@ -219,7 +221,8 @@ baseline before adding incremental table patches.
 
 ## Versioning And Patches
 
-Current table-level versions are simple and correct but coarse.
+Current table-level versions are the coarse invalidation path. Optional column versions let
+`InputRef::TableCol` avoid unrelated column updates when callers provide per-column metadata.
 
 Target shape:
 
@@ -242,7 +245,7 @@ pub enum TablePatch {
 Open questions:
 
 - Do row insertions include order positions, or is order a separate table view update?
-- Are column versions maintained by `Table`, by `TableData`, or by a separate table state wrapper?
+- Which adapter crates should maintain column versions directly versus using coarse table bumps?
 - Does `Scene` store pending table patches, or does a future scheduler own them?
 
 ## Schema And Names
@@ -345,6 +348,8 @@ Exit criteria:
 - Make `InputRef::TableCol` consult column versions when available.
 - Preserve table-level invalidation as the fallback.
 
+Status: done.
+
 Exit criteria:
 
 - updating one column can avoid recomputing marks that depend on unrelated columns.
@@ -381,15 +386,14 @@ Exit criteria:
 
 ## Next Implementation Slice
 
-The next code slice should be M3, not patches or Arrow:
+The next code slice should be M4, not patches or Arrow:
 
-1. Add column-level version metadata while keeping table-level versions as the fallback.
-2. Make `InputRef::TableCol` consult column versions when available.
-3. Add tests showing unrelated column updates do not dirty table-column inputs.
+1. Add one optional bulk column view, likely for `f64`.
+2. Use it in a narrow hot path such as transform extraction or scale-domain inference.
+3. Keep per-cell `TableData` access as the fallback.
 4. Keep patch storage and propagation out of this slice.
 
-This narrows dependency invalidation before introducing table patches or incremental transform
-execution.
+This improves read performance without introducing table patches or a storage backend dependency.
 
 ## Risks
 

@@ -100,16 +100,14 @@ impl TableFrame {
 
     /// Converts this frame into a `vizir_core::Table` with an owned `TableData` accessor.
     pub fn into_table(self, id: TableId) -> Table {
-        Table {
-            id,
-            version: 1,
-            row_keys: self.row_keys,
-            schema: numeric_schema(self.columns.iter().copied()),
-            data: Some(Box::new(FrameData {
-                columns: self.columns,
-                data: self.data,
-            })),
-        }
+        let mut table = Table::new(id);
+        table.row_keys = self.row_keys;
+        table.schema = numeric_schema(self.columns.iter().copied());
+        table.data = Some(Box::new(FrameData {
+            columns: self.columns,
+            data: self.data,
+        }));
+        table
     }
 }
 

@@ -7,7 +7,7 @@ useful for ergonomic Rust chart APIs.
 
 ## Current state
 
-- `vizir_core::Table`: row keys + version; `TableData` supports typed lanes.
+- `vizir_core::Table`: row keys + table/column versions; `TableData` supports typed lanes.
 - No table diffs beyond row key reconciliation.
 - `vizir_transforms` provides a first transform IR + full-recompute executor for numeric columns:
   - `Filter`, `Project`, `Sort`, `Calculate`, `JoinAggregate`, `Aggregate`, `Bin`, `Fold`,

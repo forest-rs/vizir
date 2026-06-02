@@ -4,7 +4,7 @@
 //! `vizir_core`: minimal incremental viz runtime (tables, signals, marks, diffs).
 //!
 //! This crate provides:
-//! - versioned inputs ([`Table`]/[`Signal`])
+//! - versioned inputs ([`Table`]/[`Signal`]), including column-level table versions
 //! - stable mark identity ([`MarkId`])
 //! - UI-neutral mark semantics ([`MarkMetadata`], [`MarkRole`], [`DatumRef`])
 //! - explicit dependency tracking ([`InputRef`]) with helper constructors for common inputs
@@ -368,6 +368,13 @@ pub struct Table {
     /// Optional metadata for known columns.
     pub schema: TableSchema,
 
+    /// Optional per-column versions for narrower [`InputRef::TableCol`] invalidation.
+    ///
+    /// When a column has no explicit version, table-column dependencies fall back to
+    /// [`Table::version`]. Coarse table changes clear these versions so existing column
+    /// dependencies still observe full-table replacements.
+    pub column_versions: HashMap<ColumnId, Version>,
+
     /// Optional columnar access for encodings.
     pub data: Option<Box<dyn TableData>>,
 }
@@ -380,13 +387,23 @@ impl Table {
             version: 1,
             row_keys: Vec::new(),
             schema: TableSchema::new(),
+            column_versions: HashMap::new(),
             data: None,
         }
     }
 
     /// Increment the version counter.
+    ///
+    /// This is a coarse table invalidation. It clears explicit column versions so
+    /// [`InputRef::TableCol`] dependencies fall back to the new table version.
     pub fn bump(&mut self) {
+        self.column_versions.clear();
         self.version = self.version.wrapping_add(1);
+    }
+
+    fn bump_version_only(&mut self) -> Version {
+        self.version = self.version.wrapping_add(1);
+        self.version
     }
 
     /// Replace the table's row keys and bump its version.
@@ -405,6 +422,40 @@ impl Table {
     pub fn set_schema(&mut self, schema: TableSchema) {
         self.schema = schema;
         self.bump();
+    }
+
+    /// Set an explicit column version without changing the table-level version.
+    ///
+    /// Use this when importing version metadata from an external table store. Use
+    /// [`Self::bump_column`] for local column mutations so coarse table dependencies are also
+    /// invalidated.
+    pub fn set_column_version(&mut self, col: ColumnId, version: Version) {
+        self.column_versions.insert(col, version);
+    }
+
+    /// Increment one column version and the coarse table version.
+    ///
+    /// Marks depending on the whole table observe the table-level bump. Marks depending on other
+    /// explicit table columns continue to see their column versions unchanged.
+    pub fn bump_column(&mut self, col: ColumnId) -> Version {
+        let previous = self.column_version(col).unwrap_or(self.version);
+        self.bump_version_only();
+        let next = previous.wrapping_add(1);
+        self.column_versions.insert(col, next);
+        next
+    }
+
+    /// Return the explicit version for one column, if present.
+    pub fn column_version(&self, col: ColumnId) -> Option<Version> {
+        self.column_versions.get(&col).copied()
+    }
+
+    /// Return the effective version for a table-column dependency.
+    ///
+    /// Explicit column versions are preferred. If none is present, the table-level version is used
+    /// as a conservative fallback.
+    pub fn table_column_version(&self, col: ColumnId) -> Version {
+        self.column_version(col).unwrap_or(self.version)
     }
 
     /// Return the number of rows.
@@ -1637,6 +1688,13 @@ impl<'a> EvalCtx<'a> {
         self.tables.get(&id).map(|t| t.version)
     }
 
+    /// Return the effective version of a table column, if the table is present.
+    ///
+    /// This prefers explicit column-level versions and falls back to the table-level version.
+    pub fn table_column_version(&self, table: TableId, col: ColumnId) -> Option<Version> {
+        self.tables.get(&table).map(|t| t.table_column_version(col))
+    }
+
     /// Return the physical value type for a table column, if known.
     pub fn table_column_type(&self, table: TableId, col: ColumnId) -> Option<ColumnType> {
         let t = self.tables.get(&table)?;
@@ -1874,6 +1932,37 @@ impl Scene {
         }
     }
 
+    /// Increment one table column version, inserting an empty table if needed.
+    ///
+    /// This also increments the table-level version so coarse table dependencies are invalidated.
+    pub fn bump_table_column(&mut self, id: TableId, col: ColumnId) -> Version {
+        match self.tables.entry(id) {
+            Entry::Occupied(mut e) => e.get_mut().bump_column(col),
+            Entry::Vacant(e) => {
+                let mut table = Table::new(id);
+                let version = table.bump_column(col);
+                e.insert(table);
+                version
+            }
+        }
+    }
+
+    /// Set one table column version, inserting an empty table if needed.
+    ///
+    /// This imports explicit column-version metadata without changing the table-level version.
+    pub fn set_table_column_version(&mut self, id: TableId, col: ColumnId, version: Version) {
+        match self.tables.entry(id) {
+            Entry::Occupied(mut e) => {
+                e.get_mut().set_column_version(col, version);
+            }
+            Entry::Vacant(e) => {
+                let mut table = Table::new(id);
+                table.set_column_version(col, version);
+                e.insert(table);
+            }
+        }
+    }
+
     /// Set a signal value and bump its version (inserting it if missing).
     ///
     /// Returns `Err(TypeMismatch)` if a signal exists at `id` with a different type.
@@ -2071,7 +2160,7 @@ impl Scene {
             for dep in mark.deps.iter().copied() {
                 let v = match dep {
                     InputRef::Table { table } => ctx.table_version(table),
-                    InputRef::TableCol { table, .. } => ctx.table_version(table),
+                    InputRef::TableCol { table, col } => ctx.table_column_version(table, col),
                     InputRef::Signal { signal } => ctx.signal_version(signal),
                 };
                 let Some(v) = v else { continue };
@@ -2418,6 +2507,33 @@ mod tests {
     }
 
     #[derive(Debug)]
+    struct TwoCols {
+        x: Vec<f64>,
+        y: Vec<f64>,
+    }
+
+    impl TableData for TwoCols {
+        fn row_count(&self) -> usize {
+            self.x.len().min(self.y.len())
+        }
+
+        fn column_type(&self, col: ColumnId) -> Option<ColumnType> {
+            match col {
+                ColumnId(0) | ColumnId(1) => Some(ColumnType::F64),
+                _ => None,
+            }
+        }
+
+        fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+            match col {
+                ColumnId(0) => self.x.get(row).copied(),
+                ColumnId(1) => self.y.get(row).copied(),
+                _ => None,
+            }
+        }
+    }
+
+    #[derive(Debug)]
     struct MixedCols {
         names: Vec<String>,
         flags: Vec<bool>,
@@ -2640,6 +2756,84 @@ mod tests {
         assert_eq!(table.column_name(ColumnId(0)), Some("label"));
         assert_eq!(table.column_name(ColumnId(1)), Some("value"));
         assert_eq!(table.column_type(ColumnId(2)), None);
+    }
+
+    #[test]
+    fn table_column_versions_recompute_only_changed_columns() {
+        let mut scene = Scene::new();
+        let table = TableId(8);
+        let x_col = ColumnId(0);
+        let y_col = ColumnId(1);
+        let mark_id = MarkId(1);
+
+        scene.set_table_row_keys(table, Vec::from([10]));
+        scene.set_table_data(
+            table,
+            Some(Box::new(TwoCols {
+                x: Vec::from([1.0]),
+                y: Vec::from([10.0]),
+            })),
+        );
+        let initial_version = scene.tables.get(&table).unwrap().version;
+        scene.set_table_column_version(table, x_col, initial_version);
+        scene.set_table_column_version(table, y_col, initial_version);
+
+        let mark = Mark::builder(mark_id)
+            .x_table_f64(table, 0, x_col, 0.0, |value| value)
+            .y_table_f64(table, 0, y_col, 0.0, |value| value)
+            .build();
+        let diffs = scene.tick([mark]);
+        let [MarkDiff::Enter { new, .. }] = &diffs[..] else {
+            panic!("expected enter");
+        };
+        let MarkPayload::Rect(rect) = &**new else {
+            panic!("expected rect payload");
+        };
+        assert_eq!(rect.rect.x0, 1.0);
+        assert_eq!(rect.rect.y0, 10.0);
+
+        scene.tables.get_mut(&table).unwrap().data = Some(Box::new(TwoCols {
+            x: Vec::from([2.0]),
+            y: Vec::from([20.0]),
+        }));
+        scene.bump_table_column(table, x_col);
+        let diffs = scene.update();
+        let [MarkDiff::Update { old, new, .. }] = &diffs[..] else {
+            panic!("expected x-only update");
+        };
+        let (MarkPayload::Rect(old), MarkPayload::Rect(new)) = (&**old, &**new) else {
+            panic!("expected rect payloads");
+        };
+        assert_eq!(old.rect.x0, 1.0);
+        assert_eq!(old.rect.y0, 10.0);
+        assert_eq!(new.rect.x0, 2.0);
+        assert_eq!(new.rect.y0, 10.0);
+
+        scene.bump_table_column(table, y_col);
+        let diffs = scene.update();
+        let [MarkDiff::Update { old, new, .. }] = &diffs[..] else {
+            panic!("expected y-only update");
+        };
+        let (MarkPayload::Rect(old), MarkPayload::Rect(new)) = (&**old, &**new) else {
+            panic!("expected rect payloads");
+        };
+        assert_eq!(old.rect.x0, 2.0);
+        assert_eq!(old.rect.y0, 10.0);
+        assert_eq!(new.rect.x0, 2.0);
+        assert_eq!(new.rect.y0, 20.0);
+    }
+
+    #[test]
+    fn coarse_table_bump_clears_column_versions() {
+        let mut table = Table::new(TableId(9));
+        table.set_column_version(ColumnId(0), 10);
+        table.set_column_version(ColumnId(1), 20);
+
+        table.bump();
+
+        assert_eq!(table.column_version(ColumnId(0)), None);
+        assert_eq!(table.column_version(ColumnId(1)), None);
+        assert_eq!(table.table_column_version(ColumnId(0)), table.version);
     }
 
     #[test]

@@ -9,6 +9,8 @@ charting layer and future Vega/Vega-Lite lowering.
 
 - Tables/signals with versions.
 - Tables carry minimal schema metadata keyed by `ColumnId`.
+- Tables can carry optional column versions; `InputRef::TableCol` uses them when available and
+  falls back to table-level versions.
 - Transform outputs have documented row-key provenance for the current full-recompute operators.
 - `TableData` exposes typed lanes (`f64`, integers, bool, text) plus optional physical column type
   reporting.
@@ -42,9 +44,10 @@ Detailed table-data design lives in `plans/table-data.md`.
   - Likely direction:
     - carry an **origin key** (the upstream stable key) plus an optional **derived key**
       (e.g. group key for aggregates, bin key for binning, window frame key).
-- Decide versioning granularity:
-  - table-level version only (v1) vs column-level versions vs patch-based versions.
-  - column-level versions can reduce re-eval when only one column changes.
+- Extend versioning granularity:
+  - table-level versions remain the coarse invalidation path.
+  - column-level versions reduce re-eval when only one column changes.
+  - patch-based versions remain future work.
 - Decide whether/when to introduce table patches (diffs):
   - Keep v2 compatible with a future `TablePatch` model (insert/update/delete by row key).
   - Don’t commit to a specific patch encoding until transform foundations land
