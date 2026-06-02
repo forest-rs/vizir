@@ -764,6 +764,25 @@ impl Encoding<f64> {
     }
 }
 
+impl Encoding<String> {
+    /// Create a text encoding by reading one string table column.
+    ///
+    /// The dependency on `table`/`col` is attached mechanically. If the value is missing or the
+    /// table does not expose a string lane for the column, `fallback` is used.
+    pub fn table_str(
+        table: TableId,
+        row: usize,
+        col: ColumnId,
+        fallback: impl Into<String>,
+    ) -> Self {
+        let fallback = fallback.into();
+        Self::from_table_col(table, col, move |ctx, _| {
+            ctx.table_str(table, row, col)
+                .map_or_else(|| fallback.clone(), String::from)
+        })
+    }
+}
+
 impl<T: fmt::Debug> fmt::Debug for Encoding<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -1523,6 +1542,17 @@ impl MarkBuilder {
         f: impl Fn(&EvalCtx<'_>, MarkId) -> String + 'static,
     ) -> Self {
         self.text_encoding(Encoding::from_table_col(table, col, f))
+    }
+
+    /// Set the `text` encoding from one string table column (text marks only).
+    pub fn text_table_str(
+        self,
+        table: TableId,
+        row: usize,
+        col: ColumnId,
+        fallback: impl Into<String>,
+    ) -> Self {
+        self.text_encoding(Encoding::table_str(table, row, col, fallback))
     }
 
     /// Set the `font_size` encoding to a constant value (text marks only).
@@ -2860,6 +2890,33 @@ mod tests {
         assert_eq!(ctx.table_str(table, 1, ColumnId(0)), Some("beta"));
         assert_eq!(ctx.table_bool(table, 0, ColumnId(1)), Some(true));
         assert_eq!(ctx.table_f64(table, 0, ColumnId(0)), None);
+    }
+
+    #[test]
+    fn text_table_str_helper_reads_string_lane() {
+        let mut scene = Scene::new();
+        let table = TableId(8);
+        scene.set_table_row_keys(table, Vec::from([1, 2]));
+        scene.set_table_data(
+            table,
+            Some(Box::new(MixedCols {
+                names: Vec::from([String::from("alpha"), String::from("beta")]),
+                flags: Vec::from([true, false]),
+            })),
+        );
+
+        let diffs = scene.tick([Mark::builder(MarkId(1))
+            .text()
+            .text_table_str(table, 1, ColumnId(0), "")
+            .build()]);
+
+        let [MarkDiff::Enter { new, .. }] = &diffs[..] else {
+            panic!("expected enter");
+        };
+        let MarkPayload::Text(text) = &**new else {
+            panic!("expected text payload");
+        };
+        assert_eq!(text.text, "beta");
     }
 
     #[test]

@@ -26,8 +26,8 @@ use kurbo::{Affine, BezPath, Rect};
 use peniko::Brush;
 use peniko::color::palette::css;
 use vizir_core::{
-    ColumnId, Encoding, Mark, MarkDiff, MarkEncodings, MarkId, PathEncodings, RectEncodings, Scene,
-    TableId, TextAnchor, TextBaseline, TextEncodings,
+    ColumnId, Encoding, EvalCtx, Mark, MarkDiff, MarkEncodings, MarkId, PathEncodings,
+    RectEncodings, Scene, TableId, TextAnchor, TextBaseline, TextEncodings,
 };
 use vizir_transforms::{
     AggregateField, AggregateOp, CalculateExpr, CalculateOperand, LookupField, PivotValue,
@@ -3145,10 +3145,7 @@ impl TextLayer {
                             .x_table_f64(table_id, row, x_col, 0.0, move |x| x_scale.map(x))
                             .y_table_f64(table_id, row, y_col, 0.0, move |y| y_scale.map(y) - 4.0)
                             .text_table_col(table_id, text_col, move |ctx, _| {
-                                format_channel_value(
-                                    ctx.table_f64(table_id, row, text_col).unwrap_or(f64::NAN),
-                                    text_kind,
-                                )
+                                format_text_channel_value(ctx, table_id, row, text_col, text_kind)
                             })
                             .font_size_const(10.0)
                             .text_anchor(TextAnchor::Middle)
@@ -3189,10 +3186,7 @@ impl TextLayer {
                             .x_const(band.x(row) + 0.5 * band_width)
                             .y_table_f64(table_id, row, y_col, 0.0, move |y| y_scale.map(y) - 4.0)
                             .text_table_col(table_id, text_col, move |ctx, _| {
-                                format_channel_value(
-                                    ctx.table_f64(table_id, row, text_col).unwrap_or(f64::NAN),
-                                    text_kind,
-                                )
+                                format_text_channel_value(ctx, table_id, row, text_col, text_kind)
                             })
                             .font_size_const(10.0)
                             .text_anchor(TextAnchor::Middle)
@@ -3797,6 +3791,22 @@ fn format_channel_value(v: f64, kind: FieldKind) -> String {
             }
         }
     }
+}
+
+fn format_text_channel_value(
+    ctx: &EvalCtx<'_>,
+    table: TableId,
+    row: usize,
+    col: ColumnId,
+    kind: FieldKind,
+) -> String {
+    if matches!(kind, FieldKind::Nominal | FieldKind::Ordinal)
+        && let Some(value) = ctx.table_str(table, row, col)
+    {
+        return String::from(value);
+    }
+
+    format_channel_value(ctx.table_f64(table, row, col).unwrap_or(f64::NAN), kind)
 }
 
 fn default_series_fills(count: usize) -> Vec<Brush> {
@@ -4756,7 +4766,7 @@ mod tests {
 
     use super::*;
     use crate::HeuristicTextMeasurer;
-    use vizir_core::{MarkKind, Table, TableData};
+    use vizir_core::{ColumnType, MarkKind, Table, TableData};
     use vizir_transforms::WindowOp;
 
     #[derive(Debug)]
@@ -4825,6 +4835,43 @@ mod tests {
                 ColumnId(2) => self.c.get(row).copied(),
                 ColumnId(3) => self.d.get(row).copied(),
                 _ => None,
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct TextCols {
+        x: Vec<f64>,
+        y: Vec<f64>,
+        label: Vec<String>,
+    }
+
+    impl TableData for TextCols {
+        fn row_count(&self) -> usize {
+            self.x.len().min(self.y.len()).min(self.label.len())
+        }
+
+        fn column_type(&self, col: ColumnId) -> Option<ColumnType> {
+            match col {
+                ColumnId(0) | ColumnId(1) => Some(ColumnType::F64),
+                ColumnId(2) => Some(ColumnType::Text),
+                _ => None,
+            }
+        }
+
+        fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+            match col {
+                ColumnId(0) => self.x.get(row).copied(),
+                ColumnId(1) => self.y.get(row).copied(),
+                _ => None,
+            }
+        }
+
+        fn get_str(&self, row: usize, col: ColumnId) -> Option<&str> {
+            if col == ColumnId(2) {
+                self.label.get(row).map(String::as_str)
+            } else {
+                None
             }
         }
     }
@@ -5707,6 +5754,52 @@ mod tests {
             .expect("text marks");
         assert_eq!(marks.len(), 3);
         assert!(marks.iter().all(|mark| mark.kind == MarkKind::Text));
+    }
+
+    #[test]
+    fn text_mark_lowering_reads_string_labels() {
+        let mut scene = Scene::new();
+        let table_id = TableId(411);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![401, 402];
+        table.data = Some(Box::new(TextCols {
+            x: vec![0.0, 1.0],
+            y: vec![3.0, 5.0],
+            label: vec![String::from("alpha"), String::from("beta")],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xDD90,
+            TableId(4110),
+            DataRef::Table(table_id),
+            MarkDef::Text,
+        )
+        .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+        .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("value"))
+        .with_text(ChannelDef::nominal(ColumnId(2)));
+
+        let lowered = spec.lower(&scene).expect("lower text mark");
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let marks = lowered
+            .series_marks(&scene, layout.data)
+            .expect("text marks");
+        let diffs = scene.tick(marks);
+        let mut labels: Vec<String> = diffs
+            .iter()
+            .filter_map(|diff| {
+                let MarkDiff::Enter { new, .. } = diff else {
+                    return None;
+                };
+                let vizir_core::MarkPayload::Text(text) = &**new else {
+                    return None;
+                };
+                Some(text.text.clone())
+            })
+            .collect();
+        labels.sort();
+
+        assert_eq!(labels, vec![String::from("alpha"), String::from("beta")]);
     }
 
     #[test]

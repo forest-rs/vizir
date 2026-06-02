@@ -49,6 +49,8 @@ renderer adapters, or authored visualization semantics.
 - Existing charts and transforms still consume mostly `f64` lanes.
 - `InputRef::TableCol` uses explicit column versions when present and falls back to table-level
   versions otherwise.
+- Text marks can read `get_str` lanes for nominal/ordinal text labels, with numeric formatting as
+  fallback.
 - `vizir_transforms::TableFrame` is an owned numeric frame used by the current full-recompute
   transform executor.
 
@@ -387,20 +389,23 @@ Exit criteria:
 - Decide category key representation for string-backed nominal/ordinal fields.
 - Keep `styled_text` integration separate from core text storage.
 
+Status: done.
+
 Exit criteria:
 
 - a simple authored text-label chart can read actual string data without numeric placeholders.
 
 ## Next Implementation Slice
 
-The next code slice should be M6, not Arrow:
+The table-data design path is now through the planned M0-M6 slices. The next code slice should be
+chosen from the dependent plans, not by adding Arrow by default:
 
-1. Wire text table lanes into text marks for a minimal authored/runtime path.
-2. Keep text shaping and rich styling out of core; downstream should handle `styled_text` later.
-3. Decide only the minimal category/text representation needed for this slice.
-4. Keep storage-backend adapters out of this slice.
+1. Patch scheduling/executor state if incremental transforms are the priority.
+2. IO/adapters if real datasets are the priority.
+3. `styled_text` integration if rich text rendering is the priority.
+4. Additional typed views only when a measured hot path needs them.
 
-This validates non-numeric table lanes without pulling text layout into the core runtime.
+Keep storage-backend adapters out of `vizir_core`.
 
 ## Risks
 
