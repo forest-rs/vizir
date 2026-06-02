@@ -177,7 +177,7 @@ pub fn static_scenarios() -> &'static [StaticScenario] {
         ),
         StaticScenario::new(
             "Lowered JSON Text Labels",
-            "A text chart from JSON using string-backed label data.",
+            "A layered line + point chart from JSON using string-backed label data.",
             gallery::lowered_json_text_labels_demo,
         ),
         StaticScenario::new(
@@ -682,12 +682,13 @@ mod tests {
     }
 
     #[test]
-    fn text_label_scenario_uses_string_data() {
+    fn text_label_scenario_uses_string_data_with_plotted_marks() {
         let scenario = static_scenarios()
             .iter()
             .find(|scenario| scenario.title == "Lowered JSON Text Labels")
             .expect("text label scenario");
         let frame = scenario.build();
+        let mut path_count = 0;
         let labels: Vec<&str> = frame
             .diffs
             .iter()
@@ -695,13 +696,18 @@ mod tests {
                 let MarkDiff::Enter { new, .. } = diff else {
                     return None;
                 };
-                let vizir_core::MarkPayload::Text(text) = &**new else {
-                    return None;
-                };
-                Some(text.text.as_str())
+                match &**new {
+                    vizir_core::MarkPayload::Text(text) => Some(text.text.as_str()),
+                    vizir_core::MarkPayload::Path(_) => {
+                        path_count += 1;
+                        None
+                    }
+                    vizir_core::MarkPayload::Rect(_) => None,
+                }
             })
             .collect();
 
+        assert!(path_count >= 2);
         assert!(labels.contains(&"alpha"));
         assert!(labels.contains(&"beta"));
         assert!(labels.contains(&"gamma"));

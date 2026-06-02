@@ -1372,8 +1372,9 @@ mod tests {
 
     #[test]
     fn parses_text_labels_fixture() {
-        let spec = parse_unit_spec_json(include_str!("../../fixtures/specs/unit_text_labels.json"))
-            .expect("parse text labels spec");
+        let spec =
+            parse_layer_spec_json(include_str!("../../fixtures/specs/layer_text_labels.json"))
+                .expect("parse text labels spec");
 
         let resolver = SliceFieldResolver::new(&[
             SchemaField {

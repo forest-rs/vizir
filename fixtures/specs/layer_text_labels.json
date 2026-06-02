@@ -1,0 +1,30 @@
+{
+  "title": "String labels",
+  "width": 260.0,
+  "height": 150.0,
+  "encoding": {
+    "x": { "field": "x", "type": "quantitative", "title": "x" },
+    "y": { "field": "y", "type": "quantitative", "title": "value" }
+  },
+  "layer": [
+    {
+      "mark": "line",
+      "style": { "stroke": "#4f6faa", "strokeWidth": 2.0 }
+    },
+    {
+      "mark": "point",
+      "style": {
+        "fill": "#ffffff",
+        "stroke": "#4f6faa",
+        "strokeWidth": 1.5
+      }
+    },
+    {
+      "mark": "text",
+      "encoding": {
+        "text": { "field": "label", "type": "nominal" }
+      },
+      "style": { "fill": "#111111" }
+    }
+  ]
+}

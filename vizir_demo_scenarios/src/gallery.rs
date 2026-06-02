@@ -1255,20 +1255,22 @@ fn lowered_json_text_labels_section() -> ScenarioSection {
     let source_id = TableId(1410);
 
     let mut table = Table::new(source_id);
-    table.row_keys = vec![0, 1, 2, 3];
+    table.row_keys = vec![0, 1, 2, 3, 4, 5];
     table.data = Some(Box::new(TextLabelValues {
-        x: vec![0.0, 1.0, 2.0, 3.0],
-        y: vec![4.0, 7.0, 5.0, 8.0],
+        x: vec![-0.5, 0.0, 1.0, 2.0, 3.0, 3.5],
+        y: vec![3.5, 4.3, 7.2, 5.4, 7.8, 8.6],
         label: vec![
+            String::new(),
             String::from("alpha"),
             String::from("beta"),
             String::from("gamma"),
             String::from("delta"),
+            String::new(),
         ],
     }));
     scene.insert_table(table);
 
-    let parsed = parse_unit_spec_json(include_str!("../../fixtures/specs/unit_text_labels.json"))
+    let parsed = parse_layer_spec_json(include_str!("../../fixtures/specs/layer_text_labels.json"))
         .expect("parse json text labels spec");
 
     let resolver = SliceFieldResolver::new(&[
@@ -1298,8 +1300,8 @@ fn lowered_json_text_labels_section() -> ScenarioSection {
 
     ScenarioSection {
         title: "Lowered JSON Text Labels",
-        description: "A JSON-authored text chart whose labels come from string-backed table data.",
-        frame: render_lowered_unit_spec(&mut scene, spec),
+        description: "A JSON-authored line + point chart whose labels come from string-backed table data.",
+        frame: render_lowered_layer_spec(&mut scene, spec),
     }
 }
 
