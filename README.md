@@ -1,58 +1,94 @@
-# Vizir
+# VizIR
 
-Incremental, “Vega-ish” visualization runtime + chart building blocks.
+Semantic visualization IR and incremental runtime work for forest-rs.
 
-Vizir is a small family of crates designed to be combined in different stacks over time. The focus
-is on clean separation of concerns, pluggable performance trade‑offs, and long‑term architectural
-stability.
+VizIR is early, pre-release work. The public API is expected to change while the
+core table model, authored chart lowering, renderer adapters, and demo surfaces
+settle. The goal is a small set of durable crates for building inspectable,
+animated, data-driven views without tying visualization semantics to one UI
+toolkit or renderer.
 
-## Crates
+## Workspace
 
-- `vizir_core`
-  - `#![no_std]` + `alloc` incremental evaluation core.
-  - Versioned inputs: `Table` (row keys + optional column accessor) and typed `Signal<T>`.
-  - Stable identity via `MarkId`, and diffs `Enter/Update/Exit` keyed by `MarkId`.
-  - UI-neutral semantic metadata (`MarkRole`, `DatumRef`, labels/descriptions) carried beside
-    render payloads for inspection, selection, tooltips, and accessibility.
-  - Mark primitives: `Rect`, `Path`, `Text` (unshaped), plus `z_index` for ordering.
+| Crate | Purpose |
+| --- | --- |
+| [`vizir_core`](vizir_core/) | `no_std` incremental runtime: tables, signals, stable mark identity, semantic mark metadata, dependency tracking, and mark diffs. |
+| [`vizir_transforms`](vizir_transforms/) | `no_std` table transform IR and full-recompute executor for filter/sort/aggregate/stack and related dataflow operators. |
+| [`vizir_charts`](vizir_charts/) | `no_std` chart building blocks, authored-spec lowering, scales, guides, and mark specs that generate `vizir_core` marks. |
+| [`vizir_backend_svg`](vizir_backend_svg/) | Retained SVG adapter for evaluated `vizir_core` mark diffs. |
+| [`vizir_backend_imaging`](vizir_backend_imaging/) | `imaging` command-stream adapter for evaluated `vizir_core` mark diffs, with optional Parley-backed text painting. |
+| [`vizir_demo_scenarios`](vizir_demo_scenarios/) | Shared renderer-neutral scenarios used by SVG and native demos. |
+| [`vizir_charts_demo`](vizir_charts_demo/) | HTML/SVG report generator for the shared scenarios. |
+| [`vizir_imaging_demo`](vizir_imaging_demo/) | Native `winit`/`wgpu` demo using `imaging_vello_hybrid`. |
+| [`vizir_examples`](vizir_examples/) | Scratch examples for core runtime behavior. |
 
-- `vizir_charts`
-  - `#![no_std]` + `alloc` chart building blocks that generate `vizir_core::Mark`s.
-  - Scales: `ScaleLinear`, `ScaleBand` (v1).
-  - Guides: `AxisSpec` (Vega-style `orient`), `LegendSwatchesSpec` (now supports columns).
-  - Mark specs (Swift Charts / Vega-inspired): `BarMarkSpec`, `LineMarkSpec`, `PointMarkSpec`,
-    `AreaMarkSpec`, `RuleMarkSpec`, `SectorMarkSpec`, plus `RectMarkSpec`/`TextMarkSpec`.
+## Running Things
 
-- `vizir_charts_demo`
-  - A tiny demo binary that emits SVG dumps: `bar.svg`, `scatter.svg`, `line.svg`, `area.svg`,
-    `sector.svg`.
-  - This crate can depend on `std` and is where we experiment with renderer adapters.
+Generate the HTML/SVG report:
 
-- `vizir_examples`
-  - Scratch/example binaries (kept separate from core crates).
+```sh
+cargo run -p vizir_charts_demo
+```
 
-## Design principles
+Run the native imaging demo:
 
-- Long-term architecture over short-term compatibility.
-- Keep core crates `no_std`-first and minimize dependencies.
-- Keep rendering out of the core: consumers apply `MarkDiff` to their own display/imaging layers.
-- Prefer stable identity + diffs over rebuilding whole scenes.
+```sh
+cargo run -p vizir_imaging_demo
+```
 
-## Plans
+Run the basic runtime example:
 
-Living roadmap/design notes live in `plans/`:
-- `plans/README.md`
+```sh
+cargo run -p vizir_examples
+```
 
-## Getting started
+## Status
 
-- Run the demo SVG emitter:
-  - `cargo run -p vizir_charts_demo`
-- Validate the workspace:
-  - `cargo fmt --all`
-  - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-  - `cargo test --workspace --all-features`
+The foundational crates are intended to stay `no_std` where practical. Renderer
+adapters, demos, and host-facing crates may depend on platform/runtime facilities
+that do not belong in the core runtime.
 
-## MSRV & License
+Before publishing or pushing release-facing work, run:
 
-- Minimum supported Rust: 1.88.
-- Dual-licensed under Apache‑2.0 and MIT.
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+```
+
+For the no-std feature matrix used by CI:
+
+```sh
+cargo hack check -p vizir_core -p vizir_charts -p vizir_transforms -p vizir_backend_svg -p vizir_backend_imaging --locked --optional-deps --each-feature --ignore-unknown-features --features libm --exclude-features std,default,parley --target x86_64-unknown-none
+```
+
+## Design Direction
+
+- Keep `vizir_core` small, stable, and renderer-neutral.
+- Keep table data, transforms, authored specs, and rendering adapters as separate
+  replaceable layers.
+- Prefer stable identity and diffs over rebuilding whole scenes.
+- Treat semantic metadata as part of the runtime contract for selection,
+  inspection, accessibility, tooltips, and agent-facing diagnostics.
+- Stay Vega-ish where it helps, but avoid implying full Vega/Vega-Lite parity
+  before the supported slice is proven.
+
+Living design notes are in [`plans/`](plans/), especially
+[`plans/support-matrix.md`](plans/support-matrix.md).
+
+## Minimum Supported Rust Version
+
+This workspace currently targets **Rust 1.88** and later.
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>), or
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>),
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
+dual licensed as above, without any additional terms or conditions.
