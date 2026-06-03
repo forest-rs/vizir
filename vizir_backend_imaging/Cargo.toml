@@ -2,6 +2,7 @@
 name = "vizir_backend_imaging"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "imaging command-stream adapter for evaluated VizIR marks."

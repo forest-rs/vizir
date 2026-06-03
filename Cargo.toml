@@ -40,12 +40,12 @@ serde_json = { version = "1.0.145", default-features = false, features = [
 ] }
 smallvec = { version = "1.13.2", default-features = false }
 
-vizir_charts = { path = "vizir_charts", default-features = false }
-vizir_backend_imaging = { path = "vizir_backend_imaging", default-features = false }
-vizir_backend_svg = { path = "vizir_backend_svg", default-features = false }
-vizir_demo_scenarios = { path = "vizir_demo_scenarios", default-features = false }
-vizir_core = { path = "vizir_core", default-features = false }
-vizir_transforms = { path = "vizir_transforms", default-features = false }
+vizir_charts = { version = "0.1.0", path = "vizir_charts", default-features = false }
+vizir_backend_imaging = { version = "0.1.0", path = "vizir_backend_imaging", default-features = false }
+vizir_backend_svg = { version = "0.1.0", path = "vizir_backend_svg", default-features = false }
+vizir_demo_scenarios = { version = "0.1.0", path = "vizir_demo_scenarios", default-features = false }
+vizir_core = { version = "0.1.0", path = "vizir_core", default-features = false }
+vizir_transforms = { version = "0.1.0", path = "vizir_transforms", default-features = false }
 
 [workspace.lints]
 # LINEBENDER LINT SET - Cargo.toml - v7

@@ -2,6 +2,7 @@
 name = "vizir_backend_svg"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "SVG rendering adapter for evaluated VizIR marks."
