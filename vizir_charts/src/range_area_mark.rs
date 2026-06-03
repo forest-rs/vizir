@@ -6,8 +6,8 @@
 use alloc::vec::Vec;
 
 use kurbo::BezPath;
-use peniko::{Brush, Color};
-use vizir_core::{ColumnId, InputRef, Mark, MarkId, TableId};
+use peniko::Brush;
+use vizir_core::{ColumnId, Mark, MarkId, TableId};
 
 use crate::axis::StrokeStyle;
 use crate::scale::ScaleContinuous;
@@ -115,7 +115,7 @@ impl RangeAreaMarkSpec {
         let area = Mark::builder(area_id)
             .path()
             .z_index(z_index)
-            .path_compute([InputRef::Table { table: table_id }], move |ctx, _| {
+            .path_table(table_id, move |ctx, _| {
                 let n = ctx.table_row_count(table_id).unwrap_or(0);
                 let mut top: Vec<(f64, f64)> = Vec::with_capacity(n);
                 let mut bottom: Vec<(f64, f64)> = Vec::with_capacity(n);
@@ -146,7 +146,7 @@ impl RangeAreaMarkSpec {
                 path
             })
             .fill_brush_const(fill)
-            .stroke_width_const(0.0)
+            .no_stroke()
             .build();
 
         let mut out = alloc::vec![area];
@@ -154,11 +154,11 @@ impl RangeAreaMarkSpec {
         if let Some(stroke) = self.stroke.clone() {
             let line_id = MarkId::from_raw(self.id_base + 1);
             let stroke_brush = stroke.brush.clone();
-            let stroke_width = stroke.stroke_width;
+            let stroke_style = stroke.stroke.clone();
             let line = Mark::builder(line_id)
                 .path()
                 .z_index(z_index.saturating_add(crate::z_order::SERIES_STROKE))
-                .path_compute([InputRef::Table { table: table_id }], move |ctx, _| {
+                .path_table(table_id, move |ctx, _| {
                     let n = ctx.table_row_count(table_id).unwrap_or(0);
                     let mut path = BezPath::new();
                     for row in 0..n {
@@ -173,9 +173,9 @@ impl RangeAreaMarkSpec {
                     }
                     path
                 })
-                .fill_const(Color::TRANSPARENT)
+                .no_fill()
                 .stroke_brush_const(stroke_brush)
-                .stroke_width_const(stroke_width)
+                .stroke_style_const(stroke_style)
                 .build();
             out.push(line);
         }

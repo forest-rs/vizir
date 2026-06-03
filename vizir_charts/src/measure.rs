@@ -7,14 +7,23 @@
 //! shaping/layout downstream, so guides accept a measurer callback for rough
 //! bounds estimation.
 
+/// Measured text extents in chart coordinates.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TextMetrics {
+    /// Horizontal advance width.
+    pub advance_width: f64,
+    /// Vertical line height.
+    pub line_height: f64,
+}
+
 /// A minimal text measurement interface used by guide generators.
 ///
 /// This is used by axes/legends to estimate their extents (margins) before the
 /// marks are generated. Callers can plug in a real text measurement backend
 /// (e.g. based on shaping), or use [`HeuristicTextMeasurer`].
 pub trait TextMeasurer {
-    /// Returns `(width, height)` in the same coordinate system as the marks.
-    fn measure(&self, text: &str, font_size: f64) -> (f64, f64);
+    /// Returns text metrics in the same coordinate system as the marks.
+    fn measure(&self, text: &str, font_size: f64) -> TextMetrics;
 }
 
 /// A tiny heuristic text measurer suitable for demos and early layout.
@@ -24,8 +33,10 @@ pub trait TextMeasurer {
 pub struct HeuristicTextMeasurer;
 
 impl TextMeasurer for HeuristicTextMeasurer {
-    fn measure(&self, text: &str, font_size: f64) -> (f64, f64) {
-        let width = 0.6 * font_size * text.chars().count() as f64;
-        (width, font_size)
+    fn measure(&self, text: &str, font_size: f64) -> TextMetrics {
+        TextMetrics {
+            advance_width: 0.6 * font_size * text.chars().count() as f64,
+            line_height: font_size,
+        }
     }
 }

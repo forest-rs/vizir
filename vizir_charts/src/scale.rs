@@ -608,7 +608,7 @@ pub fn infer_domain_f64(data: &dyn TableData, col: ColumnId) -> Option<(f64, f64
     let mut max = f64::NEG_INFINITY;
     let n = data.row_count();
     for row in 0..n {
-        let Some(v) = data.f64(row, col) else {
+        let Some(v) = data.get_f64(row, col) else {
             continue;
         };
         if !v.is_finite() {

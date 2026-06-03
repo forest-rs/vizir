@@ -2,6 +2,7 @@
 name = "vizir_charts"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Vega-ish chart building blocks (scales, axes, legends) that generate vizir_core marks."

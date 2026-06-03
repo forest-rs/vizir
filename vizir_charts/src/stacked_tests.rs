@@ -27,7 +27,7 @@ impl TableData for StackedValues {
         self.cat.len().min(self.y0.len()).min(self.y1.len())
     }
 
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
         match col {
             ColumnId(0) => self.cat.get(row).copied(),
             ColumnId(1) => self.y0.get(row).copied(),

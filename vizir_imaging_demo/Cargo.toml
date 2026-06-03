@@ -1,0 +1,24 @@
+[package]
+name = "vizir_imaging_demo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Native VizIR demo using winit, wgpu, imaging, and imaging_vello_hybrid."
+readme = "README.md"
+keywords = ["visualization", "charts", "imaging"]
+categories = ["graphics"]
+publish = false
+
+[dependencies]
+imaging = { workspace = true, features = ["std"] }
+imaging_vello_hybrid.workspace = true
+pollster = "0.4.0"
+vizir_backend_imaging = { workspace = true, features = ["parley"] }
+vizir_core = { workspace = true, features = ["std"] }
+vizir_demo_scenarios = { workspace = true, features = ["std"] }
+winit = "0.30.12"
+
+[lints]
+workspace = true

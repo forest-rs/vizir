@@ -26,7 +26,7 @@ use kurbo::{Affine, BezPath, Rect};
 use peniko::Brush;
 use peniko::color::palette::css;
 use vizir_core::{
-    ColumnId, Encoding, InputRef, Mark, MarkDiff, MarkEncodings, MarkId, PathEncodings,
+    ColumnId, Encoding, EvalCtx, Mark, MarkDiff, MarkEncodings, MarkId, PathEncodings,
     RectEncodings, Scene, TableId, TextAnchor, TextBaseline, TextEncodings,
 };
 use vizir_transforms::{
@@ -2647,94 +2647,42 @@ impl BarLayer {
                 let mark = Mark::builder(layer_row_mark_id(id_base, row_key))
                     .rect()
                     .z_index(crate::z_order::SERIES_FILL)
-                    .x_compute(
-                        [InputRef::TableCol {
-                            table: table_id,
-                            col: x_col,
-                        }],
-                        move |ctx, _| {
-                            let value = ctx.table_f64(table_id, row, x_col).unwrap_or(f64::NAN);
-                            band.x(category_index_for_value(value, &category_index_map))
-                                + group_offset
-                        },
-                    )
+                    .x_table_f64(table_id, row, x_col, f64::NAN, move |value| {
+                        band.x(category_index_for_value(value, &category_index_map)) + group_offset
+                    })
                     .w_const(group_width);
                 let mut mark = if let Some(y2_col) = y2_col {
-                    mark.y_compute(
-                        [
-                            InputRef::TableCol {
-                                table: table_id,
-                                col: y_col,
-                            },
-                            InputRef::TableCol {
-                                table: table_id,
-                                col: y2_col,
-                            },
-                        ],
-                        move |ctx, _| {
-                            let top = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
-                            let bottom = ctx.table_f64(table_id, row, y2_col).unwrap_or(baseline);
-                            y_scale.map(top.max(bottom))
-                        },
-                    )
-                    .h_compute(
-                        [
-                            InputRef::TableCol {
-                                table: table_id,
-                                col: y_col,
-                            },
-                            InputRef::TableCol {
-                                table: table_id,
-                                col: y2_col,
-                            },
-                        ],
-                        move |ctx, _| {
-                            let top = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
-                            let bottom = ctx.table_f64(table_id, row, y2_col).unwrap_or(baseline);
-                            (y_scale.map(top) - y_scale.map(bottom)).abs()
-                        },
-                    )
+                    mark.y_table_cols(table_id, [y_col, y2_col], move |ctx, _| {
+                        let top = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
+                        let bottom = ctx.table_f64(table_id, row, y2_col).unwrap_or(baseline);
+                        y_scale.map(top.max(bottom))
+                    })
+                    .h_table_cols(table_id, [y_col, y2_col], move |ctx, _| {
+                        let top = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
+                        let bottom = ctx.table_f64(table_id, row, y2_col).unwrap_or(baseline);
+                        (y_scale.map(top) - y_scale.map(bottom)).abs()
+                    })
                 } else {
                     let y0 = y_scale.map(baseline);
-                    mark.y_compute(
-                        [InputRef::TableCol {
-                            table: table_id,
-                            col: y_col,
-                        }],
-                        move |ctx, _| {
-                            let v = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
-                            y_scale.map(v).min(y0)
-                        },
-                    )
-                    .h_compute(
-                        [InputRef::TableCol {
-                            table: table_id,
-                            col: y_col,
-                        }],
-                        move |ctx, _| {
-                            let v = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
-                            (y_scale.map(v) - y0).abs()
-                        },
-                    )
+                    mark.y_table_f64(table_id, row, y_col, baseline, move |v| {
+                        y_scale.map(v).min(y0)
+                    })
+                    .h_table_f64(table_id, row, y_col, baseline, move |v| {
+                        (y_scale.map(v) - y0).abs()
+                    })
                 };
                 mark = if let Some(opacity_col) = opacity_col {
                     let fill = fill.clone();
-                    mark.fill_compute(
-                        [InputRef::TableCol {
-                            table: table_id,
-                            col: opacity_col,
-                        }],
-                        move |ctx, _| {
-                            brush_with_opacity(
-                                &fill,
-                                opacity_for_value(
-                                    ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
-                                    opacity_domain,
-                                    1.0,
-                                ),
-                            )
-                        },
-                    )
+                    mark.fill_table_col(table_id, opacity_col, move |ctx, _| {
+                        brush_with_opacity(
+                            &fill,
+                            opacity_for_value(
+                                ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
+                                opacity_domain,
+                                1.0,
+                            ),
+                        )
+                    })
                 } else {
                     mark.fill_brush_const(fill.clone())
                 };
@@ -2842,21 +2790,41 @@ impl PointLayer {
             .enumerate()
             .map(|(row, row_key)| {
                 let size = size_col
-                    .and_then(|col| table.data.as_deref().and_then(|data| data.f64(row, col)))
+                    .and_then(|col| {
+                        table
+                            .data
+                            .as_deref()
+                            .and_then(|data| data.get_f64(row, col))
+                    })
                     .map(|value| point_size_for_value(value, size_domain, default_size))
                     .unwrap_or(default_size);
                 let symbol = shape_col
-                    .and_then(|col| table.data.as_deref().and_then(|data| data.f64(row, col)))
+                    .and_then(|col| {
+                        table
+                            .data
+                            .as_deref()
+                            .and_then(|data| data.get_f64(row, col))
+                    })
                     .map(|value| symbol_for_shape_value(value, &shape_map, default_symbol))
                     .unwrap_or(default_symbol);
                 let stroke = stroke_col
-                    .and_then(|col| table.data.as_deref().and_then(|data| data.f64(row, col)))
+                    .and_then(|col| {
+                        table
+                            .data
+                            .as_deref()
+                            .and_then(|data| data.get_f64(row, col))
+                    })
                     .map(|value| {
                         brush_for_series_value(value, &stroke_map, constant_stroke.clone())
                     })
                     .unwrap_or_else(|| constant_stroke.clone());
                 let stroke_width = stroke_width_col
-                    .and_then(|col| table.data.as_deref().and_then(|data| data.f64(row, col)))
+                    .and_then(|col| {
+                        table
+                            .data
+                            .as_deref()
+                            .and_then(|data| data.get_f64(row, col))
+                    })
                     .map(|value| {
                         stroke_width_for_value(value, stroke_width_domain, default_stroke_width)
                     })
@@ -2868,46 +2836,26 @@ impl PointLayer {
                     let mut mark = Mark::builder(layer_row_mark_id(id_base, row_key))
                         .rect()
                         .z_index(crate::z_order::SERIES_POINTS)
-                        .x_compute(
-                            [InputRef::TableCol {
-                                table: table_id,
-                                col: x_col,
-                            }],
-                            move |ctx, _| {
-                                x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0))
-                                    - size / 2.0
-                            },
-                        )
-                        .y_compute(
-                            [InputRef::TableCol {
-                                table: table_id,
-                                col: y_col,
-                            }],
-                            move |ctx, _| {
-                                y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0))
-                                    - size / 2.0
-                            },
-                        )
+                        .x_table_f64(table_id, row, x_col, 0.0, move |x| {
+                            x_scale.map(x) - size / 2.0
+                        })
+                        .y_table_f64(table_id, row, y_col, 0.0, move |y| {
+                            y_scale.map(y) - size / 2.0
+                        })
                         .w_const(size)
                         .h_const(size);
                     mark = if let Some(opacity_col) = opacity_col {
                         let fill = fill.clone();
-                        mark.fill_compute(
-                            [InputRef::TableCol {
-                                table: table_id,
-                                col: opacity_col,
-                            }],
-                            move |ctx, _| {
-                                brush_with_opacity(
-                                    &fill,
-                                    opacity_for_value(
-                                        ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
-                                        opacity_domain,
-                                        1.0,
-                                    ),
-                                )
-                            },
-                        )
+                        mark.fill_table_col(table_id, opacity_col, move |ctx, _| {
+                            brush_with_opacity(
+                                &fill,
+                                opacity_for_value(
+                                    ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
+                                    opacity_domain,
+                                    1.0,
+                                ),
+                            )
+                        })
                     } else {
                         mark.fill_brush_const(fill.clone())
                     };
@@ -2916,84 +2864,48 @@ impl PointLayer {
                     let mut mark = Mark::builder(layer_row_mark_id(id_base, row_key))
                         .path()
                         .z_index(crate::z_order::SERIES_POINTS)
-                        .path_compute(
-                            [
-                                InputRef::TableCol {
-                                    table: table_id,
-                                    col: x_col,
-                                },
-                                InputRef::TableCol {
-                                    table: table_id,
-                                    col: y_col,
-                                },
-                            ],
-                            move |ctx, _| {
-                                let x =
-                                    x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0));
-                                let y =
-                                    y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0));
-                                symbol.path(x, y, size)
-                            },
-                        );
+                        .path_table_cols(table_id, [x_col, y_col], move |ctx, _| {
+                            let x = x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0));
+                            let y = y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0));
+                            symbol.path(x, y, size)
+                        });
                     mark = if let Some(opacity_col) = opacity_col {
                         let fill = fill.clone();
-                        mark.fill_compute(
-                            [InputRef::TableCol {
-                                table: table_id,
-                                col: opacity_col,
-                            }],
-                            move |ctx, _| {
-                                brush_with_opacity(
-                                    &fill,
-                                    opacity_for_value(
-                                        ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
-                                        opacity_domain,
-                                        1.0,
-                                    ),
-                                )
-                            },
-                        )
+                        mark.fill_table_col(table_id, opacity_col, move |ctx, _| {
+                            brush_with_opacity(
+                                &fill,
+                                opacity_for_value(
+                                    ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
+                                    opacity_domain,
+                                    1.0,
+                                ),
+                            )
+                        })
                     } else {
                         mark.fill_brush_const(fill.clone())
                     };
                     mark = if let Some(stroke_col) = stroke_col {
                         let stroke_map = stroke_map.clone();
                         let default_stroke = constant_stroke.clone();
-                        mark.stroke_compute(
-                            [InputRef::TableCol {
-                                table: table_id,
-                                col: stroke_col,
-                            }],
-                            move |ctx, _| {
-                                let value =
-                                    ctx.table_f64(table_id, row, stroke_col).unwrap_or(f64::NAN);
-                                brush_for_series_value(value, &stroke_map, default_stroke.clone())
-                            },
-                        )
+                        mark.stroke_table_col(table_id, stroke_col, move |ctx, _| {
+                            let value =
+                                ctx.table_f64(table_id, row, stroke_col).unwrap_or(f64::NAN);
+                            brush_for_series_value(value, &stroke_map, default_stroke.clone())
+                        })
                     } else {
                         mark.stroke_brush_const(stroke.clone())
                     };
                     mark = if let Some(stroke_width_col) = stroke_width_col {
-                        mark.stroke_width_compute(
-                            [InputRef::TableCol {
-                                table: table_id,
-                                col: stroke_width_col,
-                            }],
-                            move |ctx, _| {
-                                let value = ctx
-                                    .table_f64(table_id, row, stroke_width_col)
-                                    .unwrap_or(default_stroke_width);
-                                stroke_width_for_value(
-                                    value,
-                                    stroke_width_domain,
-                                    default_stroke_width,
-                                )
-                            },
-                        )
+                        mark.stroke_width_table_col(table_id, stroke_width_col, move |ctx, _| {
+                            let value = ctx
+                                .table_f64(table_id, row, stroke_width_col)
+                                .unwrap_or(default_stroke_width);
+                            stroke_width_for_value(value, stroke_width_domain, default_stroke_width)
+                        })
                     } else if has_stroke_style {
                         mark.stroke_width_const(stroke_width)
                     } else {
-                        mark.stroke_width_const(0.0)
+                        mark.no_stroke()
                     };
                     mark.build()
                 }
@@ -3116,7 +3028,7 @@ impl RuleLayer {
                                 plot.y0,
                                 plot.y1,
                             )
-                            .with_stroke(stroke.brush.clone(), stroke.stroke_width)
+                            .with_stroke_style(stroke.brush.clone(), stroke.stroke.clone())
                             .mark()
                         })
                         .collect()
@@ -3136,13 +3048,13 @@ impl RuleLayer {
                                     table
                                         .data
                                         .as_deref()
-                                        .and_then(|data| data.f64(row, x))
+                                        .and_then(|data| data.get_f64(row, x))
                                         .unwrap_or(0.0),
                                 ),
                                 plot.y0,
                                 plot.y1,
                             )
-                            .with_stroke(stroke.brush.clone(), stroke.stroke_width)
+                            .with_stroke_style(stroke.brush.clone(), stroke.stroke.clone())
                             .mark()
                         })
                         .collect()
@@ -3163,13 +3075,13 @@ impl RuleLayer {
                                 table
                                     .data
                                     .as_deref()
-                                    .and_then(|data| data.f64(row, y))
+                                    .and_then(|data| data.get_f64(row, y))
                                     .unwrap_or(0.0),
                             ),
                             plot.x0,
                             plot.x1,
                         )
-                        .with_stroke(stroke.brush.clone(), stroke.stroke_width)
+                        .with_stroke_style(stroke.brush.clone(), stroke.stroke.clone())
                         .mark()
                     })
                     .collect()
@@ -3230,59 +3142,26 @@ impl TextLayer {
                         let mut mark = Mark::builder(layer_row_mark_id(id_base, row_key))
                             .text()
                             .z_index(crate::z_order::SERIES_LABELS)
-                            .x_compute(
-                                [InputRef::TableCol {
-                                    table: table_id,
-                                    col: x_col,
-                                }],
-                                move |ctx, _| {
-                                    x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0))
-                                },
-                            )
-                            .y_compute(
-                                [InputRef::TableCol {
-                                    table: table_id,
-                                    col: y_col,
-                                }],
-                                move |ctx, _| {
-                                    y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0))
-                                        - 4.0
-                                },
-                            )
-                            .text_compute(
-                                [InputRef::TableCol {
-                                    table: table_id,
-                                    col: text_col,
-                                }],
-                                move |ctx, _| {
-                                    format_channel_value(
-                                        ctx.table_f64(table_id, row, text_col).unwrap_or(f64::NAN),
-                                        text_kind,
-                                    )
-                                },
-                            )
+                            .x_table_f64(table_id, row, x_col, 0.0, move |x| x_scale.map(x))
+                            .y_table_f64(table_id, row, y_col, 0.0, move |y| y_scale.map(y) - 4.0)
+                            .text_table_col(table_id, text_col, move |ctx, _| {
+                                format_text_channel_value(ctx, table_id, row, text_col, text_kind)
+                            })
                             .font_size_const(10.0)
                             .text_anchor(TextAnchor::Middle)
                             .text_baseline(TextBaseline::Ideographic);
                         mark = if let Some(opacity_col) = opacity_col {
                             let fill = fill.clone();
-                            mark.fill_compute(
-                                [InputRef::TableCol {
-                                    table: table_id,
-                                    col: opacity_col,
-                                }],
-                                move |ctx, _| {
-                                    brush_with_opacity(
-                                        &fill,
-                                        opacity_for_value(
-                                            ctx.table_f64(table_id, row, opacity_col)
-                                                .unwrap_or(1.0),
-                                            opacity_domain,
-                                            1.0,
-                                        ),
-                                    )
-                                },
-                            )
+                            mark.fill_table_col(table_id, opacity_col, move |ctx, _| {
+                                brush_with_opacity(
+                                    &fill,
+                                    opacity_for_value(
+                                        ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
+                                        opacity_domain,
+                                        1.0,
+                                    ),
+                                )
+                            })
                         } else {
                             mark.fill_brush_const(fill.clone())
                         };
@@ -3305,50 +3184,25 @@ impl TextLayer {
                             .text()
                             .z_index(crate::z_order::SERIES_LABELS)
                             .x_const(band.x(row) + 0.5 * band_width)
-                            .y_compute(
-                                [InputRef::TableCol {
-                                    table: table_id,
-                                    col: y_col,
-                                }],
-                                move |ctx, _| {
-                                    y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0))
-                                        - 4.0
-                                },
-                            )
-                            .text_compute(
-                                [InputRef::TableCol {
-                                    table: table_id,
-                                    col: text_col,
-                                }],
-                                move |ctx, _| {
-                                    format_channel_value(
-                                        ctx.table_f64(table_id, row, text_col).unwrap_or(f64::NAN),
-                                        text_kind,
-                                    )
-                                },
-                            )
+                            .y_table_f64(table_id, row, y_col, 0.0, move |y| y_scale.map(y) - 4.0)
+                            .text_table_col(table_id, text_col, move |ctx, _| {
+                                format_text_channel_value(ctx, table_id, row, text_col, text_kind)
+                            })
                             .font_size_const(10.0)
                             .text_anchor(TextAnchor::Middle)
                             .text_baseline(TextBaseline::Ideographic);
                         mark = if let Some(opacity_col) = opacity_col {
                             let fill = fill.clone();
-                            mark.fill_compute(
-                                [InputRef::TableCol {
-                                    table: table_id,
-                                    col: opacity_col,
-                                }],
-                                move |ctx, _| {
-                                    brush_with_opacity(
-                                        &fill,
-                                        opacity_for_value(
-                                            ctx.table_f64(table_id, row, opacity_col)
-                                                .unwrap_or(1.0),
-                                            opacity_domain,
-                                            1.0,
-                                        ),
-                                    )
-                                },
-                            )
+                            mark.fill_table_col(table_id, opacity_col, move |ctx, _| {
+                                brush_with_opacity(
+                                    &fill,
+                                    opacity_for_value(
+                                        ctx.table_f64(table_id, row, opacity_col).unwrap_or(1.0),
+                                        opacity_domain,
+                                        1.0,
+                                    ),
+                                )
+                            })
                         } else {
                             mark.fill_brush_const(fill.clone())
                         };
@@ -3827,7 +3681,7 @@ fn infer_frame_domain_pair(
     let mut max = f64::NEG_INFINITY;
     for col in [Some(primary), secondary].into_iter().flatten() {
         for row in 0..frame.row_count() {
-            let Some(v) = frame.f64(row, col) else {
+            let Some(v) = frame.get_f64(row, col) else {
                 continue;
             };
             if !v.is_finite() {
@@ -3906,7 +3760,7 @@ fn category_labels(frame: &TableFrame, col: ColumnId, kind: FieldKind) -> Vec<St
 fn distinct_values(frame: &TableFrame, col: ColumnId) -> Vec<f64> {
     let mut values = Vec::new();
     for row in 0..frame.row_count() {
-        let Some(v) = frame.f64(row, col) else {
+        let Some(v) = frame.get_f64(row, col) else {
             continue;
         };
         if !v.is_finite() {
@@ -3937,6 +3791,22 @@ fn format_channel_value(v: f64, kind: FieldKind) -> String {
             }
         }
     }
+}
+
+fn format_text_channel_value(
+    ctx: &EvalCtx<'_>,
+    table: TableId,
+    row: usize,
+    col: ColumnId,
+    kind: FieldKind,
+) -> String {
+    if matches!(kind, FieldKind::Nominal | FieldKind::Ordinal)
+        && let Some(value) = ctx.table_str(table, row, col)
+    {
+        return String::from(value);
+    }
+
+    format_channel_value(ctx.table_f64(table, row, col).unwrap_or(f64::NAN), kind)
 }
 
 fn default_series_fills(count: usize) -> Vec<Brush> {
@@ -4318,8 +4188,8 @@ fn translate_mark(mut mark: Mark, dx: f64, dy: f64) -> Mark {
         MarkEncodings::Path(enc) => MarkEncodings::Path(Box::new(PathEncodings {
             path: translate_path_encoding(enc.path, dx, dy),
             fill: enc.fill,
+            stroke_brush: enc.stroke_brush,
             stroke: enc.stroke,
-            stroke_width: enc.stroke_width,
         })),
     };
     mark.cache = None;
@@ -4532,7 +4402,7 @@ fn apply_layer_child_style(
                 }
                 if let Some(stroke) = &style.stroke {
                     point.constant_stroke = stroke.brush.clone();
-                    point.default_stroke_width = stroke.stroke_width;
+                    point.default_stroke_width = stroke.stroke.width;
                     point.has_constant_stroke_style = true;
                 }
                 if let Some(opacity) = style.opacity {
@@ -4896,7 +4766,7 @@ mod tests {
 
     use super::*;
     use crate::HeuristicTextMeasurer;
-    use vizir_core::{MarkKind, Table, TableData};
+    use vizir_core::{ColumnType, MarkKind, Table, TableData};
     use vizir_transforms::WindowOp;
 
     #[derive(Debug)]
@@ -4910,7 +4780,7 @@ mod tests {
             self.a.len().min(self.b.len())
         }
 
-        fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
             match col {
                 ColumnId(0) => self.a.get(row).copied(),
                 ColumnId(1) => self.b.get(row).copied(),
@@ -4931,7 +4801,7 @@ mod tests {
             self.a.len().min(self.b.len()).min(self.c.len())
         }
 
-        fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
             match col {
                 ColumnId(0) => self.a.get(row).copied(),
                 ColumnId(1) => self.b.get(row).copied(),
@@ -4958,13 +4828,50 @@ mod tests {
                 .min(self.d.len())
         }
 
-        fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
             match col {
                 ColumnId(0) => self.a.get(row).copied(),
                 ColumnId(1) => self.b.get(row).copied(),
                 ColumnId(2) => self.c.get(row).copied(),
                 ColumnId(3) => self.d.get(row).copied(),
                 _ => None,
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct TextCols {
+        x: Vec<f64>,
+        y: Vec<f64>,
+        label: Vec<String>,
+    }
+
+    impl TableData for TextCols {
+        fn row_count(&self) -> usize {
+            self.x.len().min(self.y.len()).min(self.label.len())
+        }
+
+        fn column_type(&self, col: ColumnId) -> Option<ColumnType> {
+            match col {
+                ColumnId(0) | ColumnId(1) => Some(ColumnType::F64),
+                ColumnId(2) => Some(ColumnType::Text),
+                _ => None,
+            }
+        }
+
+        fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+            match col {
+                ColumnId(0) => self.x.get(row).copied(),
+                ColumnId(1) => self.y.get(row).copied(),
+                _ => None,
+            }
+        }
+
+        fn get_str(&self, row: usize, col: ColumnId) -> Option<&str> {
+            if col == ColumnId(2) {
+                self.label.get(row).map(String::as_str)
+            } else {
+                None
             }
         }
     }
@@ -5044,9 +4951,9 @@ mod tests {
             .get(&lowered.output_table())
             .expect("calculated output table");
         let data = calculated.data.as_deref().expect("calculated table data");
-        assert_eq!(data.f64(0, ColumnId(10)), Some(2.5));
-        assert_eq!(data.f64(1, ColumnId(10)), Some(5.0));
-        assert_eq!(data.f64(2, ColumnId(10)), Some(7.5));
+        assert_eq!(data.get_f64(0, ColumnId(10)), Some(2.5));
+        assert_eq!(data.get_f64(1, ColumnId(10)), Some(5.0));
+        assert_eq!(data.get_f64(2, ColumnId(10)), Some(7.5));
 
         let (_layout, marks) = lowered
             .marks(&scene, &HeuristicTextMeasurer)
@@ -5098,10 +5005,10 @@ mod tests {
             .get(&lowered.output_table())
             .expect("joinaggregate output table");
         let data = joined.data.as_deref().expect("joinaggregate table data");
-        assert_eq!(data.f64(0, ColumnId(10)), Some(4.0));
-        assert_eq!(data.f64(2, ColumnId(10)), Some(4.0));
-        assert_eq!(data.f64(3, ColumnId(10)), Some(5.0));
-        assert_eq!(data.f64(5, ColumnId(10)), Some(5.0));
+        assert_eq!(data.get_f64(0, ColumnId(10)), Some(4.0));
+        assert_eq!(data.get_f64(2, ColumnId(10)), Some(4.0));
+        assert_eq!(data.get_f64(3, ColumnId(10)), Some(5.0));
+        assert_eq!(data.get_f64(5, ColumnId(10)), Some(5.0));
     }
 
     #[test]
@@ -5193,13 +5100,13 @@ mod tests {
             .get(&lowered.output_table())
             .expect("lookup output table");
         let data = enriched.data.as_deref().expect("lookup table data");
-        assert_eq!(data.f64(0, ColumnId(10)), Some(4.0));
+        assert_eq!(data.get_f64(0, ColumnId(10)), Some(4.0));
         assert!(
-            data.f64(1, ColumnId(10))
+            data.get_f64(1, ColumnId(10))
                 .expect("missing lookup value")
                 .is_nan()
         );
-        assert_eq!(data.f64(2, ColumnId(10)), Some(6.0));
+        assert_eq!(data.get_f64(2, ColumnId(10)), Some(6.0));
     }
 
     #[test]
@@ -5249,10 +5156,10 @@ mod tests {
             .expect("pivot output table");
         let data = pivoted.data.as_deref().expect("pivot table data");
         assert_eq!(pivoted.row_keys.len(), 3);
-        assert_eq!(data.f64(0, ColumnId(10)), Some(2.0));
-        assert_eq!(data.f64(2, ColumnId(10)), Some(4.0));
-        assert_eq!(data.f64(0, ColumnId(11)), Some(4.0));
-        assert_eq!(data.f64(2, ColumnId(11)), Some(6.0));
+        assert_eq!(data.get_f64(0, ColumnId(10)), Some(2.0));
+        assert_eq!(data.get_f64(2, ColumnId(10)), Some(4.0));
+        assert_eq!(data.get_f64(0, ColumnId(11)), Some(4.0));
+        assert_eq!(data.get_f64(2, ColumnId(11)), Some(6.0));
     }
 
     #[test]
@@ -5350,7 +5257,7 @@ mod tests {
             .expect("window output table");
         let data = ranked.data.as_deref().expect("window table data");
         let ranks = (0..data.row_count())
-            .map(|row| data.f64(row, ColumnId(10)).expect("rank value"))
+            .map(|row| data.get_f64(row, ColumnId(10)).expect("rank value"))
             .collect::<Vec<_>>();
         assert_eq!(ranks, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
     }
@@ -5654,8 +5561,8 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(fills.contains(&Brush::Solid(css::TOMATO.with_alpha(0.2))));
-        assert!(fills.contains(&Brush::Solid(css::TOMATO.with_alpha(1.0))));
+        assert!(fills.contains(&Some(Brush::Solid(css::TOMATO.with_alpha(0.2)))));
+        assert!(fills.contains(&Some(Brush::Solid(css::TOMATO.with_alpha(1.0)))));
     }
 
     #[test]
@@ -5696,8 +5603,10 @@ mod tests {
             let vizir_core::MarkPayload::Path(channels) = *new else {
                 continue;
             };
-            strokes.push(channels.stroke);
-            widths.push(channels.stroke_width);
+            if let Some(stroke) = channels.stroke {
+                strokes.push(stroke.brush);
+                widths.push(stroke.style.width);
+            }
         }
         assert!(strokes.contains(&Brush::Solid(css::CORNFLOWER_BLUE)));
         assert!(strokes.contains(&Brush::Solid(css::TOMATO)));
@@ -5741,9 +5650,9 @@ mod tests {
             .get(&lowered.output_table())
             .expect("sorted table");
         let data = sorted.data.as_deref().expect("sorted data");
-        assert_eq!(data.f64(0, ColumnId(0)), Some(0.0));
-        assert_eq!(data.f64(1, ColumnId(0)), Some(1.0));
-        assert_eq!(data.f64(2, ColumnId(0)), Some(2.0));
+        assert_eq!(data.get_f64(0, ColumnId(0)), Some(0.0));
+        assert_eq!(data.get_f64(1, ColumnId(0)), Some(1.0));
+        assert_eq!(data.get_f64(2, ColumnId(0)), Some(2.0));
 
         let (_layout, marks) = lowered
             .marks(&scene, &HeuristicTextMeasurer)
@@ -5845,6 +5754,52 @@ mod tests {
             .expect("text marks");
         assert_eq!(marks.len(), 3);
         assert!(marks.iter().all(|mark| mark.kind == MarkKind::Text));
+    }
+
+    #[test]
+    fn text_mark_lowering_reads_string_labels() {
+        let mut scene = Scene::new();
+        let table_id = TableId(411);
+        let mut table = Table::new(table_id);
+        table.row_keys = vec![401, 402];
+        table.data = Some(Box::new(TextCols {
+            x: vec![0.0, 1.0],
+            y: vec![3.0, 5.0],
+            label: vec![String::from("alpha"), String::from("beta")],
+        }));
+        scene.insert_table(table);
+
+        let spec = UnitSpec::new(
+            0xDD90,
+            TableId(4110),
+            DataRef::Table(table_id),
+            MarkDef::Text,
+        )
+        .with_x(ChannelDef::quantitative(ColumnId(0)).with_title("x"))
+        .with_y(ChannelDef::quantitative(ColumnId(1)).with_title("value"))
+        .with_text(ChannelDef::nominal(ColumnId(2)));
+
+        let lowered = spec.lower(&scene).expect("lower text mark");
+        let layout = lowered.chart().layout(&HeuristicTextMeasurer);
+        let marks = lowered
+            .series_marks(&scene, layout.data)
+            .expect("text marks");
+        let diffs = scene.tick(marks);
+        let mut labels: Vec<String> = diffs
+            .iter()
+            .filter_map(|diff| {
+                let MarkDiff::Enter { new, .. } = diff else {
+                    return None;
+                };
+                let vizir_core::MarkPayload::Text(text) = &**new else {
+                    return None;
+                };
+                Some(text.text.clone())
+            })
+            .collect();
+        labels.sort();
+
+        assert_eq!(labels, vec![String::from("alpha"), String::from("beta")]);
     }
 
     #[test]
@@ -6215,8 +6170,10 @@ mod tests {
             let vizir_core::MarkPayload::Path(channels) = *new else {
                 continue;
             };
-            strokes.push(channels.stroke);
-            widths.push(channels.stroke_width);
+            if let Some(stroke) = channels.stroke {
+                strokes.push(stroke.brush);
+                widths.push(stroke.style.width);
+            }
         }
         assert!(strokes.contains(&Brush::Solid(css::TOMATO)));
         assert!(widths.iter().any(|width| (*width - 2.0).abs() < 1e-9));
@@ -6405,10 +6362,12 @@ mod tests {
                 continue;
             };
             fills.push(channels.fill);
-            strokes.push(channels.stroke);
-            widths.push(channels.stroke_width);
+            if let Some(stroke) = channels.stroke {
+                strokes.push(stroke.brush);
+                widths.push(stroke.style.width);
+            }
         }
-        assert!(fills.contains(&Brush::Solid(css::CORNFLOWER_BLUE.with_alpha(0.25))));
+        assert!(fills.contains(&Some(Brush::Solid(css::CORNFLOWER_BLUE.with_alpha(0.25)))));
         assert!(strokes.contains(&Brush::Solid(css::BLACK)));
         assert!(widths.iter().any(|width| (*width - 2.5).abs() < 1e-9));
     }

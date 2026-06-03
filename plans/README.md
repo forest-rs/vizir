@@ -25,6 +25,7 @@ We want to stay “Vega-ish” where it makes sense. Local reference copies live
 ## Index
 
 - Core + evolution: `plans/engine-evolution.md`
+- Table data model: `plans/table-data.md`
 - Spec IR + lowering slice: `plans/spec-ir.md`
 - Authored spec next slices: `plans/authored-next-slices.md`
 - Authored spec support matrix: `plans/support-matrix.md`

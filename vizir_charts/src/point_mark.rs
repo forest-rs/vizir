@@ -6,8 +6,9 @@
 use alloc::vec::Vec;
 
 use peniko::Brush;
-use vizir_core::{ColumnId, InputRef, Mark, MarkId, TableId};
+use vizir_core::{ColumnId, DatumRef, Mark, MarkId, TableId};
 
+use crate::roles::ROLE_SERIES_POINT;
 use crate::scale::ScaleContinuous;
 use crate::symbol::Symbol;
 
@@ -105,55 +106,31 @@ impl PointMarkSpec {
                 match symbol {
                     Symbol::Square => Mark::builder(id)
                         .rect()
+                        .role(ROLE_SERIES_POINT)
+                        .datum(DatumRef::new(table_id, row_key))
                         .z_index(z_index)
-                        .x_compute(
-                            [InputRef::TableCol {
-                                table: table_id,
-                                col: x_col,
-                            }],
-                            move |ctx, _| {
-                                x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0))
-                                    - size / 2.0
-                            },
-                        )
-                        .y_compute(
-                            [InputRef::TableCol {
-                                table: table_id,
-                                col: y_col,
-                            }],
-                            move |ctx, _| {
-                                y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0))
-                                    - size / 2.0
-                            },
-                        )
+                        .x_table_f64(table_id, row, x_col, 0.0, move |x| {
+                            x_scale.map(x) - size / 2.0
+                        })
+                        .y_table_f64(table_id, row, y_col, 0.0, move |y| {
+                            y_scale.map(y) - size / 2.0
+                        })
                         .w_const(size)
                         .h_const(size)
                         .fill_brush_const(fill.clone())
                         .build(),
                     Symbol::Circle | Symbol::Diamond | Symbol::Triangle => Mark::builder(id)
                         .path()
+                        .role(ROLE_SERIES_POINT)
+                        .datum(DatumRef::new(table_id, row_key))
                         .z_index(z_index)
-                        .path_compute(
-                            [
-                                InputRef::TableCol {
-                                    table: table_id,
-                                    col: x_col,
-                                },
-                                InputRef::TableCol {
-                                    table: table_id,
-                                    col: y_col,
-                                },
-                            ],
-                            move |ctx, _| {
-                                let x =
-                                    x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0));
-                                let y =
-                                    y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0));
-                                symbol.path(x, y, size)
-                            },
-                        )
+                        .path_table_cols(table_id, [x_col, y_col], move |ctx, _| {
+                            let x = x_scale.map(ctx.table_f64(table_id, row, x_col).unwrap_or(0.0));
+                            let y = y_scale.map(ctx.table_f64(table_id, row, y_col).unwrap_or(0.0));
+                            symbol.path(x, y, size)
+                        })
                         .fill_brush_const(fill.clone())
-                        .stroke_width_const(0.0)
+                        .no_stroke()
                         .build(),
                 }
             })

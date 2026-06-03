@@ -7,10 +7,16 @@ useful for ergonomic Rust chart APIs.
 
 ## Current state
 
-- `vizir_core::Table` v1: row keys + version; `TableData` supports numeric column reads.
-- No table diffs beyond row key reconciliation.
+- `vizir_core::Table`: row keys + table/column versions; `TableData` supports typed lanes.
+- Core has semantic `TablePatch` values; transform patch propagation is currently bounded to
+  `Project`, with replacement fallback for other operators.
 - `vizir_transforms` provides a first transform IR + full-recompute executor for numeric columns:
-  - `Filter`, `Project`, `Sort`, `Bin`, `Aggregate`, `Stack (offset=zero)` are implemented
+  - `Filter`, `Project`, `Sort`, `Calculate`, `JoinAggregate`, `Aggregate`, `Bin`, `Fold`,
+    `Lookup`, `Pivot`, `Window`, and `Stack` are implemented.
+  - Transform row-key provenance is documented in the IR and covered by focused executor tests.
+  - `TableFrame` extraction uses the optional bulk `f64` table view when available and falls back
+    to per-cell reads.
+  - `Project` can propagate bounded row/column patches.
 
 ## Staged milestones
 
@@ -28,7 +34,8 @@ useful for ergonomic Rust chart APIs.
 - Start with full recompute per transform, but structured so we can add incremental patches.
 - Add stable row IDs through transforms (lineage/provenance):
   - carry original row keys + transform-specific keys.
-  - Current: `Filter`/`Sort` preserve upstream `row_keys` as stable identity.
+  - Current: row-preserving transforms keep upstream row keys, sort moves keys with rows, and
+    aggregate/fold/pivot derive deterministic output row keys from transform semantics.
 
 ### M2: Incremental table patches
 
@@ -49,5 +56,6 @@ useful for ergonomic Rust chart APIs.
 
 ## Related plans
 
+- See `plans/table-data.md` for typed table access, row provenance, schema, and patch design.
 - See `plans/engine-evolution.md` for table storage and diff representation.
 - See `plans/scales.md` for scale domains that often depend on transforms (aggregate/bin).

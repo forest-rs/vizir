@@ -8,6 +8,16 @@ charting layer and future Vega/Vega-Lite lowering.
 ## Current state
 
 - Tables/signals with versions.
+- Tables carry minimal schema metadata keyed by `ColumnId`.
+- Tables can carry optional column versions; `InputRef::TableCol` uses them when available and
+  falls back to table-level versions.
+- Transform outputs have documented row-key provenance for the current full-recompute operators.
+- `TableData` exposes typed lanes (`f64`, integers, bool, text), optional physical column type
+  reporting, and an optional bulk `f64` view.
+- Authored text marks can read string table lanes for nominal/ordinal labels; shaping remains
+  downstream.
+- `TablePatch` describes semantic row/column changes; transform propagation currently covers
+  `Project` only.
 - Marks with explicit deps and incremental per-encoding updates.
 - Diffs: `Enter/Update/Exit` with optional bounds (text bounds unknown).
 - Marks have an explicit `z_index` for rendering order; diffs carry z-index changes so renderers
@@ -15,29 +25,33 @@ charting layer and future Vega/Vega-Lite lowering.
 
 ## Staged milestones
 
-### M0: Tables v1→v2
+### M0: Tables v2 refinement
 
-- Decide the column interface shape (and how it interacts with `no_std`):
+Detailed table-data design lives in `plans/table-data.md`.
+
+- Refine the typed column interface shape (and how it interacts with `no_std`):
   - **Borrowed slices**: columns as `&[T]` obtained from a table handle.
     - Pros: fastest, simplest call sites, easy SIMD.
     - Cons: lifetime/threading constraints; hard to model partial updates/patched views.
-  - **Trait object accessor** (`dyn TableData`-ish) with typed getters and row count.
-    - Pros: flexible backing stores (custom, Arrow, DataFusion, generated).
-    - Cons: per-element virtual dispatch; harder to batch/SIMD; less “Rust-y” for fast paths.
+  - **Trait object accessor** (`dyn TableData`) with typed getters and row count.
+    - Current: flexible backing stores with per-cell typed getters and an optional contiguous
+      `f64` slice fast path.
   - **Arrow(-ish)** (or Arrow2) as the eventual “real” table substrate.
     - Pros: interoperable; rich types; already has compute ecosystem.
     - Cons: dependency weight; `no_std` compatibility is nuanced; API churn risk.
-- Decide the row-id story (stable identity through transforms):
+- Extend the row-id story (stable identity through transforms):
   - v1 uses `row_keys: Vec<u64>` as stable identity for “one mark per row” charts.
-  - v2 needs an explicit model for:
+  - Current transforms document which operators preserve, reorder, or derive row keys.
+  - v2 still needs an explicit model for:
     - **row identity** (stable key) vs **row index** (position) vs **row order** (sort output),
     - how transforms produce new row sets while preserving provenance.
   - Likely direction:
     - carry an **origin key** (the upstream stable key) plus an optional **derived key**
       (e.g. group key for aggregates, bin key for binning, window frame key).
-- Decide versioning granularity:
-  - table-level version only (v1) vs column-level versions vs patch-based versions.
-  - column-level versions can reduce re-eval when only one column changes.
+- Extend versioning granularity:
+  - table-level versions remain the coarse invalidation path.
+  - column-level versions reduce re-eval when only one column changes.
+  - patch-based versions remain future work.
 - Decide whether/when to introduce table patches (diffs):
   - Keep v2 compatible with a future `TablePatch` model (insert/update/delete by row key).
   - Don’t commit to a specific patch encoding until transform foundations land

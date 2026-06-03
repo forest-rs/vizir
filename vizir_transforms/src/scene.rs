@@ -338,9 +338,15 @@ fn required_input_columns(transforms: &[Transform]) -> HashMap<TableId, HashSet<
 fn upsert_frame_as_table(scene: &mut Scene, id: TableId, frame: TableFrame) {
     match scene.tables.entry(id) {
         Entry::Occupied(mut e) => {
-            let Table { data, row_keys, .. } = frame.into_table(id);
+            let Table {
+                data,
+                row_keys,
+                schema,
+                ..
+            } = frame.into_table(id);
             let existing = e.get_mut();
             existing.row_keys = row_keys;
+            existing.schema = schema;
             existing.data = data;
             existing.bump();
         }
@@ -357,7 +363,7 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
-    use vizir_core::{ColumnId, Scene, Table, TableData, TableId};
+    use vizir_core::{ColumnId, ColumnType, Scene, Table, TableData, TableId};
 
     use super::*;
     use crate::transform::Transform;
@@ -373,7 +379,7 @@ mod tests {
             self.a.len().min(self.b.len())
         }
 
-        fn f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
             match col {
                 ColumnId(0) => self.a.get(row).copied(),
                 ColumnId(1) => self.b.get(row).copied(),
@@ -405,12 +411,28 @@ mod tests {
 
         // First run: insert the output table.
         p.apply_to_scene(&mut scene).unwrap();
-        let v1 = scene.tables.get(&out_id).unwrap().version;
+        let output = scene.tables.get(&out_id).unwrap();
+        let v1 = output.version;
+        assert_eq!(output.column_type(ColumnId(0)), Some(ColumnType::F64));
+        assert_eq!(output.column_type(ColumnId(1)), None);
 
         // Second run: updates existing table and bumps version once.
         p.apply_to_scene(&mut scene).unwrap();
         let v2 = scene.tables.get(&out_id).unwrap().version;
 
         assert_ne!(v1, v2);
+
+        let mut p2 = Program::new();
+        p2.push(Transform::Project {
+            input: source_id,
+            output: out_id,
+            columns: vec![ColumnId(1)],
+        });
+
+        // Updating an existing output also replaces the table schema.
+        p2.apply_to_scene(&mut scene).unwrap();
+        let output = scene.tables.get(&out_id).unwrap();
+        assert_eq!(output.column_type(ColumnId(0)), None);
+        assert_eq!(output.column_type(ColumnId(1)), Some(ColumnType::F64));
     }
 }

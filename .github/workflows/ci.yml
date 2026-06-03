@@ -3,7 +3,7 @@ env:
   # version like 1.70. Note that we only specify MAJOR.MINOR and not PATCH so that bugfixes still
   # come automatically. If the version specified here is no longer the latest stable version,
   # then please feel free to submit a PR that adjusts it along with the potential clippy fixes.
-  RUST_STABLE_VER: "1.91" # In quotes because otherwise (e.g.) 1.70 would be interpreted as 1.7
+  RUST_STABLE_VER: "1.95" # In quotes because otherwise (e.g.) 1.70 would be interpreted as 1.7
   # The purpose of checking with the minimum supported Rust toolchain is to detect its staleness.
   # If the compilation fails, then the version specified here needs to be bumped up to reality.
   # Be sure to also update the rust-version property in the workspace Cargo.toml file,
@@ -14,20 +14,26 @@ env:
   RUST_MIN_VER_PKGS: >-
     -p vizir_core
     -p vizir_charts
+    -p vizir_transforms
+    -p vizir_backend_imaging
+    -p vizir_backend_svg
   # List of packages that don't support `no_std`.
   RUST_STD_ONLY_PKGS: >-
     --exclude vizir_charts_demo
     --exclude vizir_examples
+    --exclude vizir_imaging_demo
   # List of packages that don't support wasip1
   RUST_NO_WASIP1_PKGS: >-
     --exclude vizir_charts_demo
     --exclude vizir_examples
+    --exclude vizir_imaging_demo
   # List of packages that don't support wasm32
   RUST_NO_WASM_PKGS: >-
     --exclude vizir_charts_demo
     --exclude vizir_examples
+    --exclude vizir_imaging_demo
   # List of features that depend on the standard library and will be excluded from no_std checks.
-  FEATURES_DEPENDING_ON_STD: "std,default"
+  FEATURES_DEPENDING_ON_STD: "std,default,parley"
 
 
 # Rationale

@@ -282,8 +282,8 @@ impl ChartLayout {
     ) -> f64 {
         let mut max_w = 0.0_f64;
         for s in tick_labels {
-            let (w, _h) = measurer.measure(s, font_size);
-            max_w = max_w.max(w);
+            let metrics = measurer.measure(s, font_size);
+            max_w = max_w.max(metrics.advance_width);
         }
         tick_size.abs() + tick_padding.max(0.0) + label_padding.max(0.0) + max_w
     }
@@ -296,8 +296,8 @@ impl ChartLayout {
         label_padding: f64,
         font_size: f64,
     ) -> f64 {
-        let (_w, h) = measurer.measure("Mg", font_size);
-        tick_size.abs() + tick_padding.max(0.0) + label_padding.max(0.0) + h
+        let metrics = measurer.measure("Mg", font_size);
+        tick_size.abs() + tick_padding.max(0.0) + label_padding.max(0.0) + metrics.line_height
     }
 }
 

@@ -4,9 +4,10 @@
 //! `vizir_core`: minimal incremental viz runtime (tables, signals, marks, diffs).
 //!
 //! This crate provides:
-//! - versioned inputs ([`Table`]/[`Signal`])
+//! - versioned inputs ([`Table`]/[`Signal`]), including column-level table versions
 //! - stable mark identity ([`MarkId`])
-//! - explicit dependency tracking ([`InputRef`])
+//! - UI-neutral mark semantics ([`MarkMetadata`], [`MarkRole`], [`DatumRef`])
+//! - explicit dependency tracking ([`InputRef`]) with helper constructors for common inputs
 //! - incremental evaluation + diff output ([`MarkDiff`])
 //! - per-kind mark payloads ([`MarkPayload`])
 //!
@@ -27,7 +28,7 @@ use core::any::Any;
 use core::fmt;
 use hashbrown::HashMap;
 use hashbrown::hash_map::Entry;
-use kurbo::{BezPath, Point, Rect, Shape};
+use kurbo::{BezPath, Point, Rect, Shape, Stroke};
 use peniko::{Brush, Color};
 use smallvec::SmallVec;
 
@@ -70,6 +71,221 @@ impl MarkId {
 /// Stable identifier for a table column.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ColumnId(pub u32);
+
+/// Physical value lane for a table column.
+///
+/// This is intentionally about storage/access type, not authored visualization semantics. A
+/// [`ColumnType::F64`] column may still be used as a quantitative value, category key, or
+/// timestamp-seconds lane by higher layers. Keeping the lanes typed avoids a shapeless dynamic
+/// value enum while still allowing non-numeric data to enter the runtime.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum ColumnType {
+    /// 64-bit floating point values.
+    F64,
+    /// 64-bit signed integer values.
+    I64,
+    /// 64-bit unsigned integer values.
+    U64,
+    /// Boolean values.
+    Bool,
+    /// UTF-8 text values.
+    Text,
+}
+
+/// Metadata for one table column.
+///
+/// This is core-level schema metadata: it records physical storage/access type and an optional
+/// human or adapter-provided name. Authored visualization semantics such as quantitative,
+/// nominal, ordinal, or temporal still belong in higher layers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ColumnSchema {
+    /// Stable runtime column token.
+    pub id: ColumnId,
+    /// Physical value lane for this column.
+    pub ty: ColumnType,
+    /// Optional column name supplied by an adapter or authored field resolver.
+    pub name: Option<String>,
+}
+
+impl ColumnSchema {
+    /// Create schema metadata for an unnamed column.
+    #[must_use]
+    pub const fn new(id: ColumnId, ty: ColumnType) -> Self {
+        Self { id, ty, name: None }
+    }
+
+    /// Attach a column name.
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+}
+
+/// Metadata for a table's known columns.
+///
+/// `TableSchema` is intentionally small and keyed by [`ColumnId`]. It is useful for diagnostics,
+/// adapters, and lowering checks, but it is not a dataframe schema language.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TableSchema {
+    columns: Vec<ColumnSchema>,
+}
+
+impl TableSchema {
+    /// Create an empty table schema.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            columns: Vec::new(),
+        }
+    }
+
+    /// Create a table schema from column metadata.
+    #[must_use]
+    pub fn from_columns(columns: impl IntoIterator<Item = ColumnSchema>) -> Self {
+        Self {
+            columns: columns.into_iter().collect(),
+        }
+    }
+
+    /// Return all known columns.
+    #[must_use]
+    pub fn columns(&self) -> &[ColumnSchema] {
+        &self.columns
+    }
+
+    /// Return `true` if this schema has no column metadata.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.columns.is_empty()
+    }
+
+    /// Return metadata for one column.
+    #[must_use]
+    pub fn column(&self, id: ColumnId) -> Option<&ColumnSchema> {
+        self.columns.iter().find(|column| column.id == id)
+    }
+
+    /// Return the physical value type for one column.
+    #[must_use]
+    pub fn column_type(&self, id: ColumnId) -> Option<ColumnType> {
+        self.column(id).map(|column| column.ty)
+    }
+
+    /// Return the optional name for one column.
+    #[must_use]
+    pub fn column_name(&self, id: ColumnId) -> Option<&str> {
+        self.column(id).and_then(|column| column.name.as_deref())
+    }
+
+    /// Insert or replace column metadata by [`ColumnId`].
+    pub fn upsert_column(&mut self, column: ColumnSchema) {
+        if let Some(existing) = self
+            .columns
+            .iter_mut()
+            .find(|existing| existing.id == column.id)
+        {
+            *existing = column;
+        } else {
+            self.columns.push(column);
+        }
+    }
+}
+
+/// Semantic role for a mark.
+///
+/// Roles are intentionally static strings rather than a closed enum. `vizir_core` carries the
+/// role through diffs, while higher layers own the vocabulary (`"series.bar"`, `"axis.tick"`,
+/// `"legend.swatch"`, and so on).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct MarkRole(&'static str);
+
+impl MarkRole {
+    /// Create a semantic role from a static identifier.
+    #[must_use]
+    pub const fn new(value: &'static str) -> Self {
+        Self(value)
+    }
+
+    /// Return the static role identifier.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+/// Reference from a visual mark back to source data.
+///
+/// This is a semantic link, not a data accessor. It lets downstream systems connect a mark to
+/// table rows and, when applicable, a specific field for inspection, selection, accessibility,
+/// or tooltip lookup.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DatumRef {
+    /// Source table.
+    pub table: TableId,
+    /// Stable source row key.
+    pub row_key: u64,
+    /// Optional source column when the mark primarily represents one field.
+    pub column: Option<ColumnId>,
+}
+
+impl DatumRef {
+    /// Create a datum reference for a table row.
+    #[must_use]
+    pub const fn new(table: TableId, row_key: u64) -> Self {
+        Self {
+            table,
+            row_key,
+            column: None,
+        }
+    }
+
+    /// Attach a primary source column to this datum reference.
+    #[must_use]
+    pub const fn with_column(mut self, column: ColumnId) -> Self {
+        self.column = Some(column);
+        self
+    }
+}
+
+/// UI-neutral semantic metadata associated with a mark.
+///
+/// Metadata is carried beside render payloads. It does not affect geometry or paint evaluation,
+/// but changes to metadata still produce [`MarkDiff::Update`] so retained consumers can update
+/// inspection, selection, tooltip, and accessibility state.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MarkMetadata {
+    /// Optional semantic role.
+    pub role: Option<MarkRole>,
+    /// Optional source datum reference.
+    pub datum: Option<DatumRef>,
+    /// Optional short human-facing label.
+    pub label: Option<String>,
+    /// Optional longer human-facing description.
+    pub description: Option<String>,
+}
+
+impl MarkMetadata {
+    /// Create empty mark metadata.
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self {
+            role: None,
+            datum: None,
+            label: None,
+            description: None,
+        }
+    }
+
+    /// Return `true` when no semantic fields are set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.role.is_none()
+            && self.datum.is_none()
+            && self.label.is_none()
+            && self.description.is_none()
+    }
+}
 
 /// The geometric "kind" of a mark, which determines how channels are interpreted.
 ///
@@ -115,6 +331,26 @@ pub enum InputRef {
     },
 }
 
+impl InputRef {
+    /// Create a coarse table dependency.
+    #[must_use]
+    pub const fn table(table: TableId) -> Self {
+        Self::Table { table }
+    }
+
+    /// Create a table-column dependency.
+    #[must_use]
+    pub const fn table_col(table: TableId, col: ColumnId) -> Self {
+        Self::TableCol { table, col }
+    }
+
+    /// Create a signal dependency.
+    #[must_use]
+    pub const fn signal(signal: SignalId) -> Self {
+        Self::Signal { signal }
+    }
+}
+
 /// Minimal columnar table placeholder.
 /// Replace with Arrow, your own column store, or a trait object later.
 #[derive(Debug)]
@@ -129,6 +365,16 @@ pub struct Table {
     /// row-driven mark sets without committing to a column representation yet.
     pub row_keys: Vec<u64>,
 
+    /// Optional metadata for known columns.
+    pub schema: TableSchema,
+
+    /// Optional per-column versions for narrower [`InputRef::TableCol`] invalidation.
+    ///
+    /// When a column has no explicit version, table-column dependencies fall back to
+    /// [`Table::version`]. Coarse table changes clear these versions so existing column
+    /// dependencies still observe full-table replacements.
+    pub column_versions: HashMap<ColumnId, Version>,
+
     /// Optional columnar access for encodings.
     pub data: Option<Box<dyn TableData>>,
 }
@@ -140,13 +386,24 @@ impl Table {
             id,
             version: 1,
             row_keys: Vec::new(),
+            schema: TableSchema::new(),
+            column_versions: HashMap::new(),
             data: None,
         }
     }
 
     /// Increment the version counter.
+    ///
+    /// This is a coarse table invalidation. It clears explicit column versions so
+    /// [`InputRef::TableCol`] dependencies fall back to the new table version.
     pub fn bump(&mut self) {
+        self.column_versions.clear();
         self.version = self.version.wrapping_add(1);
+    }
+
+    fn bump_version_only(&mut self) -> Version {
+        self.version = self.version.wrapping_add(1);
+        self.version
     }
 
     /// Replace the table's row keys and bump its version.
@@ -161,6 +418,46 @@ impl Table {
         self.bump();
     }
 
+    /// Replace the table schema and bump its version.
+    pub fn set_schema(&mut self, schema: TableSchema) {
+        self.schema = schema;
+        self.bump();
+    }
+
+    /// Set an explicit column version without changing the table-level version.
+    ///
+    /// Use this when importing version metadata from an external table store. Use
+    /// [`Self::bump_column`] for local column mutations so coarse table dependencies are also
+    /// invalidated.
+    pub fn set_column_version(&mut self, col: ColumnId, version: Version) {
+        self.column_versions.insert(col, version);
+    }
+
+    /// Increment one column version and the coarse table version.
+    ///
+    /// Marks depending on the whole table observe the table-level bump. Marks depending on other
+    /// explicit table columns continue to see their column versions unchanged.
+    pub fn bump_column(&mut self, col: ColumnId) -> Version {
+        let previous = self.column_version(col).unwrap_or(self.version);
+        self.bump_version_only();
+        let next = previous.wrapping_add(1);
+        self.column_versions.insert(col, next);
+        next
+    }
+
+    /// Return the explicit version for one column, if present.
+    pub fn column_version(&self, col: ColumnId) -> Option<Version> {
+        self.column_versions.get(&col).copied()
+    }
+
+    /// Return the effective version for a table-column dependency.
+    ///
+    /// Explicit column versions are preferred. If none is present, the table-level version is used
+    /// as a conservative fallback.
+    pub fn table_column_version(&self, col: ColumnId) -> Version {
+        self.column_version(col).unwrap_or(self.version)
+    }
+
     /// Return the number of rows.
     pub fn row_count(&self) -> usize {
         self.row_keys.len()
@@ -170,20 +467,166 @@ impl Table {
     pub fn row_key(&self, row: usize) -> Option<u64> {
         self.row_keys.get(row).copied()
     }
+
+    /// Return metadata for one column, if known.
+    pub fn column_schema(&self, col: ColumnId) -> Option<&ColumnSchema> {
+        self.schema.column(col)
+    }
+
+    /// Return the physical value type for a column, if known.
+    pub fn column_type(&self, col: ColumnId) -> Option<ColumnType> {
+        self.schema
+            .column_type(col)
+            .or_else(|| self.data.as_deref()?.column_type(col))
+    }
+
+    /// Return the optional name for a column, if known.
+    pub fn column_name(&self, col: ColumnId) -> Option<&str> {
+        self.schema.column_name(col)
+    }
+
+    /// Return an optional bulk `f64` view for one column.
+    pub fn f64_column(&self, col: ColumnId) -> Option<F64ColumnRef<'_>> {
+        self.data.as_deref()?.f64_column(col)
+    }
 }
 
-/// Optional columnar access for table-driven mark encodings.
+/// Borrowed bulk view of an `f64` table column.
 ///
-/// v0: only `f64` is supported because it's enough for basic charts (positions, sizes).
+/// This is an optional fast path. Callers must continue to support per-cell
+/// [`TableData::get_f64`] fallback when a table implementation cannot expose a contiguous slice.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum F64ColumnRef<'a> {
+    /// A contiguous `f64` slice.
+    Slice(&'a [f64]),
+}
+
+impl<'a> F64ColumnRef<'a> {
+    /// Return the number of values in the view.
+    #[must_use]
+    pub const fn len(self) -> usize {
+        match self {
+            Self::Slice(values) => values.len(),
+        }
+    }
+
+    /// Return `true` when the view contains no values.
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+
+    /// Return the value at `row`, if present.
+    #[must_use]
+    pub fn get(self, row: usize) -> Option<f64> {
+        match self {
+            Self::Slice(values) => values.get(row).copied(),
+        }
+    }
+
+    /// Return the view as a contiguous slice.
+    #[must_use]
+    pub const fn as_slice(self) -> &'a [f64] {
+        match self {
+            Self::Slice(values) => values,
+        }
+    }
+}
+
+/// Semantic table change description.
 ///
-/// To use this, implement `TableData` on your column store and set [`Table::data`]. Computed mark
-/// encodings can read values via [`EvalCtx::table_f64`].
+/// Patches are expressed in terms of stable row keys and [`ColumnId`]s, not storage buffers or
+/// row positions. This keeps patch propagation independent of the table backend.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TablePatch {
+    /// No observable table change.
+    Empty,
+    /// Rows with these stable keys were inserted.
+    RowsInserted {
+        /// Inserted row keys.
+        keys: Vec<u64>,
+    },
+    /// Rows with these stable keys were removed.
+    RowsRemoved {
+        /// Removed row keys.
+        keys: Vec<u64>,
+    },
+    /// Existing rows changed in the listed columns.
+    RowsUpdated {
+        /// Updated row keys.
+        keys: Vec<u64>,
+        /// Updated columns.
+        columns: Vec<ColumnId>,
+    },
+    /// One or more whole columns changed.
+    ColumnsUpdated {
+        /// Updated columns.
+        columns: Vec<ColumnId>,
+    },
+    /// The table changed in a way that is not represented by a bounded patch.
+    Replaced,
+}
+
+impl TablePatch {
+    /// Return `true` if this patch represents no observable table change.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        matches!(self, Self::Empty)
+    }
+}
+
+/// Optional typed columnar access for table-driven mark encodings.
+///
+/// This is a small typed-lane interface, not a table engine. Implementors expose whichever column
+/// accessors they support and can optionally report a [`ColumnType`] for each column. Numeric chart
+/// code can read via [`Self::get_f64`] or the optional [`Self::f64_column`] bulk view, while future
+/// authored layers can use text, integer, and boolean lanes without introducing a dynamic value
+/// enum.
 pub trait TableData: fmt::Debug {
     /// Number of rows available via this accessor.
     fn row_count(&self) -> usize;
 
-    /// Return a numeric value for a given row/column.
-    fn f64(&self, row: usize, col: ColumnId) -> Option<f64>;
+    /// Return the physical value type for a column, if known.
+    fn column_type(&self, col: ColumnId) -> Option<ColumnType> {
+        let _ = col;
+        None
+    }
+
+    /// Return an `f64` value for a given row/column.
+    fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+        let _ = (row, col);
+        None
+    }
+
+    /// Return a bulk `f64` view for a column, if available.
+    fn f64_column(&self, col: ColumnId) -> Option<F64ColumnRef<'_>> {
+        let _ = col;
+        None
+    }
+
+    /// Return an `i64` value for a given row/column.
+    fn get_i64(&self, row: usize, col: ColumnId) -> Option<i64> {
+        let _ = (row, col);
+        None
+    }
+
+    /// Return a `u64` value for a given row/column.
+    fn get_u64(&self, row: usize, col: ColumnId) -> Option<u64> {
+        let _ = (row, col);
+        None
+    }
+
+    /// Return a `bool` value for a given row/column.
+    fn get_bool(&self, row: usize, col: ColumnId) -> Option<bool> {
+        let _ = (row, col);
+        None
+    }
+
+    /// Return a UTF-8 text value for a given row/column.
+    fn get_str(&self, row: usize, col: ColumnId) -> Option<&str> {
+        let _ = (row, col);
+        None
+    }
 }
 
 /// Type-erased access to a [`Signal`] for storage in a scene.
@@ -255,6 +698,91 @@ pub enum Encoding<T> {
     },
 }
 
+impl<T> Encoding<T> {
+    /// Create a computed encoding with explicit dependencies.
+    ///
+    /// Prefer the narrower dependency constructors such as [`Self::from_table_col`] or
+    /// [`Self::from_signal`] when a computed channel reads one known input. Use this constructor
+    /// for low-level escape hatches where the caller has already derived the full dependency set.
+    pub fn compute(
+        deps: impl IntoIterator<Item = InputRef>,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> T + 'static,
+    ) -> Self {
+        Self::Compute {
+            deps: deps4(deps),
+            f: Box::new(f),
+        }
+    }
+
+    /// Create a computed encoding that depends on an entire table.
+    pub fn from_table(table: TableId, f: impl Fn(&EvalCtx<'_>, MarkId) -> T + 'static) -> Self {
+        Self::compute([InputRef::table(table)], f)
+    }
+
+    /// Create a computed encoding that depends on one table column.
+    pub fn from_table_col(
+        table: TableId,
+        col: ColumnId,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> T + 'static,
+    ) -> Self {
+        Self::compute([InputRef::table_col(table, col)], f)
+    }
+
+    /// Create a computed encoding that depends on several columns from the same table.
+    pub fn from_table_cols(
+        table: TableId,
+        cols: impl IntoIterator<Item = ColumnId>,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> T + 'static,
+    ) -> Self {
+        Self::compute(
+            cols.into_iter().map(|col| InputRef::table_col(table, col)),
+            f,
+        )
+    }
+
+    /// Create a computed encoding that depends on one signal.
+    pub fn from_signal(signal: SignalId, f: impl Fn(&EvalCtx<'_>, MarkId) -> T + 'static) -> Self {
+        Self::compute([InputRef::signal(signal)], f)
+    }
+}
+
+impl Encoding<f64> {
+    /// Create a numeric encoding by reading one `f64` table column and mapping it.
+    ///
+    /// The dependency on `table`/`col` is attached mechanically, so callers do not have to keep a
+    /// closure and an explicit dependency list in sync.
+    pub fn table_f64(
+        table: TableId,
+        row: usize,
+        col: ColumnId,
+        fallback: f64,
+        map: impl Fn(f64) -> f64 + 'static,
+    ) -> Self {
+        Self::from_table_col(table, col, move |ctx, _| {
+            map(ctx.table_f64(table, row, col).unwrap_or(fallback))
+        })
+    }
+}
+
+impl Encoding<String> {
+    /// Create a text encoding by reading one string table column.
+    ///
+    /// The dependency on `table`/`col` is attached mechanically. If the value is missing or the
+    /// table does not expose a string lane for the column, `fallback` is used.
+    pub fn table_str(
+        table: TableId,
+        row: usize,
+        col: ColumnId,
+        fallback: impl Into<String>,
+    ) -> Self {
+        let fallback = fallback.into();
+        Self::from_table_col(table, col, move |ctx, _| {
+            ctx.table_str(table, row, col)
+                .map_or_else(|| fallback.clone(), String::from)
+        })
+    }
+}
+
 impl<T: fmt::Debug> fmt::Debug for Encoding<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -289,6 +817,10 @@ fn deps4(deps: impl IntoIterator<Item = InputRef>) -> SmallVec<[InputRef; 4]> {
 ///
 /// This is the “render-facing” data model: it is what downstream renderers consume, and it is what
 /// appears in [`MarkDiff`] diffs (boxed) and cached on [`Mark`].
+#[allow(
+    clippy::large_enum_variant,
+    reason = "diffs box MarkPayload already; changing channel storage is a separate representation decision"
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum MarkPayload {
     /// An axis-aligned rectangle.
@@ -315,7 +847,7 @@ impl MarkPayload {
             Self::Rect(r) => Some(r.rect),
             // v1: text shaping/layout is downstream; bounds are not known here.
             Self::Text(_) => None,
-            Self::Path(p) => Some(p.path.bounding_box()),
+            Self::Path(p) => p.bounds(),
         }
     }
 }
@@ -391,12 +923,33 @@ pub enum TextBaseline {
 pub struct PathChannels {
     /// The vector path geometry.
     pub path: BezPath,
-    /// Fill paint.
-    pub fill: Brush,
+    /// Optional fill paint.
+    pub fill: Option<Brush>,
+    /// Optional stroke paint and style.
+    pub stroke: Option<PathStroke>,
+}
+
+impl PathChannels {
+    fn bounds(&self) -> Option<Rect> {
+        let path_bounds = self.path.bounding_box();
+        let mut bounds = self.fill.as_ref().map(|_| path_bounds);
+        if let Some(stroke) = &self.stroke
+            && stroke.style.width > 0.0
+        {
+            let half_width = 0.5 * stroke.style.width;
+            bounds = union_bounds(bounds, Some(path_bounds.inflate(half_width, half_width)));
+        }
+        bounds
+    }
+}
+
+/// Evaluated stroke paint and style for a path mark.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PathStroke {
     /// Stroke paint.
-    pub stroke: Brush,
-    /// Stroke width in scene coordinates.
-    pub stroke_width: f64,
+    pub brush: Brush,
+    /// Stroke style, including width, caps, joins, and dashes.
+    pub style: Stroke,
 }
 
 impl Default for RectChannels {
@@ -426,9 +979,8 @@ impl Default for PathChannels {
     fn default() -> Self {
         Self {
             path: BezPath::new(),
-            fill: Brush::Solid(Color::from_rgba8(0, 0, 0, 255)),
-            stroke: Brush::default(),
-            stroke_width: 0.0,
+            fill: Some(Brush::Solid(Color::from_rgba8(0, 0, 0, 255))),
+            stroke: None,
         }
     }
 }
@@ -482,8 +1034,8 @@ impl MarkEncodings {
                 let e = e.as_ref();
                 out.extend(e.path.deps());
                 out.extend(e.fill.deps());
+                out.extend(e.stroke_brush.deps());
                 out.extend(e.stroke.deps());
-                out.extend(e.stroke_width.deps());
             }
         }
         out.sort();
@@ -533,12 +1085,12 @@ pub struct TextEncodings {
 pub struct PathEncodings {
     /// Path geometry.
     pub path: Encoding<BezPath>,
-    /// Fill paint.
-    pub fill: Encoding<Brush>,
-    /// Stroke paint.
-    pub stroke: Encoding<Brush>,
-    /// Stroke width.
-    pub stroke_width: Encoding<f64>,
+    /// Optional fill paint.
+    pub fill: Encoding<Option<Brush>>,
+    /// Optional stroke paint.
+    pub stroke_brush: Encoding<Option<Brush>>,
+    /// Stroke style, including width, caps, joins, and dashes.
+    pub stroke: Encoding<Stroke>,
 }
 
 impl Default for RectEncodings {
@@ -572,9 +1124,9 @@ impl Default for PathEncodings {
     fn default() -> Self {
         Self {
             path: Encoding::Const(BezPath::new()),
-            fill: Encoding::Const(Brush::Solid(Color::from_rgba8(0, 0, 0, 255))),
-            stroke: Encoding::Const(Brush::default()),
-            stroke_width: Encoding::Const(0.0),
+            fill: Encoding::Const(Some(Brush::Solid(Color::from_rgba8(0, 0, 0, 255)))),
+            stroke_brush: Encoding::Const(None),
+            stroke: Encoding::Const(Stroke::default()),
         }
     }
 }
@@ -597,6 +1149,9 @@ pub struct Mark {
     /// Encodings for this mark's kind.
     pub encodings: MarkEncodings,
 
+    /// UI-neutral semantic metadata carried beside render payloads.
+    pub metadata: MarkMetadata,
+
     /// Flattened dependency summary for quick dirtiness checks.
     pub deps: SmallVec<[InputRef; 8]>,
 
@@ -605,6 +1160,9 @@ pub struct Mark {
 
     /// Z-index used at the time of the last evaluation (for diffing/reordering).
     cached_z_index: i32,
+
+    /// Metadata used at the time of the last evaluation (for diffing retained semantics).
+    cached_metadata: MarkMetadata,
 
     /// Last versions observed for inputs (simple per-mark tracking).
     pub last_seen: HashMap<InputRef, Version>,
@@ -620,9 +1178,11 @@ impl Mark {
             z_index: 0,
             kind: MarkKind::Rect,
             encodings: MarkEncodings::Rect(Box::default()),
+            metadata: MarkMetadata::default(),
             deps: SmallVec::new(),
             cache: None,
             cached_z_index: 0,
+            cached_metadata: MarkMetadata::default(),
             last_seen: HashMap::new(),
             force_eval: false,
         };
@@ -642,6 +1202,14 @@ impl Mark {
             mark: Self::new(id),
         }
     }
+
+    fn presented_metadata(&self) -> MarkMetadata {
+        if self.cache.is_some() {
+            self.cached_metadata.clone()
+        } else {
+            self.metadata.clone()
+        }
+    }
 }
 
 /// A builder for [`Mark`] that rebuilds dependencies on `build()`.
@@ -651,6 +1219,36 @@ pub struct MarkBuilder {
 }
 
 impl MarkBuilder {
+    /// Replace semantic metadata.
+    pub fn metadata(mut self, metadata: MarkMetadata) -> Self {
+        self.mark.metadata = metadata;
+        self
+    }
+
+    /// Set the semantic role.
+    pub fn role(mut self, role: MarkRole) -> Self {
+        self.mark.metadata.role = Some(role);
+        self
+    }
+
+    /// Set the source datum reference.
+    pub fn datum(mut self, datum: DatumRef) -> Self {
+        self.mark.metadata.datum = Some(datum);
+        self
+    }
+
+    /// Set a short human-facing semantic label.
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.mark.metadata.label = Some(label.into());
+        self
+    }
+
+    /// Set a longer human-facing semantic description.
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.mark.metadata.description = Some(description.into());
+        self
+    }
+
     /// Set the mark z-index (rendering order).
     pub fn z_index(mut self, z_index: i32) -> Self {
         self.mark.z_index = z_index;
@@ -684,10 +1282,15 @@ impl MarkBuilder {
     }
 
     /// Set the `x` encoding to a constant value.
-    pub fn x_const(mut self, v: f64) -> Self {
+    pub fn x_const(self, v: f64) -> Self {
+        self.x_encoding(Encoding::Const(v))
+    }
+
+    /// Set the `x` encoding directly.
+    pub fn x_encoding(mut self, encoding: Encoding<f64>) -> Self {
         match &mut self.mark.encodings {
-            MarkEncodings::Rect(e) => e.as_mut().x = Encoding::Const(v),
-            MarkEncodings::Text(e) => e.as_mut().x = Encoding::Const(v),
+            MarkEncodings::Rect(e) => e.as_mut().x = encoding,
+            MarkEncodings::Text(e) => e.as_mut().x = encoding,
             MarkEncodings::Path(_) => {}
         }
         self
@@ -695,33 +1298,35 @@ impl MarkBuilder {
 
     /// Set the `x` encoding to a computed value.
     pub fn x_compute(
-        mut self,
+        self,
         deps: impl IntoIterator<Item = InputRef>,
         f: impl Fn(&EvalCtx<'_>, MarkId) -> f64 + 'static,
     ) -> Self {
-        match &mut self.mark.encodings {
-            MarkEncodings::Rect(e) => {
-                e.as_mut().x = Encoding::Compute {
-                    deps: deps4(deps),
-                    f: Box::new(f),
-                };
-            }
-            MarkEncodings::Text(e) => {
-                e.as_mut().x = Encoding::Compute {
-                    deps: deps4(deps),
-                    f: Box::new(f),
-                };
-            }
-            MarkEncodings::Path(_) => {}
-        }
-        self
+        self.x_encoding(Encoding::compute(deps, f))
+    }
+
+    /// Set the `x` encoding from one numeric table column.
+    pub fn x_table_f64(
+        self,
+        table: TableId,
+        row: usize,
+        col: ColumnId,
+        fallback: f64,
+        map: impl Fn(f64) -> f64 + 'static,
+    ) -> Self {
+        self.x_encoding(Encoding::table_f64(table, row, col, fallback, map))
     }
 
     /// Set the `y` encoding to a constant value.
-    pub fn y_const(mut self, v: f64) -> Self {
+    pub fn y_const(self, v: f64) -> Self {
+        self.y_encoding(Encoding::Const(v))
+    }
+
+    /// Set the `y` encoding directly.
+    pub fn y_encoding(mut self, encoding: Encoding<f64>) -> Self {
         match &mut self.mark.encodings {
-            MarkEncodings::Rect(e) => e.as_mut().y = Encoding::Const(v),
-            MarkEncodings::Text(e) => e.as_mut().y = Encoding::Const(v),
+            MarkEncodings::Rect(e) => e.as_mut().y = encoding,
+            MarkEncodings::Text(e) => e.as_mut().y = encoding,
             MarkEncodings::Path(_) => {}
         }
         self
@@ -729,81 +1334,119 @@ impl MarkBuilder {
 
     /// Set the `y` encoding to a computed value.
     pub fn y_compute(
-        mut self,
+        self,
         deps: impl IntoIterator<Item = InputRef>,
         f: impl Fn(&EvalCtx<'_>, MarkId) -> f64 + 'static,
     ) -> Self {
-        match &mut self.mark.encodings {
-            MarkEncodings::Rect(e) => {
-                e.as_mut().y = Encoding::Compute {
-                    deps: deps4(deps),
-                    f: Box::new(f),
-                };
-            }
-            MarkEncodings::Text(e) => {
-                e.as_mut().y = Encoding::Compute {
-                    deps: deps4(deps),
-                    f: Box::new(f),
-                };
-            }
-            MarkEncodings::Path(_) => {}
-        }
-        self
+        self.y_encoding(Encoding::compute(deps, f))
+    }
+
+    /// Set the `y` encoding from one numeric table column.
+    pub fn y_table_f64(
+        self,
+        table: TableId,
+        row: usize,
+        col: ColumnId,
+        fallback: f64,
+        map: impl Fn(f64) -> f64 + 'static,
+    ) -> Self {
+        self.y_encoding(Encoding::table_f64(table, row, col, fallback, map))
+    }
+
+    /// Set the `y` encoding from several columns from one table.
+    pub fn y_table_cols(
+        self,
+        table: TableId,
+        cols: impl IntoIterator<Item = ColumnId>,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> f64 + 'static,
+    ) -> Self {
+        self.y_encoding(Encoding::from_table_cols(table, cols, f))
     }
 
     /// Set the `w` encoding to a constant value.
-    pub fn w_const(mut self, v: f64) -> Self {
+    pub fn w_const(self, v: f64) -> Self {
+        self.w_encoding(Encoding::Const(v))
+    }
+
+    /// Set the `w` encoding directly (rect marks only).
+    pub fn w_encoding(mut self, encoding: Encoding<f64>) -> Self {
         if let MarkEncodings::Rect(e) = &mut self.mark.encodings {
-            e.as_mut().w = Encoding::Const(v);
+            e.as_mut().w = encoding;
         }
         self
     }
 
     /// Set the `w` encoding to a computed value (rect marks only).
     pub fn w_compute(
-        mut self,
+        self,
         deps: impl IntoIterator<Item = InputRef>,
         f: impl Fn(&EvalCtx<'_>, MarkId) -> f64 + 'static,
     ) -> Self {
-        if let MarkEncodings::Rect(e) = &mut self.mark.encodings {
-            e.as_mut().w = Encoding::Compute {
-                deps: deps4(deps),
-                f: Box::new(f),
-            };
-        }
-        self
+        self.w_encoding(Encoding::compute(deps, f))
+    }
+
+    /// Set the `w` encoding from one numeric table column (rect marks only).
+    pub fn w_table_f64(
+        self,
+        table: TableId,
+        row: usize,
+        col: ColumnId,
+        fallback: f64,
+        map: impl Fn(f64) -> f64 + 'static,
+    ) -> Self {
+        self.w_encoding(Encoding::table_f64(table, row, col, fallback, map))
     }
 
     /// Set the `h` encoding to a constant value.
-    pub fn h_const(mut self, v: f64) -> Self {
+    pub fn h_const(self, v: f64) -> Self {
+        self.h_encoding(Encoding::Const(v))
+    }
+
+    /// Set the `h` encoding directly (rect marks only).
+    pub fn h_encoding(mut self, encoding: Encoding<f64>) -> Self {
         if let MarkEncodings::Rect(e) = &mut self.mark.encodings {
-            e.as_mut().h = Encoding::Const(v);
+            e.as_mut().h = encoding;
         }
         self
     }
 
     /// Set the `h` encoding to a computed value (rect marks only).
     pub fn h_compute(
-        mut self,
+        self,
         deps: impl IntoIterator<Item = InputRef>,
         f: impl Fn(&EvalCtx<'_>, MarkId) -> f64 + 'static,
     ) -> Self {
-        if let MarkEncodings::Rect(e) = &mut self.mark.encodings {
-            e.as_mut().h = Encoding::Compute {
-                deps: deps4(deps),
-                f: Box::new(f),
-            };
-        }
-        self
+        self.h_encoding(Encoding::compute(deps, f))
+    }
+
+    /// Set the `h` encoding from one numeric table column (rect marks only).
+    pub fn h_table_f64(
+        self,
+        table: TableId,
+        row: usize,
+        col: ColumnId,
+        fallback: f64,
+        map: impl Fn(f64) -> f64 + 'static,
+    ) -> Self {
+        self.h_encoding(Encoding::table_f64(table, row, col, fallback, map))
+    }
+
+    /// Set the `h` encoding from several columns from one table (rect marks only).
+    pub fn h_table_cols(
+        self,
+        table: TableId,
+        cols: impl IntoIterator<Item = ColumnId>,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> f64 + 'static,
+    ) -> Self {
+        self.h_encoding(Encoding::from_table_cols(table, cols, f))
     }
 
     /// Set the `fill` encoding to a constant value.
     pub fn fill_const(mut self, v: Color) -> Self {
-        let brush = Brush::Solid(v);
         match &mut self.mark.encodings {
-            MarkEncodings::Rect(e) => e.as_mut().fill = Encoding::Const(brush),
-            MarkEncodings::Text(e) => e.as_mut().fill = Encoding::Const(brush),
-            MarkEncodings::Path(e) => e.as_mut().fill = Encoding::Const(brush),
+            MarkEncodings::Rect(e) => e.as_mut().fill = Encoding::Const(Brush::Solid(v)),
+            MarkEncodings::Text(e) => e.as_mut().fill = Encoding::Const(Brush::Solid(v)),
+            MarkEncodings::Path(e) => e.as_mut().fill = Encoding::Const(Some(Brush::Solid(v))),
         }
         self
     }
@@ -814,7 +1457,15 @@ impl MarkBuilder {
         match &mut self.mark.encodings {
             MarkEncodings::Rect(e) => e.as_mut().fill = Encoding::Const(v),
             MarkEncodings::Text(e) => e.as_mut().fill = Encoding::Const(v),
-            MarkEncodings::Path(e) => e.as_mut().fill = Encoding::Const(v),
+            MarkEncodings::Path(e) => e.as_mut().fill = Encoding::Const(Some(v)),
+        }
+        self
+    }
+
+    /// Disable path fill output.
+    pub fn no_fill(mut self) -> Self {
+        if let MarkEncodings::Path(e) = &mut self.mark.encodings {
+            e.as_mut().fill = Encoding::Const(None);
         }
         self
     }
@@ -841,11 +1492,21 @@ impl MarkBuilder {
             MarkEncodings::Path(e) => {
                 e.as_mut().fill = Encoding::Compute {
                     deps: deps4(deps),
-                    f: Box::new(f),
+                    f: Box::new(move |ctx, id| Some(f(ctx, id))),
                 };
             }
         }
         self
+    }
+
+    /// Set the `fill` encoding from one table column.
+    pub fn fill_table_col(
+        self,
+        table: TableId,
+        col: ColumnId,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> Brush + 'static,
+    ) -> Self {
+        self.fill_compute([InputRef::table_col(table, col)], f)
     }
 
     /// Set the `text` encoding to a constant value (text marks only).
@@ -858,17 +1519,40 @@ impl MarkBuilder {
 
     /// Set the `text` encoding to a computed value (text marks only).
     pub fn text_compute(
-        mut self,
+        self,
         deps: impl IntoIterator<Item = InputRef>,
         f: impl Fn(&EvalCtx<'_>, MarkId) -> String + 'static,
     ) -> Self {
+        self.text_encoding(Encoding::compute(deps, f))
+    }
+
+    /// Set the `text` encoding directly (text marks only).
+    pub fn text_encoding(mut self, encoding: Encoding<String>) -> Self {
         if let MarkEncodings::Text(e) = &mut self.mark.encodings {
-            e.as_mut().text = Encoding::Compute {
-                deps: deps4(deps),
-                f: Box::new(f),
-            };
+            e.as_mut().text = encoding;
         }
         self
+    }
+
+    /// Set the `text` encoding from one table column (text marks only).
+    pub fn text_table_col(
+        self,
+        table: TableId,
+        col: ColumnId,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> String + 'static,
+    ) -> Self {
+        self.text_encoding(Encoding::from_table_col(table, col, f))
+    }
+
+    /// Set the `text` encoding from one string table column (text marks only).
+    pub fn text_table_str(
+        self,
+        table: TableId,
+        row: usize,
+        col: ColumnId,
+        fallback: impl Into<String>,
+    ) -> Self {
+        self.text_encoding(Encoding::table_str(table, row, col, fallback))
     }
 
     /// Set the `font_size` encoding to a constant value (text marks only).
@@ -958,32 +1642,50 @@ impl MarkBuilder {
     }
 
     /// Set the `path` encoding to a constant value (path marks only).
-    pub fn path_const(mut self, v: BezPath) -> Self {
+    pub fn path_const(self, v: BezPath) -> Self {
+        self.path_encoding(Encoding::Const(v))
+    }
+
+    /// Set the `path` encoding directly (path marks only).
+    pub fn path_encoding(mut self, encoding: Encoding<BezPath>) -> Self {
         if let MarkEncodings::Path(e) = &mut self.mark.encodings {
-            e.as_mut().path = Encoding::Const(v);
+            e.as_mut().path = encoding;
         }
         self
     }
 
     /// Set the `path` encoding to a computed value (path marks only).
     pub fn path_compute(
-        mut self,
+        self,
         deps: impl IntoIterator<Item = InputRef>,
         f: impl Fn(&EvalCtx<'_>, MarkId) -> BezPath + 'static,
     ) -> Self {
-        if let MarkEncodings::Path(e) = &mut self.mark.encodings {
-            e.as_mut().path = Encoding::Compute {
-                deps: deps4(deps),
-                f: Box::new(f),
-            };
-        }
-        self
+        self.path_encoding(Encoding::compute(deps, f))
+    }
+
+    /// Set the `path` encoding from an entire table (path marks only).
+    pub fn path_table(
+        self,
+        table: TableId,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> BezPath + 'static,
+    ) -> Self {
+        self.path_encoding(Encoding::from_table(table, f))
+    }
+
+    /// Set the `path` encoding from several columns from one table (path marks only).
+    pub fn path_table_cols(
+        self,
+        table: TableId,
+        cols: impl IntoIterator<Item = ColumnId>,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> BezPath + 'static,
+    ) -> Self {
+        self.path_encoding(Encoding::from_table_cols(table, cols, f))
     }
 
     /// Set the `stroke` encoding to a constant value (path marks only).
     pub fn stroke_const(mut self, v: Color) -> Self {
         if let MarkEncodings::Path(e) = &mut self.mark.encodings {
-            e.as_mut().stroke = Encoding::Const(Brush::Solid(v));
+            e.as_mut().stroke_brush = Encoding::Const(Some(Brush::Solid(v)));
         }
         self
     }
@@ -991,7 +1693,15 @@ impl MarkBuilder {
     /// Set the `stroke` encoding to a constant brush (path marks only).
     pub fn stroke_brush_const(mut self, v: impl Into<Brush>) -> Self {
         if let MarkEncodings::Path(e) = &mut self.mark.encodings {
-            e.as_mut().stroke = Encoding::Const(v.into());
+            e.as_mut().stroke_brush = Encoding::Const(Some(v.into()));
+        }
+        self
+    }
+
+    /// Disable path stroke output.
+    pub fn no_stroke(mut self) -> Self {
+        if let MarkEncodings::Path(e) = &mut self.mark.encodings {
+            e.as_mut().stroke_brush = Encoding::Const(None);
         }
         self
     }
@@ -1003,6 +1713,39 @@ impl MarkBuilder {
         f: impl Fn(&EvalCtx<'_>, MarkId) -> Brush + 'static,
     ) -> Self {
         if let MarkEncodings::Path(e) = &mut self.mark.encodings {
+            e.as_mut().stroke_brush = Encoding::Compute {
+                deps: deps4(deps),
+                f: Box::new(move |ctx, id| Some(f(ctx, id))),
+            };
+        }
+        self
+    }
+
+    /// Set the `stroke` encoding from one table column (path marks only).
+    pub fn stroke_table_col(
+        self,
+        table: TableId,
+        col: ColumnId,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> Brush + 'static,
+    ) -> Self {
+        self.stroke_compute([InputRef::table_col(table, col)], f)
+    }
+
+    /// Set the path stroke style to a constant value.
+    pub fn stroke_style_const(mut self, v: Stroke) -> Self {
+        if let MarkEncodings::Path(e) = &mut self.mark.encodings {
+            e.as_mut().stroke = Encoding::Const(v);
+        }
+        self
+    }
+
+    /// Set the path stroke style to a computed value.
+    pub fn stroke_style_compute(
+        mut self,
+        deps: impl IntoIterator<Item = InputRef>,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> Stroke + 'static,
+    ) -> Self {
+        if let MarkEncodings::Path(e) = &mut self.mark.encodings {
             e.as_mut().stroke = Encoding::Compute {
                 deps: deps4(deps),
                 f: Box::new(f),
@@ -1012,11 +1755,8 @@ impl MarkBuilder {
     }
 
     /// Set the `stroke_width` encoding to a constant value (path marks only).
-    pub fn stroke_width_const(mut self, v: f64) -> Self {
-        if let MarkEncodings::Path(e) = &mut self.mark.encodings {
-            e.as_mut().stroke_width = Encoding::Const(v);
-        }
-        self
+    pub fn stroke_width_const(self, v: f64) -> Self {
+        self.stroke_style_const(Stroke::new(v))
     }
 
     /// Set the `stroke_width` encoding to a computed value (path marks only).
@@ -1026,12 +1766,22 @@ impl MarkBuilder {
         f: impl Fn(&EvalCtx<'_>, MarkId) -> f64 + 'static,
     ) -> Self {
         if let MarkEncodings::Path(e) = &mut self.mark.encodings {
-            e.as_mut().stroke_width = Encoding::Compute {
+            e.as_mut().stroke = Encoding::Compute {
                 deps: deps4(deps),
-                f: Box::new(f),
+                f: Box::new(move |ctx, id| Stroke::new(f(ctx, id))),
             };
         }
         self
+    }
+
+    /// Set the `stroke_width` encoding from one table column (path marks only).
+    pub fn stroke_width_table_col(
+        self,
+        table: TableId,
+        col: ColumnId,
+        f: impl Fn(&EvalCtx<'_>, MarkId) -> f64 + 'static,
+    ) -> Self {
+        self.stroke_width_compute([InputRef::table_col(table, col)], f)
     }
 
     /// Finish building and rebuild dependencies.
@@ -1063,6 +1813,20 @@ impl<'a> EvalCtx<'a> {
     pub fn table_version(&self, id: TableId) -> Option<Version> {
         self.tables.get(&id).map(|t| t.version)
     }
+
+    /// Return the effective version of a table column, if the table is present.
+    ///
+    /// This prefers explicit column-level versions and falls back to the table-level version.
+    pub fn table_column_version(&self, table: TableId, col: ColumnId) -> Option<Version> {
+        self.tables.get(&table).map(|t| t.table_column_version(col))
+    }
+
+    /// Return the physical value type for a table column, if known.
+    pub fn table_column_type(&self, table: TableId, col: ColumnId) -> Option<ColumnType> {
+        let t = self.tables.get(&table)?;
+        t.column_type(col)
+    }
+
     /// Return the current version of a signal, if present.
     pub fn signal_version(&self, id: SignalId) -> Option<Version> {
         self.signals.get(&id).map(|s| s.version())
@@ -1079,7 +1843,40 @@ impl<'a> EvalCtx<'a> {
     pub fn table_f64(&self, table: TableId, row: usize, col: ColumnId) -> Option<f64> {
         let t = self.tables.get(&table)?;
         let data = t.data.as_deref()?;
-        data.f64(row, col)
+        data.get_f64(row, col)
+    }
+
+    /// Return an optional bulk `f64` view for a table column.
+    pub fn table_f64_column(&self, table: TableId, col: ColumnId) -> Option<F64ColumnRef<'_>> {
+        self.tables.get(&table)?.f64_column(col)
+    }
+
+    /// Read a signed integer table value, if a table data accessor is present.
+    pub fn table_i64(&self, table: TableId, row: usize, col: ColumnId) -> Option<i64> {
+        let t = self.tables.get(&table)?;
+        let data = t.data.as_deref()?;
+        data.get_i64(row, col)
+    }
+
+    /// Read an unsigned integer table value, if a table data accessor is present.
+    pub fn table_u64(&self, table: TableId, row: usize, col: ColumnId) -> Option<u64> {
+        let t = self.tables.get(&table)?;
+        let data = t.data.as_deref()?;
+        data.get_u64(row, col)
+    }
+
+    /// Read a boolean table value, if a table data accessor is present.
+    pub fn table_bool(&self, table: TableId, row: usize, col: ColumnId) -> Option<bool> {
+        let t = self.tables.get(&table)?;
+        let data = t.data.as_deref()?;
+        data.get_bool(row, col)
+    }
+
+    /// Read a UTF-8 text table value, if a table data accessor is present.
+    pub fn table_str(&self, table: TableId, row: usize, col: ColumnId) -> Option<&str> {
+        let t = self.tables.get(&table)?;
+        let data = t.data.as_deref()?;
+        data.get_str(row, col)
     }
 
     /// Return the current table row count.
@@ -1102,12 +1899,14 @@ pub enum MarkDiff {
         z_index: i32,
         /// The mark kind.
         kind: MarkKind,
+        /// UI-neutral semantic metadata for the entered mark.
+        metadata: MarkMetadata,
         /// Newly evaluated channels.
         new: Box<MarkPayload>,
         /// Optional bounds hint for downstream damage calculation.
         bounds: Option<Rect>,
     },
-    /// A mark exists and some channels changed.
+    /// A mark exists and its payload, z-order, or semantic metadata changed.
     Update {
         /// Stable identifier.
         id: MarkId,
@@ -1117,6 +1916,10 @@ pub enum MarkDiff {
         new_z_index: i32,
         /// The mark kind.
         kind: MarkKind,
+        /// Previously retained semantic metadata.
+        old_metadata: MarkMetadata,
+        /// Newly retained semantic metadata.
+        new_metadata: MarkMetadata,
         /// Previously cached channels.
         old: Box<MarkPayload>,
         /// Newly evaluated channels.
@@ -1139,6 +1942,8 @@ pub enum MarkDiff {
         z_index: i32,
         /// The mark kind.
         kind: MarkKind,
+        /// UI-neutral semantic metadata for the exited mark.
+        metadata: MarkMetadata,
         /// Cached channels, if this mark was previously evaluated.
         old: Option<Box<MarkPayload>>,
         /// Optional bounds hint for downstream damage calculation.
@@ -1156,6 +1961,21 @@ impl MarkDiff {
             Self::Enter { bounds, .. } => *bounds,
             Self::Update { damage, .. } => *damage,
             Self::Exit { bounds, .. } => *bounds,
+        }
+    }
+
+    /// Returns the current semantic metadata for this diff.
+    ///
+    /// For updates, this returns the new metadata.
+    #[must_use]
+    pub fn metadata(&self) -> &MarkMetadata {
+        match self {
+            Self::Enter { metadata, .. }
+            | Self::Update {
+                new_metadata: metadata,
+                ..
+            }
+            | Self::Exit { metadata, .. } => metadata,
         }
     }
 }
@@ -1238,6 +2058,37 @@ impl Scene {
             Entry::Vacant(e) => {
                 let mut table = Table::new(id);
                 table.data = data;
+                e.insert(table);
+            }
+        }
+    }
+
+    /// Increment one table column version, inserting an empty table if needed.
+    ///
+    /// This also increments the table-level version so coarse table dependencies are invalidated.
+    pub fn bump_table_column(&mut self, id: TableId, col: ColumnId) -> Version {
+        match self.tables.entry(id) {
+            Entry::Occupied(mut e) => e.get_mut().bump_column(col),
+            Entry::Vacant(e) => {
+                let mut table = Table::new(id);
+                let version = table.bump_column(col);
+                e.insert(table);
+                version
+            }
+        }
+    }
+
+    /// Set one table column version, inserting an empty table if needed.
+    ///
+    /// This imports explicit column-version metadata without changing the table-level version.
+    pub fn set_table_column_version(&mut self, id: TableId, col: ColumnId, version: Version) {
+        match self.tables.entry(id) {
+            Entry::Occupied(mut e) => {
+                e.get_mut().set_column_version(col, version);
+            }
+            Entry::Vacant(e) => {
+                let mut table = Table::new(id);
+                table.set_column_version(col, version);
                 e.insert(table);
             }
         }
@@ -1326,10 +2177,12 @@ impl Scene {
             if let Some(old) = old_marks.remove(&mark.id) {
                 if mark.kind != old.kind {
                     let bounds = old.cache.as_ref().and_then(MarkPayload::bounds);
+                    let metadata = old.presented_metadata();
                     exits.push(MarkDiff::Exit {
                         id: mark.id,
                         z_index: old.z_index,
                         kind: old.kind,
+                        metadata,
                         old: old.cache.map(Box::new),
                         bounds,
                     });
@@ -1337,6 +2190,7 @@ impl Scene {
                     mark.force_eval |= mark.deps != old.deps;
                     mark.cache = old.cache;
                     mark.cached_z_index = old.cached_z_index;
+                    mark.cached_metadata = old.cached_metadata;
                     mark.last_seen = old.last_seen;
                 }
             }
@@ -1346,10 +2200,12 @@ impl Scene {
 
         for (id, old) in old_marks {
             let bounds = old.cache.as_ref().and_then(MarkPayload::bounds);
+            let metadata = old.presented_metadata();
             exits.push(MarkDiff::Exit {
                 id,
                 z_index: old.z_index,
                 kind: old.kind,
+                metadata,
                 old: old.cache.map(Box::new),
                 bounds,
             });
@@ -1416,10 +2272,14 @@ impl Scene {
             let removed = self.marks.remove(&id);
             let old = removed.as_ref().and_then(|m| m.cache.clone());
             let bounds = old.as_ref().and_then(MarkPayload::bounds);
+            let metadata = removed
+                .as_ref()
+                .map_or_else(MarkMetadata::default, Mark::presented_metadata);
             diffs.push(MarkDiff::Exit {
                 id,
                 z_index: removed.as_ref().map_or(0, |m| m.z_index),
                 kind: removed.as_ref().map_or(MarkKind::Rect, |m| m.kind),
+                metadata,
                 old: old.map(Box::new),
                 bounds,
             });
@@ -1431,7 +2291,7 @@ impl Scene {
             for dep in mark.deps.iter().copied() {
                 let v = match dep {
                     InputRef::Table { table } => ctx.table_version(table),
-                    InputRef::TableCol { table, .. } => ctx.table_version(table),
+                    InputRef::TableCol { table, col } => ctx.table_column_version(table, col),
                     InputRef::Signal { signal } => ctx.signal_version(signal),
                 };
                 let Some(v) = v else { continue };
@@ -1447,11 +2307,13 @@ impl Scene {
                     id: mark.id,
                     z_index: mark.z_index,
                     kind: mark.kind,
+                    metadata: mark.metadata.clone(),
                     new: Box::new(new.clone()),
                     bounds: new.bounds(),
                 });
                 mark.cache = Some(new);
                 mark.cached_z_index = mark.z_index;
+                mark.cached_metadata = mark.metadata.clone();
                 mark.force_eval = false;
                 continue;
             }
@@ -1459,10 +2321,13 @@ impl Scene {
             if mark.force_eval {
                 let old_z_index = mark.cached_z_index;
                 let new_z_index = mark.z_index;
+                let old_metadata = mark.cached_metadata.clone();
+                let new_metadata = mark.metadata.clone();
+                let metadata_changed = old_metadata != new_metadata;
                 let old = mark.cache.as_ref().expect("checked above").clone();
                 let new = eval_payload(&mark.encodings, &ctx, mark.id);
 
-                if old != new || old_z_index != new_z_index {
+                if old != new || old_z_index != new_z_index || metadata_changed {
                     let old_bounds = old.bounds();
                     let new_bounds = new.bounds();
                     let damage = union_bounds(old_bounds, new_bounds);
@@ -1471,6 +2336,8 @@ impl Scene {
                         old_z_index,
                         new_z_index,
                         kind: mark.kind,
+                        old_metadata,
+                        new_metadata,
                         old: Box::new(old.clone()),
                         new: Box::new(new.clone()),
                         old_bounds,
@@ -1481,37 +2348,48 @@ impl Scene {
 
                 mark.cache = Some(new);
                 mark.cached_z_index = mark.z_index;
+                mark.cached_metadata = mark.metadata.clone();
                 mark.force_eval = false;
                 continue;
             }
 
             if changed_inputs.is_empty() {
-                if mark.cached_z_index != mark.z_index {
+                let old_metadata = mark.cached_metadata.clone();
+                let new_metadata = mark.metadata.clone();
+                let metadata_changed = old_metadata != new_metadata;
+                if mark.cached_z_index != mark.z_index || metadata_changed {
                     let old = mark.cache.as_ref().expect("checked above").clone();
                     let bounds = old.bounds();
+                    let z_index_changed = mark.cached_z_index != mark.z_index;
                     diffs.push(MarkDiff::Update {
                         id: mark.id,
                         old_z_index: mark.cached_z_index,
                         new_z_index: mark.z_index,
                         kind: mark.kind,
+                        old_metadata,
+                        new_metadata,
                         old: Box::new(old.clone()),
                         new: Box::new(old.clone()),
                         old_bounds: bounds,
                         new_bounds: bounds,
-                        damage: bounds,
+                        damage: if z_index_changed { bounds } else { None },
                     });
                     mark.cached_z_index = mark.z_index;
+                    mark.cached_metadata = mark.metadata.clone();
                 }
                 continue;
             }
 
             let old_z_index = mark.cached_z_index;
             let new_z_index = mark.z_index;
+            let old_metadata = mark.cached_metadata.clone();
+            let new_metadata = mark.metadata.clone();
+            let metadata_changed = old_metadata != new_metadata;
             let old = mark.cache.as_ref().expect("checked above").clone();
             let mut new = old.clone();
             update_payload_incremental(&mark.encodings, &ctx, mark.id, &changed_inputs, &mut new);
 
-            if old != new || old_z_index != new_z_index {
+            if old != new || old_z_index != new_z_index || metadata_changed {
                 let old_bounds = old.bounds();
                 let new_bounds = new.bounds();
                 let damage = union_bounds(old_bounds, new_bounds);
@@ -1520,6 +2398,8 @@ impl Scene {
                     old_z_index,
                     new_z_index,
                     kind: mark.kind,
+                    old_metadata,
+                    new_metadata,
                     old: Box::new(old.clone()),
                     new: Box::new(new.clone()),
                     old_bounds,
@@ -1529,6 +2409,7 @@ impl Scene {
             }
             mark.cache = Some(new);
             mark.cached_z_index = mark.z_index;
+            mark.cached_metadata = mark.metadata.clone();
         }
 
         diffs
@@ -1600,11 +2481,15 @@ fn eval_payload(encodings: &MarkEncodings, ctx: &EvalCtx<'_>, id: MarkId) -> Mar
         }
         MarkEncodings::Path(e) => {
             let e = e.as_ref();
+            let stroke_brush = eval_value(&e.stroke_brush, ctx, id);
+            let stroke_style = eval_value(&e.stroke, ctx, id);
             MarkPayload::Path(PathChannels {
                 path: eval_value(&e.path, ctx, id),
                 fill: eval_value(&e.fill, ctx, id),
-                stroke: eval_value(&e.stroke, ctx, id),
-                stroke_width: eval_value(&e.stroke_width, ctx, id),
+                stroke: stroke_brush.map(|brush| PathStroke {
+                    brush,
+                    style: stroke_style,
+                }),
             })
         }
     }
@@ -1700,11 +2585,25 @@ fn update_payload_incremental(
             if encoding_needs_update(&e.fill, changed_inputs) {
                 p.fill = eval_value(&e.fill, ctx, id);
             }
-            if encoding_needs_update(&e.stroke, changed_inputs) {
-                p.stroke = eval_value(&e.stroke, ctx, id);
-            }
-            if encoding_needs_update(&e.stroke_width, changed_inputs) {
-                p.stroke_width = eval_value(&e.stroke_width, ctx, id);
+            let stroke_brush_changed = encoding_needs_update(&e.stroke_brush, changed_inputs);
+            let stroke_changed = encoding_needs_update(&e.stroke, changed_inputs);
+            if stroke_brush_changed || stroke_changed {
+                let stroke_brush = if stroke_brush_changed {
+                    eval_value(&e.stroke_brush, ctx, id)
+                } else {
+                    p.stroke.as_ref().map(|stroke| stroke.brush.clone())
+                };
+                let stroke_style = if stroke_changed {
+                    eval_value(&e.stroke, ctx, id)
+                } else {
+                    p.stroke
+                        .as_ref()
+                        .map_or_else(Stroke::default, |stroke| stroke.style.clone())
+                };
+                p.stroke = stroke_brush.map(|brush| PathStroke {
+                    brush,
+                    style: stroke_style,
+                });
             }
         }
     }
@@ -1714,6 +2613,104 @@ fn update_payload_incremental(
 mod tests {
 
     use super::*;
+
+    #[derive(Debug)]
+    struct OneCol {
+        values: Vec<f64>,
+    }
+
+    impl TableData for OneCol {
+        fn row_count(&self) -> usize {
+            self.values.len()
+        }
+
+        fn column_type(&self, col: ColumnId) -> Option<ColumnType> {
+            (col == ColumnId(0)).then_some(ColumnType::F64)
+        }
+
+        fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+            if col == ColumnId(0) {
+                self.values.get(row).copied()
+            } else {
+                None
+            }
+        }
+
+        fn f64_column(&self, col: ColumnId) -> Option<F64ColumnRef<'_>> {
+            (col == ColumnId(0)).then_some(F64ColumnRef::Slice(&self.values))
+        }
+    }
+
+    #[derive(Debug)]
+    struct TwoCols {
+        x: Vec<f64>,
+        y: Vec<f64>,
+    }
+
+    impl TableData for TwoCols {
+        fn row_count(&self) -> usize {
+            self.x.len().min(self.y.len())
+        }
+
+        fn column_type(&self, col: ColumnId) -> Option<ColumnType> {
+            match col {
+                ColumnId(0) | ColumnId(1) => Some(ColumnType::F64),
+                _ => None,
+            }
+        }
+
+        fn get_f64(&self, row: usize, col: ColumnId) -> Option<f64> {
+            match col {
+                ColumnId(0) => self.x.get(row).copied(),
+                ColumnId(1) => self.y.get(row).copied(),
+                _ => None,
+            }
+        }
+
+        fn f64_column(&self, col: ColumnId) -> Option<F64ColumnRef<'_>> {
+            match col {
+                ColumnId(0) => Some(F64ColumnRef::Slice(&self.x)),
+                ColumnId(1) => Some(F64ColumnRef::Slice(&self.y)),
+                _ => None,
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct MixedCols {
+        names: Vec<String>,
+        flags: Vec<bool>,
+    }
+
+    impl TableData for MixedCols {
+        fn row_count(&self) -> usize {
+            self.names.len().min(self.flags.len())
+        }
+
+        fn column_type(&self, col: ColumnId) -> Option<ColumnType> {
+            match col {
+                ColumnId(0) => Some(ColumnType::Text),
+                ColumnId(1) => Some(ColumnType::Bool),
+                _ => None,
+            }
+        }
+
+        fn get_bool(&self, row: usize, col: ColumnId) -> Option<bool> {
+            if col == ColumnId(1) {
+                self.flags.get(row).copied()
+            } else {
+                None
+            }
+        }
+
+        fn get_str(&self, row: usize, col: ColumnId) -> Option<&str> {
+            if col == ColumnId(0) {
+                self.names.get(row).map(String::as_str)
+            } else {
+                None
+            }
+        }
+    }
 
     #[test]
     fn enter_update_exit_smoke() {
@@ -1750,6 +2747,277 @@ mod tests {
             &diffs[..],
             [MarkDiff::Exit { id, .. }] if *id == mark_id
         ));
+    }
+
+    #[test]
+    fn metadata_flows_through_enter_update_exit() {
+        let mut scene = Scene::new();
+        let mark_id = MarkId(9);
+        let table = TableId(3);
+        let column = ColumnId(2);
+        let row_key = 42;
+        let role_a = MarkRole::new("series.point");
+        let role_b = MarkRole::new("selection.highlight");
+
+        let mark = Mark::builder(mark_id)
+            .role(role_a)
+            .datum(DatumRef::new(table, row_key).with_column(column))
+            .label("Forty two")
+            .build();
+
+        let diffs = scene.tick([mark]);
+        let [MarkDiff::Enter { metadata, .. }] = &diffs[..] else {
+            panic!("expected enter");
+        };
+        assert_eq!(metadata.role, Some(role_a));
+        assert_eq!(
+            metadata.datum,
+            Some(DatumRef::new(table, row_key).with_column(column))
+        );
+        assert_eq!(metadata.label.as_deref(), Some("Forty two"));
+
+        let mark = Mark::builder(mark_id)
+            .role(role_b)
+            .datum(DatumRef::new(table, row_key).with_column(column))
+            .label("Forty two")
+            .build();
+        let diffs = scene.tick([mark]);
+        let [
+            MarkDiff::Update {
+                old_metadata,
+                new_metadata,
+                old,
+                new,
+                damage,
+                ..
+            },
+        ] = &diffs[..]
+        else {
+            panic!("expected metadata-only update");
+        };
+        assert_eq!(old_metadata.role, Some(role_a));
+        assert_eq!(new_metadata.role, Some(role_b));
+        assert_eq!(old, new);
+        assert_eq!(*damage, None);
+
+        let diffs = scene.tick(core::iter::empty());
+        let [MarkDiff::Exit { metadata, .. }] = &diffs[..] else {
+            panic!("expected exit");
+        };
+        assert_eq!(metadata.role, Some(role_b));
+    }
+
+    #[test]
+    fn table_column_helpers_derive_dependencies() {
+        let mut scene = Scene::new();
+        let table = TableId(1);
+        let col = ColumnId(0);
+        let mark_id = MarkId(1);
+
+        scene.set_table_row_keys(table, Vec::from([10]));
+        scene.set_table_data(
+            table,
+            Some(Box::new(OneCol {
+                values: Vec::from([2.0]),
+            })),
+        );
+
+        let mark = Mark::builder(mark_id)
+            .x_table_f64(table, 0, col, 0.0, |value| value * 2.0)
+            .build();
+        assert_eq!(mark.deps.as_slice(), &[InputRef::table_col(table, col)]);
+
+        let diffs = scene.tick([mark]);
+        let [MarkDiff::Enter { new, .. }] = &diffs[..] else {
+            panic!("expected enter");
+        };
+        let MarkPayload::Rect(rect) = &**new else {
+            panic!("expected rect payload");
+        };
+        assert_eq!(rect.rect.x0, 4.0);
+        let ctx = EvalCtx {
+            tables: &scene.tables,
+            signals: &scene.signals,
+        };
+        assert_eq!(
+            ctx.table_f64_column(table, col).map(F64ColumnRef::as_slice),
+            Some(&[2.0][..])
+        );
+
+        scene.set_table_data(
+            table,
+            Some(Box::new(OneCol {
+                values: Vec::from([3.0]),
+            })),
+        );
+        let diffs = scene.update();
+        let [MarkDiff::Update { old, new, .. }] = &diffs[..] else {
+            panic!("expected update");
+        };
+        let (MarkPayload::Rect(old), MarkPayload::Rect(new)) = (&**old, &**new) else {
+            panic!("expected rect payloads");
+        };
+        assert_eq!(old.rect.x0, 4.0);
+        assert_eq!(new.rect.x0, 6.0);
+    }
+
+    #[test]
+    fn table_data_exposes_typed_lanes() {
+        let mut scene = Scene::new();
+        let table = TableId(7);
+        scene.set_table_row_keys(table, Vec::from([1, 2]));
+        scene.set_table_data(
+            table,
+            Some(Box::new(MixedCols {
+                names: Vec::from([String::from("alpha"), String::from("beta")]),
+                flags: Vec::from([true, false]),
+            })),
+        );
+
+        let ctx = EvalCtx {
+            tables: &scene.tables,
+            signals: &scene.signals,
+        };
+
+        assert_eq!(
+            ctx.table_column_type(table, ColumnId(0)),
+            Some(ColumnType::Text)
+        );
+        assert_eq!(
+            ctx.table_column_type(table, ColumnId(1)),
+            Some(ColumnType::Bool)
+        );
+        assert_eq!(ctx.table_str(table, 1, ColumnId(0)), Some("beta"));
+        assert_eq!(ctx.table_bool(table, 0, ColumnId(1)), Some(true));
+        assert_eq!(ctx.table_f64(table, 0, ColumnId(0)), None);
+    }
+
+    #[test]
+    fn text_table_str_helper_reads_string_lane() {
+        let mut scene = Scene::new();
+        let table = TableId(8);
+        scene.set_table_row_keys(table, Vec::from([1, 2]));
+        scene.set_table_data(
+            table,
+            Some(Box::new(MixedCols {
+                names: Vec::from([String::from("alpha"), String::from("beta")]),
+                flags: Vec::from([true, false]),
+            })),
+        );
+
+        let diffs = scene.tick([Mark::builder(MarkId(1))
+            .text()
+            .text_table_str(table, 1, ColumnId(0), "")
+            .build()]);
+
+        let [MarkDiff::Enter { new, .. }] = &diffs[..] else {
+            panic!("expected enter");
+        };
+        let MarkPayload::Text(text) = &**new else {
+            panic!("expected text payload");
+        };
+        assert_eq!(text.text, "beta");
+    }
+
+    #[test]
+    fn table_schema_tracks_column_metadata() {
+        let mut table = Table::new(TableId(11));
+        let start_version = table.version;
+        table.set_schema(TableSchema::from_columns([
+            ColumnSchema::new(ColumnId(0), ColumnType::Text).with_name("label"),
+            ColumnSchema::new(ColumnId(1), ColumnType::F64).with_name("value"),
+        ]));
+
+        assert_ne!(table.version, start_version);
+        assert_eq!(table.column_type(ColumnId(0)), Some(ColumnType::Text));
+        assert_eq!(table.column_type(ColumnId(1)), Some(ColumnType::F64));
+        assert_eq!(table.column_name(ColumnId(0)), Some("label"));
+        assert_eq!(table.column_name(ColumnId(1)), Some("value"));
+        assert_eq!(table.column_type(ColumnId(2)), None);
+    }
+
+    #[test]
+    fn table_column_versions_recompute_only_changed_columns() {
+        let mut scene = Scene::new();
+        let table = TableId(8);
+        let x_col = ColumnId(0);
+        let y_col = ColumnId(1);
+        let mark_id = MarkId(1);
+
+        scene.set_table_row_keys(table, Vec::from([10]));
+        scene.set_table_data(
+            table,
+            Some(Box::new(TwoCols {
+                x: Vec::from([1.0]),
+                y: Vec::from([10.0]),
+            })),
+        );
+        let initial_version = scene.tables.get(&table).unwrap().version;
+        scene.set_table_column_version(table, x_col, initial_version);
+        scene.set_table_column_version(table, y_col, initial_version);
+
+        let mark = Mark::builder(mark_id)
+            .x_table_f64(table, 0, x_col, 0.0, |value| value)
+            .y_table_f64(table, 0, y_col, 0.0, |value| value)
+            .build();
+        let diffs = scene.tick([mark]);
+        let [MarkDiff::Enter { new, .. }] = &diffs[..] else {
+            panic!("expected enter");
+        };
+        let MarkPayload::Rect(rect) = &**new else {
+            panic!("expected rect payload");
+        };
+        assert_eq!(rect.rect.x0, 1.0);
+        assert_eq!(rect.rect.y0, 10.0);
+
+        scene.tables.get_mut(&table).unwrap().data = Some(Box::new(TwoCols {
+            x: Vec::from([2.0]),
+            y: Vec::from([20.0]),
+        }));
+        scene.bump_table_column(table, x_col);
+        let diffs = scene.update();
+        let [MarkDiff::Update { old, new, .. }] = &diffs[..] else {
+            panic!("expected x-only update");
+        };
+        let (MarkPayload::Rect(old), MarkPayload::Rect(new)) = (&**old, &**new) else {
+            panic!("expected rect payloads");
+        };
+        assert_eq!(old.rect.x0, 1.0);
+        assert_eq!(old.rect.y0, 10.0);
+        assert_eq!(new.rect.x0, 2.0);
+        assert_eq!(new.rect.y0, 10.0);
+
+        scene.bump_table_column(table, y_col);
+        let diffs = scene.update();
+        let [MarkDiff::Update { old, new, .. }] = &diffs[..] else {
+            panic!("expected y-only update");
+        };
+        let (MarkPayload::Rect(old), MarkPayload::Rect(new)) = (&**old, &**new) else {
+            panic!("expected rect payloads");
+        };
+        assert_eq!(old.rect.x0, 2.0);
+        assert_eq!(old.rect.y0, 10.0);
+        assert_eq!(new.rect.x0, 2.0);
+        assert_eq!(new.rect.y0, 20.0);
+    }
+
+    #[test]
+    fn coarse_table_bump_clears_column_versions() {
+        let mut table = Table::new(TableId(9));
+        table.set_column_version(ColumnId(0), 10);
+        table.set_column_version(ColumnId(1), 20);
+
+        table.bump();
+
+        assert_eq!(table.column_version(ColumnId(0)), None);
+        assert_eq!(table.column_version(ColumnId(1)), None);
+        assert_eq!(table.table_column_version(ColumnId(0)), table.version);
+    }
+
+    #[test]
+    fn table_patch_empty_reports_no_observable_change() {
+        assert!(TablePatch::Empty.is_empty());
+        assert!(!TablePatch::RowsInserted { keys: Vec::new() }.is_empty());
     }
 
     #[test]
@@ -1909,8 +3177,10 @@ mod tests {
         let (MarkPayload::Path(old), MarkPayload::Path(new)) = (&**old, &**new) else {
             panic!("expected path payloads");
         };
-        assert_ne!(old.stroke, new.stroke);
-        assert_ne!(old.stroke_width, new.stroke_width);
+        let old_stroke = old.stroke.as_ref().expect("old stroke");
+        let new_stroke = new.stroke.as_ref().expect("new stroke");
+        assert_ne!(old_stroke.brush, new_stroke.brush);
+        assert_ne!(old_stroke.style.width, new_stroke.style.width);
     }
 
     #[test]

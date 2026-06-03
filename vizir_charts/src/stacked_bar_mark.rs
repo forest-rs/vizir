@@ -7,11 +7,12 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use peniko::Brush;
-use vizir_core::{ColumnId, InputRef, Mark, MarkId, TableId};
+use vizir_core::{ColumnId, DatumRef, Mark, MarkId, TableId};
 
 #[cfg(not(feature = "std"))]
 use crate::float::FloatExt;
 
+use crate::roles::ROLE_SERIES_BAR;
 use crate::scale::{ScaleBand, ScaleContinuous};
 
 /// A vertical stacked bar mark derived from a table.
@@ -151,68 +152,36 @@ impl StackedBarMarkSpec {
 
                 let x = {
                     let category_index = category_index.clone();
-                    Mark::builder(id).rect().z_index(z_index).x_compute(
-                        [InputRef::TableCol {
-                            table: table_id,
-                            col: cat_col,
-                        }],
-                        move |ctx, _| {
-                            let cat = ctx.table_f64(table_id, row, cat_col).unwrap_or(0.0);
+                    Mark::builder(id)
+                        .rect()
+                        .role(ROLE_SERIES_BAR)
+                        .datum(DatumRef::new(table_id, row_key))
+                        .z_index(z_index)
+                        .x_table_f64(table_id, row, cat_col, 0.0, move |cat| {
                             band.x(category_index(cat))
-                        },
-                    )
+                        })
                 };
 
-                let y = x.y_compute(
-                    [
-                        InputRef::TableCol {
-                            table: table_id,
-                            col: y0_col,
-                        },
-                        InputRef::TableCol {
-                            table: table_id,
-                            col: y1_col,
-                        },
-                    ],
-                    move |ctx, _| {
-                        let a = ctx.table_f64(table_id, row, y0_col).unwrap_or(0.0);
-                        let b = ctx.table_f64(table_id, row, y1_col).unwrap_or(0.0);
-                        y_scale.map(a.max(b))
-                    },
-                );
+                let y = x.y_table_cols(table_id, [y0_col, y1_col], move |ctx, _| {
+                    let a = ctx.table_f64(table_id, row, y0_col).unwrap_or(0.0);
+                    let b = ctx.table_f64(table_id, row, y1_col).unwrap_or(0.0);
+                    y_scale.map(a.max(b))
+                });
 
-                let h = y.h_compute(
-                    [
-                        InputRef::TableCol {
-                            table: table_id,
-                            col: y0_col,
-                        },
-                        InputRef::TableCol {
-                            table: table_id,
-                            col: y1_col,
-                        },
-                    ],
-                    move |ctx, _| {
-                        let a = ctx.table_f64(table_id, row, y0_col).unwrap_or(0.0);
-                        let b = ctx.table_f64(table_id, row, y1_col).unwrap_or(0.0);
-                        (y_scale.map(a) - y_scale.map(b)).abs()
-                    },
-                );
+                let h = y.h_table_cols(table_id, [y0_col, y1_col], move |ctx, _| {
+                    let a = ctx.table_f64(table_id, row, y0_col).unwrap_or(0.0);
+                    let b = ctx.table_f64(table_id, row, y1_col).unwrap_or(0.0);
+                    (y_scale.map(a) - y_scale.map(b)).abs()
+                });
 
                 let mut m = h.w_const(bw);
 
                 if let (Some(series_col), Some(series_fills)) = (series_col, series_fills.clone()) {
-                    m = m.fill_compute(
-                        [InputRef::TableCol {
-                            table: table_id,
-                            col: series_col,
-                        }],
-                        move |ctx, _| {
-                            let v = ctx.table_f64(table_id, row, series_col).unwrap_or(0.0);
-                            let i = default_index(v, series_fills.len());
-                            series_fills.get(i).cloned().unwrap_or_else(Brush::default)
-                        },
-                    );
+                    m = m.fill_table_col(table_id, series_col, move |ctx, _| {
+                        let v = ctx.table_f64(table_id, row, series_col).unwrap_or(0.0);
+                        let i = default_index(v, series_fills.len());
+                        series_fills.get(i).cloned().unwrap_or_else(Brush::default)
+                    });
                 } else {
                     m = m.fill_brush_const(fill.clone());
                 }

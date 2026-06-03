@@ -6,8 +6,9 @@
 use alloc::vec::Vec;
 
 use peniko::Brush;
-use vizir_core::{ColumnId, InputRef, Mark, MarkId, TableId};
+use vizir_core::{ColumnId, DatumRef, Mark, MarkId, TableId};
 
+use crate::roles::ROLE_SERIES_BAR;
 use crate::scale::{ScaleBand, ScaleContinuous};
 
 /// A vertical bar mark derived from a table.
@@ -86,29 +87,17 @@ impl BarMarkSpec {
                 let id = MarkId::for_row(table_id, row_key);
                 Mark::builder(id)
                     .rect()
+                    .role(ROLE_SERIES_BAR)
+                    .datum(DatumRef::new(table_id, row_key).with_column(y_col))
                     .z_index(z_index)
                     .x_const(band.x(row))
-                    .y_compute(
-                        [InputRef::TableCol {
-                            table: table_id,
-                            col: y_col,
-                        }],
-                        move |ctx, _| {
-                            let v = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
-                            y_scale.map(v).min(y0)
-                        },
-                    )
+                    .y_table_f64(table_id, row, y_col, baseline, move |v| {
+                        y_scale.map(v).min(y0)
+                    })
                     .w_const(bw)
-                    .h_compute(
-                        [InputRef::TableCol {
-                            table: table_id,
-                            col: y_col,
-                        }],
-                        move |ctx, _| {
-                            let v = ctx.table_f64(table_id, row, y_col).unwrap_or(baseline);
-                            (y_scale.map(v) - y0).abs()
-                        },
-                    )
+                    .h_table_f64(table_id, row, y_col, baseline, move |v| {
+                        (y_scale.map(v) - y0).abs()
+                    })
                     .fill_brush_const(fill.clone())
                     .build()
             })

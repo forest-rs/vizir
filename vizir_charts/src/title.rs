@@ -68,11 +68,11 @@ impl TitleSpec {
     /// Returns the thickness (height) reserved by this title in chart layout.
     pub fn measure(&self, measurer: &impl TextMeasurer) -> f64 {
         let pad = self.padding.max(0.0);
-        let (_w, h) = measurer.measure(&self.text, self.font_size);
-        let mut total = 2.0 * pad + h;
+        let metrics = measurer.measure(&self.text, self.font_size);
+        let mut total = 2.0 * pad + metrics.line_height;
         if let Some(sub) = &self.subtitle {
-            let (_sw, sh) = measurer.measure(sub, self.subtitle_font_size);
-            total += self.subtitle_gap.max(0.0) + sh;
+            let subtitle_metrics = measurer.measure(sub, self.subtitle_font_size);
+            total += self.subtitle_gap.max(0.0) + subtitle_metrics.line_height;
         }
         total.max(0.0)
     }
@@ -134,7 +134,8 @@ impl TitleSpec {
         };
 
         let pad = self.padding.max(0.0);
-        let (_tw, th) = measurer.measure(&self.text, self.font_size);
+        let title_metrics = measurer.measure(&self.text, self.font_size);
+        let th = title_metrics.line_height;
 
         let y_title = title_rect.y0 + pad + 0.5 * th;
         let mark = Mark::builder(self.id)
@@ -154,7 +155,8 @@ impl TitleSpec {
         out.push(mark);
 
         if let Some(subtitle) = &self.subtitle {
-            let (_sw, sh) = measurer.measure(subtitle, self.subtitle_font_size);
+            let subtitle_metrics = measurer.measure(subtitle, self.subtitle_font_size);
+            let sh = subtitle_metrics.line_height;
             let y_sub = y_title + 0.5 * th + self.subtitle_gap.max(0.0) + 0.5 * sh;
             out.push(
                 Mark::builder(MarkId::from_raw(self.id.0.wrapping_add(1)))

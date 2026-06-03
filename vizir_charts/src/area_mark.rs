@@ -6,10 +6,11 @@
 use alloc::vec::Vec;
 
 use kurbo::BezPath;
-use peniko::{Brush, Color};
-use vizir_core::{ColumnId, InputRef, Mark, MarkId, TableId};
+use peniko::Brush;
+use vizir_core::{ColumnId, Mark, MarkId, TableId};
 
 use crate::axis::StrokeStyle;
+use crate::roles::{ROLE_SERIES_AREA, ROLE_SERIES_LINE};
 use crate::scale::ScaleContinuous;
 
 /// An area mark derived from a table.
@@ -111,8 +112,9 @@ impl AreaMarkSpec {
         let z_index = self.z_index;
         let area = Mark::builder(area_id)
             .path()
+            .role(ROLE_SERIES_AREA)
             .z_index(z_index)
-            .path_compute([InputRef::Table { table: table_id }], move |ctx, _| {
+            .path_table(table_id, move |ctx, _| {
                 let n = ctx.table_row_count(table_id).unwrap_or(0);
                 let mut p = BezPath::new();
                 if n == 0 {
@@ -140,7 +142,7 @@ impl AreaMarkSpec {
                 p
             })
             .fill_brush_const(fill)
-            .stroke_width_const(0.0)
+            .no_stroke()
             .build();
 
         let mut out = alloc::vec![area];
@@ -148,11 +150,12 @@ impl AreaMarkSpec {
         if let Some(stroke) = self.stroke.clone() {
             let line_id = MarkId::from_raw(self.id_base + 1);
             let stroke_brush = stroke.brush.clone();
-            let stroke_width = stroke.stroke_width;
+            let stroke_style = stroke.stroke.clone();
             let line = Mark::builder(line_id)
                 .path()
+                .role(ROLE_SERIES_LINE)
                 .z_index(z_index.saturating_add(crate::z_order::SERIES_STROKE))
-                .path_compute([InputRef::Table { table: table_id }], move |ctx, _| {
+                .path_table(table_id, move |ctx, _| {
                     let n = ctx.table_row_count(table_id).unwrap_or(0);
                     let mut p = BezPath::new();
                     for row in 0..n {
@@ -167,9 +170,9 @@ impl AreaMarkSpec {
                     }
                     p
                 })
-                .fill_const(Color::TRANSPARENT)
+                .no_fill()
                 .stroke_brush_const(stroke_brush)
-                .stroke_width_const(stroke_width)
+                .stroke_style_const(stroke_style)
                 .build();
             out.push(line);
         }

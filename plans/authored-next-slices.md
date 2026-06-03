@@ -21,6 +21,7 @@ Current state:
 - Narrow numeric-only `fold` now lowers from wide rows into repeated series slots.
 - Narrow one-key `lookup` now lowers from a base scene table into one explicit secondary table.
 - Narrow numeric-only `pivot` now lowers from long rows into explicit wide output slots.
+- Text marks can read string table lanes for nominal/ordinal labels.
 - Shared-layer diagnostics now reject child series that would require a wider y-domain than the
   base child owns.
 - The parser-facing adapter and feature-gated JSON path target the same seam through checked-in
@@ -34,7 +35,7 @@ Goals:
 Non-goals:
 - Full nested unit specs inside `layer`.
 - Full scale/domain conflict resolution across unrelated child specs or facet cells.
-- Generic string-valued table columns in `vizir_core`.
+- String-aware transform operators or storage backends.
 
 Planned slices:
 1. Facet + layer diagnostics

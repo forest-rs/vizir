@@ -12,6 +12,8 @@ stability.
   - `#![no_std]` + `alloc` incremental evaluation core.
   - Versioned inputs: `Table` (row keys + optional column accessor) and typed `Signal<T>`.
   - Stable identity via `MarkId`, and diffs `Enter/Update/Exit` keyed by `MarkId`.
+  - UI-neutral semantic metadata (`MarkRole`, `DatumRef`, labels/descriptions) carried beside
+    render payloads for inspection, selection, tooltips, and accessibility.
   - Mark primitives: `Rect`, `Path`, `Text` (unshaped), plus `z_index` for ordering.
 
 - `vizir_charts`

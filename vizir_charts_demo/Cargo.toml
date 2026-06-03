@@ -2,6 +2,7 @@
 name = "vizir_charts_demo"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Chart/plot demos built on vizir_core (kept out of core crate dev-deps)."
@@ -12,10 +13,9 @@ publish = false
 
 [dependencies]
 kurbo = { workspace = true, features = ["std"] }
-peniko = { workspace = true, features = ["std"] }
-vizir_charts = { workspace = true, features = ["std", "json"] }
+vizir_backend_svg = { workspace = true, features = ["std"] }
 vizir_core = { workspace = true, features = ["std"] }
-vizir_transforms = { workspace = true, features = ["std"] }
+vizir_demo_scenarios = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true
